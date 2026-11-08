@@ -25,6 +25,14 @@ def test_rsi_rising_series():
     assert rsi([float(x) for x in range(20, 40)], 14) == 100.0
 
 
+def test_rsi_flat_series_is_neutral():
+    assert rsi([5.0] * 30, 14) == 50.0
+
+
+def test_rsi_falling_series_is_zero():
+    assert rsi([float(40 - x) for x in range(30)], 14) == 0.0
+
+
 def test_rsi_rejects_insufficient_values():
     with pytest.raises(ValueError):
         rsi([1.0] * 14, 14)
@@ -32,6 +40,11 @@ def test_rsi_rejects_insufficient_values():
 
 def test_atr_positive_for_rising_candles():
     assert atr(rising_candles()) > 0
+
+
+def test_atr_rejects_invalid_period():
+    with pytest.raises(ValueError):
+        atr(rising_candles(), 0)
 
 
 def test_analyze_returns_signal_schema():
@@ -61,9 +74,7 @@ def test_risk_rejects_excess_open_risk():
 
 
 def test_risk_rejects_daily_loss_limit():
-    decision = RiskManager().size(
-        10000, 100, 95, daily_pnl=-300, daily_start_equity=10000
-    )
+    decision = RiskManager().size(10000, 100, 95, daily_pnl=-300, daily_start_equity=10000)
     assert not decision.approved
 
 
@@ -75,3 +86,9 @@ def test_risk_rejects_invalid_inputs(equity, entry, stop):
     decision = RiskManager().size(equity, entry, stop)
     assert not decision.approved
     assert decision.quantity == 0
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_risk_rejects_non_finite_inputs(value):
+    decision = RiskManager().size(value, 100, 95)
+    assert not decision.approved
