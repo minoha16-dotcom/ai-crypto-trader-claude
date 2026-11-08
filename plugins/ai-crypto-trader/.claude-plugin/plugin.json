@@ -1,0 +1,8 @@
+{
+  "name": "ai-crypto-trader",
+  "version": "0.1.0",
+  "description": "Research-focused crypto trading assistant for technical analysis, on-chain context, news, and risk planning across Spot and Futures. No live order execution is included.",
+  "author": { "name": "Project Maintainer" },
+  "license": "MIT",
+  "keywords": ["crypto", "trading", "technical-analysis", "on-chain", "risk-management"]
+}
