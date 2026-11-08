@@ -25,7 +25,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+      - name: Verify project package import
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -c "import backend; from backend.indicators import ema, rsi, atr, analyze; print('backend package import: OK')"
       - name: Run test suite
         env:
           DATABASE_URL: sqlite:///./test-data/trader.db
+          PYTHONPATH: ${{ github.workspace }}
         run: python -m pytest -q
