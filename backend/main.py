@@ -16,7 +16,7 @@ async def lifespan(app):
     yield
     await registry.close()
 
-app = FastAPI(title=settings.app_name, version="2.0.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="2.1.0", lifespan=lifespan)
 
 class PaperOpen(BaseModel):
     exchange: str = "binance"
@@ -36,6 +36,8 @@ class PaperOpen(BaseModel):
             raise ValueError("market_type must be spot or futures")
         if self.side not in ("LONG", "SHORT"):
             raise ValueError("side must be LONG or SHORT")
+        if self.market_type == "spot" and self.side == "SHORT":
+            raise ValueError("SHORT paper positions are not supported for spot markets")
         if self.side == "LONG" and self.stop >= self.entry:
             raise ValueError("LONG stop must be below entry")
         if self.side == "SHORT" and self.stop <= self.entry:
@@ -52,7 +54,7 @@ class PaperClose(BaseModel):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "2.0.0", "mode": "paper-only"}
+    return {"status": "ok", "version": "2.1.0", "mode": "paper-only"}
 
 @app.get("/api/exchanges")
 def exchanges():
