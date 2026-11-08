@@ -1,12 +1,75 @@
 # AI Crypto Trader V2
 
-An AI-assisted cryptocurrency research and paper-trading toolkit built around Claude Skills and a local Python/FastAPI dashboard.
+An AI-assisted cryptocurrency research and paper-trading toolkit built around Claude Skills, a Claude Code plugin, and an optional local Python/FastAPI dashboard.
 
 > **Safety first:** this project is for market research and paper trading. Exchange adapters read public market data only. There is no live order execution, no private exchange API access, and no withdrawal functionality. Nothing here is financial advice.
 
+## Install the Claude Skills
+
+### Quick install in Claude
+
+Paste this into Claude:
+
+```text
+https://github.com/minoha16-dotcom/ai-crypto-trader-claude
+
+Install the AI Crypto Trader skills from this repository. Explain how to use the 12 skills and keep all trading activity paper-only. Do not request exchange API keys or place live orders.
+```
+
+### Install as a Claude Code plugin
+
+In Claude Code, run:
+
+```text
+/plugin marketplace add minoha16-dotcom/ai-crypto-trader-claude
+/plugin install ai-crypto-trader@ai-crypto-trader-marketplace
+```
+
+The plugin provides namespaced skills, for example:
+
+- `/ai-crypto-trader:crypto-market-analysis`
+- `/ai-crypto-trader:technical-analysis`
+- `/ai-crypto-trader:risk-management`
+
+It also includes commands such as:
+
+```text
+/ai-crypto-trader:analyze BTC/USDT Spot 1h
+/ai-crypto-trader:risk-check BTC/USDT LONG entry=65000 stop=64000
+```
+
+### Install as plain Claude Code skills
+
+If you want un-namespaced skill names instead of plugin-prefixed names, clone the repository and copy the skill folders.
+
+macOS / Linux:
+
+```bash
+git clone https://github.com/minoha16-dotcom/ai-crypto-trader-claude.git
+mkdir -p ~/.claude/skills
+cp -R ai-crypto-trader-claude/plugins/ai-crypto-trader/skills/* ~/.claude/skills/
+```
+
+Project-local installation (available only in that repository):
+
+```bash
+mkdir -p .claude/skills
+cp -R ai-crypto-trader-claude/plugins/ai-crypto-trader/skills/* .claude/skills/
+```
+
+Windows PowerShell:
+
+```powershell
+git clone https://github.com/minoha16-dotcom/ai-crypto-trader-claude.git
+New-Item -ItemType Directory -Force "$HOME\.claude\skills"
+Copy-Item "ai-crypto-trader-claude\plugins\ai-crypto-trader\skills\*" "$HOME\.claude\skills" -Recurse -Force
+```
+
+The plain skill folders are Markdown instructions and do not require Python packages. You can also open any individual `SKILL.md` and paste its contents into a chat to use that skill as a one-off mode. In a normal chat, this does not provide the local dashboard, exchange-data backend, or persistent paper-trading database.
+
 ## The Trader skill
 
-The Trader skill helps structure a repeatable crypto-research workflow:
+The Trader skill collection helps structure a repeatable crypto-research workflow:
 
 - Review market conditions and identify the current market regime.
 - Analyze price action with EMA 20/50, RSI 14, and ATR 14.
@@ -17,48 +80,7 @@ The Trader skill helps structure a repeatable crypto-research workflow:
 
 Use the skills as research assistance, not as an autonomous trading signal or a guarantee of returns.
 
-## Install
-
-### Requirements
-
-- Python 3.11+
-- Git
-- Claude, if you want to use the repository's Claude plugin and Skills
-
-### Backend installation
-
-Clone the repository and enter its directory:
-
-```bash
-git clone https://github.com/minoha16-dotcom/ai-crypto-trader-claude.git
-cd ai-crypto-trader-claude
-```
-
-Create and activate a virtual environment:
-
-```bash
-python -m venv .venv
-# Windows
-.venv\\Scripts\\activate
-# macOS/Linux
-source .venv/bin/activate
-```
-
-Install dependencies and configure the environment:
-
-```bash
-pip install -r requirements.txt
-```
-
-Copy `.env.example` to `.env` and review the risk limits before starting the application.
-
-### Claude plugin
-
-Add this repository as a marketplace/plugin source in Claude's supported plugin settings. Enable the Skills you want to use. Exact installation steps may vary with the Claude client and its current plugin interface.
-
-## The eleven
-
-The repository includes a collection of focused Skills for the trading workflow:
+## The twelve skills
 
 1. **crypto-market-analysis** — broad market structure and asset context.
 2. **technical-analysis** — indicators, trend, momentum, and price structure.
@@ -73,30 +95,64 @@ The repository includes a collection of focused Skills for the trading workflow:
 11. **trade-journal** — recording and reviewing trade decisions.
 12. **strategy-backtesting** — structured historical strategy evaluation.
 
-The heading “The eleven” is retained as requested; the current repository contains **12 Skills**.
+## Optional Python dashboard and API
 
-## How to use it
+The Claude Skills/plugin can be installed independently. The local dashboard and API are an optional separate component.
 
-### Start the dashboard
+### Requirements
+
+- Python 3.11+
+- Git
+- pip
+- Claude Code only if you want the plugin or local Skills integration
+
+### Install the backend
+
+```bash
+git clone https://github.com/minoha16-dotcom/ai-crypto-trader-claude.git
+cd ai-crypto-trader-claude
+python -m venv .venv
+```
+
+Activate the environment:
+
+```bash
+# Windows
+.venv\\Scripts\\activate
+
+# macOS / Linux
+source .venv/bin/activate
+```
+
+Install the backend dependencies:
+
+```bash
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+Copy `.env.example` to `.env` and review the risk limits before starting the application.
+
+### Run the dashboard
 
 ```bash
 uvicorn backend.main:app --reload
 ```
 
-Then open:
+Open:
 
 - Dashboard: http://127.0.0.1:8000
 - API documentation: http://127.0.0.1:8000/docs
 
-### Suggested workflow
+## How to use it
 
-1. Select an exchange and choose Spot or Futures market-data mode.
-2. Run a scan for supported symbols and a timeframe.
-3. Review the market data, indicator values, and generated research signals.
-4. Check the risk limits and decide whether a simulated position is appropriate.
-5. Open a paper trade from the dashboard/API.
-6. Close the paper trade by supplying a simulated exit price.
-7. Review the journal and performance history.
+1. Install the Claude Code plugin or copy the Skills into your Claude Skills directory.
+2. Invoke a skill such as `/ai-crypto-trader:crypto-market-analysis`, or use the `/analyze` command.
+3. Specify the asset, exchange, timeframe, and Spot or Futures context.
+4. Start the optional backend if you need the dashboard, API, or local paper-trade journal.
+5. Review market data, indicator values, and research signals.
+6. Check risk limits before recording a simulated position.
+7. Close paper trades with a simulated exit price and review the journal.
 
 Example scan request:
 
@@ -141,41 +197,27 @@ curl -X POST "http://127.0.0.1:8000/api/scan?exchange=binance&market_type=spot&s
 - **Signals are heuristic:** indicator-based scans are not validated predictive models and can be wrong.
 - **Risk controls are not a guarantee:** configured limits do not eliminate market, software, or execution risk.
 - **Local storage:** SQLite is intended for local use. Set up backups and persistent storage before any deployment.
-- **Testing:** run the test suite in your environment before relying on changes. No claim is made here that tests have passed in your environment.
+- **Testing:** run `pytest -q` in the repository. GitHub Actions is configured to run the test suite on pushes and pull requests; check the Actions tab for the actual result.
 - **Not financial advice:** make independent decisions and comply with applicable laws and exchange terms.
 
 ## Files
 
 ```text
 .
+├── .claude-plugin/
+│   └── marketplace.json
+├── .github/workflows/
+│   └── tests.yml
+├── plugins/ai-crypto-trader/
+│   ├── .claude-plugin/plugin.json
+│   ├── commands/
+│   └── skills/
 ├── backend/
-│   ├── main.py
-│   └── dashboard.html
 ├── tests/
-│   └── test_core.py
 ├── .env.example
 ├── requirements.txt
 ├── README.md
-├── LICENSE
-└── skills/
-    ├── crypto-market-analysis/
-    ├── technical-analysis/
-    ├── onchain-analysis/
-    ├── crypto-news/
-    ├── risk-management/
-    ├── spot-trading/
-    ├── futures-trading/
-    ├── market-regime/
-    ├── derivatives-analysis/
-    ├── portfolio-allocation/
-    ├── trade-journal/
-    └── strategy-backtesting/
-```
-
-Run the test suite with:
-
-```bash
-pytest -q
+└── LICENSE
 ```
 
 ## License
