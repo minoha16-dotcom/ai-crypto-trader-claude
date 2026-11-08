@@ -11,7 +11,12 @@ def account():
 def open_trade(exchange,symbol,market_type,side,entry,stop,target=None,signal_id=None):
     if side not in ('LONG','SHORT'): raise ValueError('Side must be LONG or SHORT')
     if (side=='LONG' and stop>=entry) or (side=='SHORT' and stop<=entry): raise ValueError('Stop must be below entry for LONG and above entry for SHORT')
-    a=account(); d=risk_manager.size(a['equity'],entry,stop)
+    a=account()
+    with connect() as db:
+        opened=db.execute("SELECT quantity,entry,stop FROM trades WHERE status='OPEN'").fetchall()
+        open_risk=sum(abs(float(r['entry'])-float(r['stop']))*float(r['quantity']) for r in opened)
+        today=db.execute("SELECT COALESCE(SUM(pnl),0) AS pnl FROM trades WHERE status='CLOSED' AND date(closed_at)=date('now')").fetchone()
+    d=risk_manager.size(a['equity'],entry,stop,open_risk=open_risk,daily_pnl=float(today['pnl'] or 0),daily_start_equity=settings.paper_starting_balance)
     if not d.approved: raise ValueError(d.reason)
     with connect() as db:
         cur=db.execute('INSERT INTO trades(exchange,symbol,market_type,side,quantity,entry,stop,target,signal_id) VALUES(?,?,?,?,?,?,?,?,?)',(exchange,symbol,market_type,side,d.quantity,entry,stop,target,signal_id))
