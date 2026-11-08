@@ -28,4 +28,4 @@ jobs:
       - name: Run test suite
         env:
           DATABASE_URL: sqlite:///./test-data/trader.db
-        run: pytest -q
+        run: python -m pytest -q
