@@ -284,7 +284,22 @@ async def get_positions():
                 alert = "NEAR_STOP"
             elif target_proximity is not None and target_proximity >= 0.8:
                 alert = "NEAR_TARGET"
-            exit_result = close_trade(row["id"], last) if exit_reason else None
+            exit_result = None
+            if exit_reason:
+                try:
+                    exit_result = close_trade(row["id"], last)
+                except ValueError:
+                    # Another concurrent dashboard request may have closed this position.
+                    with connect() as db:
+                        already_closed = db.execute(
+                            "SELECT id, pnl, exit_price FROM trades WHERE id=? AND status='CLOSED'",
+                            (row["id"],)
+                        ).fetchone()
+                    if already_closed:
+                        exit_result = {"id": row["id"], "pnl": float(already_closed["pnl"] or 0),
+                                       "exit_price": float(already_closed["exit_price"]), "status": "CLOSED"}
+                    else:
+                        raise
             return {
                 **row,
                 "status": "CLOSED" if exit_result else row["status"],
@@ -337,7 +352,10 @@ async def risk():
         ).fetchone()["total"] or 0)
     daily_start = float(snapshot["starting_equity"]) if snapshot else settings.paper_starting_balance + realized_all - today_realized
     daily_pnl = today_realized + floating
-    open_risk = sum(abs(float(p["entry"])-float(p["stop"]))*float(p["quantity"]) for p in positions)
+    cost_rate = float(settings.taker_fee_rate) + float(settings.slippage_bps) / 10000
+    open_risk = sum((abs(float(p["entry"])-float(p["stop"]))
+                     + (float(p["entry"])+float(p["stop"]))*cost_rate)*float(p["quantity"])
+                    for p in positions)
     equity = settings.paper_starting_balance + realized_all
     remaining_daily_loss = max(0.0, daily_start * risk_manager.max_daily_loss_pct / 100 + daily_pnl)
     available_open_risk = max(0.0, equity * risk_manager.max_open_risk_pct / 100 - open_risk)
