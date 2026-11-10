@@ -162,8 +162,66 @@ def signals(limit: int = 100):
 
 
 @app.get("/api/account")
-def get_account():
-    return account()
+async def get_account():
+    data = account()
+    positions_data = await get_positions()
+    priced = [p for p in positions_data["positions"] if p.get("unrealized_pnl") is not None]
+    missing = len(priced) != len(positions_data["positions"])
+    unrealized = sum(float(p["unrealized_pnl"]) for p in priced)
+    data.update({
+        "unrealized_pnl": unrealized,
+        "equity": float(data["starting_balance"]) + float(data["realized_pnl"]) + unrealized,
+        "unpriced_open_positions": len(positions_data["positions"]) - len(priced),
+        "equity_is_partial": missing,
+        "unrealized_pnl_note": "Includes live-marked open positions; excludes positions whose exchange price is unavailable." if missing else "Includes live-marked open positions; estimate before fees and slippage.",
+    })
+    return data
+
+
+@app.get("/api/opportunities")
+async def opportunities(limit: int = 12):
+    """Latest distinct scanner setups, refreshed with current public ticker prices."""
+    with connect() as db:
+        rows = [dict(row) for row in db.execute(
+            "SELECT * FROM signals ORDER BY id DESC LIMIT 100"
+        ).fetchall()]
+    latest = []
+    seen = set()
+    for row in rows:
+        key = (row["exchange"], row["symbol"], row["market_type"], row["timeframe"])
+        if key in seen:
+            continue
+        seen.add(key)
+        latest.append(row)
+        if len(latest) >= max(1, min(limit, 30)):
+            break
+
+    async def mark_signal(row):
+        try:
+            ticker = await registry.ticker(row["exchange"], row["symbol"], row["market_type"])
+            last = ticker.get("last")
+            if last is None or float(last) <= 0:
+                raise ValueError("No valid live price")
+            return {
+                "exchange": row["exchange"], "symbol": row["symbol"],
+                "market_type": row["market_type"], "timeframe": row["timeframe"],
+                "signal": row["signal"], "trend": row["trend"], "score": row["score"],
+                "rsi": row["rsi"], "live_price": float(last),
+                "signal_price": row["price"], "price_timestamp": ticker.get("timestamp"),
+                "price_error": None,
+            }
+        except Exception as exc:
+            return {
+                "exchange": row["exchange"], "symbol": row["symbol"],
+                "market_type": row["market_type"], "timeframe": row["timeframe"],
+                "signal": row["signal"], "trend": row["trend"], "score": row["score"],
+                "rsi": row["rsi"], "live_price": None, "signal_price": row["price"],
+                "price_timestamp": None, "price_error": str(exc),
+            }
+
+    marked = await __import__("asyncio").gather(*(mark_signal(row) for row in latest))
+    marked.sort(key=lambda item: (int(item["score"] or 0), item["live_price"] is not None), reverse=True)
+    return {"opportunities": marked}
 
 
 
@@ -189,11 +247,34 @@ async def get_positions():
             direction = 1 if row["side"] == "LONG" else -1
             unrealized = (last - float(row["entry"])) * float(row["quantity"]) * direction
             notional = float(row["entry"]) * float(row["quantity"])
+            stop_gap = abs(last - float(row["stop"]))
+            stop_span = abs(float(row["entry"]) - float(row["stop"]))
+            target = row.get("target")
+            target_gap = abs(last - float(target)) if target is not None else None
+            target_span = abs(float(target) - float(row["entry"])) if target is not None else None
+            stop_proximity = max(0.0, 1.0 - stop_gap / stop_span) if stop_span else 0.0
+            target_proximity = max(0.0, 1.0 - target_gap / target_span) if target_gap is not None and target_span else None
+            alert = None
+            if (row["side"] == "LONG" and last <= float(row["stop"])) or (row["side"] == "SHORT" and last >= float(row["stop"])):
+                alert = "STOP_REACHED"
+            elif target is not None and ((row["side"] == "LONG" and last >= float(target)) or (row["side"] == "SHORT" and last <= float(target))):
+                alert = "TARGET_REACHED"
+            elif stop_proximity >= 0.8:
+                alert = "NEAR_STOP"
+            elif target_proximity is not None and target_proximity >= 0.8:
+                alert = "NEAR_TARGET"
             return {
                 **row,
                 "live_price": last,
                 "unrealized_pnl": unrealized,
                 "unrealized_pnl_pct": (unrealized / notional * 100) if notional else 0,
+                "stop_distance": stop_gap,
+                "stop_distance_pct": stop_gap / last * 100,
+                "target_distance": target_gap,
+                "target_distance_pct": (target_gap / last * 100) if target_gap is not None else None,
+                "stop_proximity_pct": stop_proximity * 100,
+                "target_proximity_pct": target_proximity * 100 if target_proximity is not None else None,
+                "alert": alert,
                 "price_timestamp": ticker.get("timestamp"),
                 "price_error": None,
             }
