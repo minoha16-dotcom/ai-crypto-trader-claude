@@ -166,6 +166,52 @@ def get_account():
     return account()
 
 
+
+@app.get("/api/positions")
+async def get_positions():
+    """Return open paper positions marked to the latest public exchange ticker."""
+    with connect() as db:
+        rows = [
+            dict(row) for row in db.execute(
+                "SELECT * FROM trades WHERE status='OPEN' ORDER BY id DESC"
+            ).fetchall()
+        ]
+
+    async def mark_position(row):
+        try:
+            ticker = await registry.ticker(
+                row["exchange"], row["symbol"], row["market_type"]
+            )
+            last = ticker.get("last")
+            if last is None or float(last) <= 0:
+                raise ValueError("Exchange did not return a valid last price")
+            last = float(last)
+            direction = 1 if row["side"] == "LONG" else -1
+            unrealized = (last - float(row["entry"])) * float(row["quantity"]) * direction
+            notional = float(row["entry"]) * float(row["quantity"])
+            return {
+                **row,
+                "live_price": last,
+                "unrealized_pnl": unrealized,
+                "unrealized_pnl_pct": (unrealized / notional * 100) if notional else 0,
+                "price_timestamp": ticker.get("timestamp"),
+                "price_error": None,
+            }
+        except Exception as exc:
+            return {
+                **row,
+                "live_price": None,
+                "unrealized_pnl": None,
+                "unrealized_pnl_pct": None,
+                "price_timestamp": None,
+                "price_error": str(exc),
+            }
+
+    return {"positions": await __import__("asyncio").gather(
+        *(mark_position(row) for row in rows)
+    )}
+
+
 @app.get("/api/risk")
 def risk():
     return {
