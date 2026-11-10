@@ -9,6 +9,7 @@ class RiskDecision:
     notional: float
     risk_amount: float
     reason: str
+    sizing_reason: str = "risk_target"
 
 
 class RiskManager:
@@ -31,17 +32,23 @@ class RiskManager:
                 return RiskDecision(False, 0, 0, 0, "Invalid daily starting equity")
             if daily_pnl <= -(daily_start_equity * self.max_daily_loss_pct / 100):
                 return RiskDecision(False, 0, 0, 0, "Daily loss limit reached")
-        risk_amount = equity * self.risk_pct / 100
-        if open_risk + risk_amount > equity * self.max_open_risk_pct / 100:
-            return RiskDecision(False, 0, 0, risk_amount, "Maximum open risk would be exceeded")
-        quantity = risk_amount / abs(entry - stop)
+        risk_target = equity * self.risk_pct / 100
+        if open_risk + risk_target > equity * self.max_open_risk_pct / 100:
+            return RiskDecision(False, 0, 0, risk_target, "Maximum open risk would be exceeded")
+        cost_rate = float(settings.taker_fee_rate) + float(settings.slippage_bps) / 10000
+        per_unit_risk = abs(entry - stop) + (entry + stop) * cost_rate
+        quantity = risk_target / per_unit_risk
         max_notional = equity * self.max_notional_pct / 100
         notional = quantity * entry
+        sizing_reason = "risk_target"
         if notional > max_notional:
             quantity = max_notional / entry
             notional = max_notional
-            risk_amount = quantity * abs(entry - stop)
-        return RiskDecision(True, quantity, notional, risk_amount, "Approved by risk limits")
+            sizing_reason = "position_notional_cap"
+        risk_amount = quantity * per_unit_risk
+        if open_risk + risk_amount > equity * self.max_open_risk_pct / 100:
+            return RiskDecision(False, 0, 0, risk_amount, "Maximum open risk would be exceeded after costs")
+        return RiskDecision(True, quantity, notional, risk_amount, "Approved by risk limits", sizing_reason)
 
 
 risk_manager = RiskManager()
