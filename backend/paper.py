@@ -30,13 +30,13 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None, si
     if target is not None and ((side == "LONG" and target <= entry) or (side == "SHORT" and target >= entry)):
         raise ValueError("Target must be above entry for LONG and below entry for SHORT")
 
-    # Acquire SQLite's write reservation before reading risk or inserting the position.
-    # This serializes concurrent opens so two requests cannot both spend the same risk budget.
     with connect() as db:
+        # SQLite obtains a write reservation; PostgreSQL takes a transaction-scoped
+        # advisory lock in the adapter so concurrent requests share one risk budget.
         db.execute("BEGIN IMMEDIATE")
         realized = db.execute(
-            "SELECT COALESCE(SUM(pnl), 0) FROM trades WHERE status='CLOSED'"
-        ).fetchone()[0]
+            "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE status='CLOSED'"
+        ).fetchone()["total"]
         equity = settings.paper_starting_balance + float(realized or 0)
         opened = db.execute(
             "SELECT quantity, entry, stop FROM trades WHERE status='OPEN'"
@@ -46,9 +46,9 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None, si
             for row in opened
         )
         today_pnl = db.execute(
-            "SELECT COALESCE(SUM(pnl), 0) FROM trades "
+            "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades "
             "WHERE status='CLOSED' AND date(closed_at)=date('now')"
-        ).fetchone()[0]
+        ).fetchone()["total"]
         today_start = db.execute(
             "SELECT starting_equity FROM daily_equity_snapshots WHERE trading_date=date('now')"
         ).fetchone()
@@ -69,10 +69,10 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None, si
             raise ValueError(decision.reason)
         cursor = db.execute(
             "INSERT INTO trades(exchange,symbol,market_type,side,quantity,entry,stop,target,signal_id) "
-            "VALUES(?,?,?,?,?,?,?,?,?)",
+            "VALUES(?,?,?,?,?,?,?,?,?) RETURNING id",
             (exchange, symbol, market_type, side, decision.quantity, entry, stop, target, signal_id),
         )
-        trade_id = cursor.lastrowid
+        trade_id = cursor.fetchone()["id"]
     return {
         "id": trade_id, "quantity": decision.quantity, "notional": decision.notional,
         "risk_amount": decision.risk_amount, "status": "OPEN",
