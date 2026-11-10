@@ -67,10 +67,9 @@ def adx(candles, period=14):
     tr_s, plus_s, minus_s = sum(trs[:period]), sum(plus_dm[:period]), sum(minus_dm[:period])
     dx_values = []
     for i in range(period, len(trs)):
-        if i > period:
-            tr_s = tr_s - tr_s / period + trs[i]
-            plus_s = plus_s - plus_s / period + plus_dm[i]
-            minus_s = minus_s - minus_s / period + minus_dm[i]
+        tr_s = tr_s - tr_s / period + trs[i]
+        plus_s = plus_s - plus_s / period + plus_dm[i]
+        minus_s = minus_s - minus_s / period + minus_dm[i]
         plus_di = 100 * plus_s / tr_s if tr_s else 0.0
         minus_di = 100 * minus_s / tr_s if tr_s else 0.0
         denominator = plus_di + minus_di
