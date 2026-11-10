@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     max_open_risk_pct: float = 2.0
     max_daily_loss_pct: float = 3.0
     max_position_notional_pct: float = 20.0
+    taker_fee_rate: float = 0.0006
+    slippage_bps: float = 2.0
     paper_starting_balance: float = 10000.0
     scan_symbols: str = 'BTC/USDT,ETH/USDT,SOL/USDT'
     scan_timeframe: str = '1h'
