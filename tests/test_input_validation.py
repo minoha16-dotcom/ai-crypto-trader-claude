@@ -72,14 +72,14 @@ def stub_open_dependencies(monkeypatch, ticker):
 
 def test_paper_open_endpoint_accepts_price_within_tolerance(monkeypatch):
     stub_open_dependencies(monkeypatch, 60000)
-    response = make_client(monkeypatch).post("/api/paper/open", json=valid_trade(entry=62900))
+    response = make_client(monkeypatch).post("/api/paper/open", json=valid_trade(entry=62900, target=65000))
     assert response.status_code == 200
     assert response.json()["status"] == "OPEN"
 
 
 def test_paper_open_endpoint_rejects_price_outside_tolerance(monkeypatch):
     stub_open_dependencies(monkeypatch, 60000)
-    response = make_client(monkeypatch).post("/api/paper/open", json=valid_trade(entry=64000))
+    response = make_client(monkeypatch).post("/api/paper/open", json=valid_trade(entry=64000, target=65000))
     assert response.status_code == 400
     assert "maximum allowed deviation is 5.00%" in response.json()["detail"]
 
