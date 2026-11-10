@@ -59,8 +59,10 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None,
             "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE status='CLOSED'"
         ).fetchone()["total"]
         equity = settings.paper_starting_balance + float(realized or 0)
+        cost_rate = float(settings.taker_fee_rate) + float(settings.slippage_bps) / 10000
         open_risk = sum(
-            abs(float(row["entry"]) - float(row["stop"])) * float(row["quantity"])
+            (abs(float(row["entry"]) - float(row["stop"]))
+             + (float(row["entry"]) + float(row["stop"])) * cost_rate) * float(row["quantity"])
             for row in opened
         )
         today_pnl = db.execute(
