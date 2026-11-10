@@ -81,3 +81,27 @@ def test_floating_daily_loss_blocks_new_trade(isolated_db):
     with pytest.raises(ValueError, match="Daily loss limit"):
         open_trade("binance", "BTC/USDT", "spot", "LONG", 100, 95,
                    unrealized_pnl=-300)
+
+
+
+def test_open_trade_reports_actual_risk_after_notional_cap(isolated_db):
+    opened = open_trade("binance", "BTC/USDT", "spot", "LONG", 100, 99)
+    assert opened["risk_pct_actual"] < settings.risk_per_trade_pct
+    assert opened["sizing_reason"] == "position_notional_cap"
+    assert opened["fees_estimated"] > 0
+
+
+def test_closed_trade_records_net_pnl_and_r_multiple(isolated_db):
+    opened = open_trade("binance", "ETH/USDT", "spot", "LONG", 100, 95, 110)
+    closed = close_trade(opened["id"], 110)
+    assert closed["costs"] > 0
+    assert closed["gross_pnl"] > closed["pnl"]
+    assert closed["r_multiple"] > 0
+
+
+def test_maximum_three_open_positions(isolated_db):
+    open_trade("binance", "BTC/USDT", "spot", "LONG", 100, 95)
+    open_trade("binance", "ETH/USDT", "spot", "LONG", 100, 95)
+    open_trade("binance", "SOL/USDT", "spot", "LONG", 100, 95)
+    with pytest.raises(ValueError, match="Maximum open paper positions"):
+        open_trade("binance", "BNB/USDT", "spot", "LONG", 100, 95)

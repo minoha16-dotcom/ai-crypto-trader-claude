@@ -1,3 +1,5 @@
+from .config import settings
+
 def ema(values, period):
     if period <= 0:
         raise ValueError("period must be positive")
@@ -49,6 +51,37 @@ def atr(candles, period=14):
     return value
 
 
+def adx(candles, period=14):
+    """Wilder ADX calculated from OHLC candles."""
+    if period <= 0 or len(candles) <= period * 2:
+        raise ValueError("Not enough candles for ADX")
+    trs, plus_dm, minus_dm = [], [], []
+    for previous, current in zip(candles[:-1], candles[1:]):
+        up = float(current[2]) - float(previous[2])
+        down = float(previous[3]) - float(current[3])
+        plus_dm.append(up if up > down and up > 0 else 0.0)
+        minus_dm.append(down if down > up and down > 0 else 0.0)
+        trs.append(max(float(current[2])-float(current[3]),
+                       abs(float(current[2])-float(previous[4])),
+                       abs(float(current[3])-float(previous[4]))))
+    tr_s, plus_s, minus_s = sum(trs[:period]), sum(plus_dm[:period]), sum(minus_dm[:period])
+    dx_values = []
+    for i in range(period, len(trs)):
+        tr_s = tr_s - tr_s / period + trs[i]
+        plus_s = plus_s - plus_s / period + plus_dm[i]
+        minus_s = minus_s - minus_s / period + minus_dm[i]
+        plus_di = 100 * plus_s / tr_s if tr_s else 0.0
+        minus_di = 100 * minus_s / tr_s if tr_s else 0.0
+        denominator = plus_di + minus_di
+        dx_values.append(100 * abs(plus_di-minus_di) / denominator if denominator else 0.0)
+    if len(dx_values) < period:
+        raise ValueError("Not enough directional movement values for ADX")
+    value = sum(dx_values[:period]) / period
+    for dx in dx_values[period:]:
+        value = (value * (period - 1) + dx) / period
+    return value
+
+
 def analyze(candles):
     closes = [float(candle[4]) for candle in candles]
     if len(closes) < 50:
@@ -62,8 +95,24 @@ def analyze(candles):
         + (1 if last > ema20 else -1 if last < ema20 else 0)
     )
     signal = "LONG" if score >= 2 else "SHORT" if score <= -2 else "WAIT"
+    trend_strength = adx(candles)
+    volumes = [float(candle[5]) for candle in candles]
+    average_volume = sum(volumes[-21:-1]) / 20 if len(volumes) >= 21 else 0.0
+    volume_ratio = volumes[-1] / average_volume if average_volume > 0 else 0.0
+    atr_pct = volatility / last * 100 if last else 0.0
+    filter_reasons = []
+    if trend_strength < float(settings.signal_min_adx):
+        filter_reasons.append("ADX_BELOW_THRESHOLD")
+    if volume_ratio < float(settings.signal_min_volume_ratio):
+        filter_reasons.append("VOLUME_BELOW_AVERAGE")
+    if atr_pct < float(settings.signal_min_atr_pct):
+        filter_reasons.append("ATR_PERCENT_TOO_LOW")
+    if filter_reasons:
+        signal = "WAIT"
     return {
         "price": last, "ema20": ema20, "ema50": ema50, "rsi14": strength,
-        "atr14": volatility, "trend": trend, "score": score, "signal": signal,
+        "atr14": volatility, "atr_pct": atr_pct, "adx14": trend_strength,
+        "volume_ratio": volume_ratio, "filter_reasons": filter_reasons,
+        "trend": trend, "score": score, "signal": signal,
         "stop_distance": max(volatility * 2, last * 0.005),
     }

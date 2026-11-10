@@ -14,6 +14,7 @@ from .exchanges import registry, EXCHANGE_IDS
 from .scanner import scan
 from .paper import open_trade, close_trade, journal, account
 from .risk import risk_manager
+from .backtest import run_backtest
 
 
 @asynccontextmanager
@@ -133,6 +134,23 @@ async def market(exchange, symbol, market_type="spot"):
         }
     except Exception as exc:
         raise HTTPException(502, str(exc))
+
+
+@app.get("/api/backtest")
+async def backtest(exchange="binance", symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000):
+    if exchange not in EXCHANGE_IDS:
+        raise HTTPException(400, "Unsupported exchange")
+    if market_type not in ("spot", "futures"):
+        raise HTTPException(400, "market_type must be spot or futures")
+    if limit < 52 or limit > 5000:
+        raise HTTPException(400, "limit must be between 52 and 5000")
+    try:
+        candles = await registry.ohlcv(exchange, symbol, timeframe, limit, market_type)
+        # The final exchange candle may still be forming; never use it for signals.
+        return {"exchange": exchange, "symbol": symbol, "market_type": market_type,
+                "timeframe": timeframe, **run_backtest(candles[:-1])}
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
 
 
 @app.post("/api/scan")
@@ -255,16 +273,38 @@ async def get_positions():
             stop_proximity = max(0.0, 1.0 - stop_gap / stop_span) if stop_span else 0.0
             target_proximity = max(0.0, 1.0 - target_gap / target_span) if target_gap is not None and target_span else None
             alert = None
+            exit_reason = None
             if (row["side"] == "LONG" and last <= float(row["stop"])) or (row["side"] == "SHORT" and last >= float(row["stop"])):
                 alert = "STOP_REACHED"
+                exit_reason = "STOP"
             elif target is not None and ((row["side"] == "LONG" and last >= float(target)) or (row["side"] == "SHORT" and last <= float(target))):
                 alert = "TARGET_REACHED"
+                exit_reason = "TARGET"
             elif stop_proximity >= 0.8:
                 alert = "NEAR_STOP"
             elif target_proximity is not None and target_proximity >= 0.8:
                 alert = "NEAR_TARGET"
+            exit_result = None
+            if exit_reason:
+                try:
+                    exit_result = close_trade(row["id"], last)
+                except ValueError:
+                    # Another concurrent dashboard request may have closed this position.
+                    with connect() as db:
+                        already_closed = db.execute(
+                            "SELECT id, pnl, exit_price FROM trades WHERE id=? AND status='CLOSED'",
+                            (row["id"],)
+                        ).fetchone()
+                    if already_closed:
+                        exit_result = {"id": row["id"], "pnl": float(already_closed["pnl"] or 0),
+                                       "exit_price": float(already_closed["exit_price"]), "status": "CLOSED"}
+                    else:
+                        raise
             return {
                 **row,
+                "status": "CLOSED" if exit_result else row["status"],
+                "exit_reason": exit_reason,
+                "exit_result": exit_result,
                 "live_price": last,
                 "unrealized_pnl": unrealized,
                 "unrealized_pnl_pct": (unrealized / notional * 100) if notional else 0,
@@ -312,7 +352,10 @@ async def risk():
         ).fetchone()["total"] or 0)
     daily_start = float(snapshot["starting_equity"]) if snapshot else settings.paper_starting_balance + realized_all - today_realized
     daily_pnl = today_realized + floating
-    open_risk = sum(abs(float(p["entry"])-float(p["stop"]))*float(p["quantity"]) for p in positions)
+    cost_rate = float(settings.taker_fee_rate) + float(settings.slippage_bps) / 10000
+    open_risk = sum((abs(float(p["entry"])-float(p["stop"]))
+                     + (float(p["entry"])+float(p["stop"]))*cost_rate)*float(p["quantity"])
+                    for p in positions)
     equity = settings.paper_starting_balance + realized_all
     remaining_daily_loss = max(0.0, daily_start * risk_manager.max_daily_loss_pct / 100 + daily_pnl)
     available_open_risk = max(0.0, equity * risk_manager.max_open_risk_pct / 100 - open_risk)
@@ -321,14 +364,14 @@ async def risk():
         "max_open_risk_pct": risk_manager.max_open_risk_pct,
         "max_daily_loss_pct": risk_manager.max_daily_loss_pct,
         "max_position_notional_pct": risk_manager.max_notional_pct,
-        "max_open_trades": 5,
+        "max_open_trades": 3,
         "open_trades": len(positions),
         "open_risk": open_risk,
         "available_open_risk": available_open_risk,
         "daily_pnl": daily_pnl,
         "remaining_daily_loss": remaining_daily_loss,
         "prices_complete": prices_complete,
-        "status": "BLOCKED" if not prices_complete or remaining_daily_loss <= 0 or len(positions) >= 5 else "ACTIVE",
+        "status": "BLOCKED" if not prices_complete or remaining_daily_loss <= 0 or len(positions) >= 3 else "ACTIVE",
         "reward_risk_ratio": 2.0,
     }
 
