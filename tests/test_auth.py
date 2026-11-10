@@ -46,6 +46,17 @@ def test_api_mutations_require_auth(monkeypatch):
 
 def test_missing_render_credentials_fail_closed(monkeypatch):
     monkeypatch.setenv("RENDER", "true")
+    monkeypatch.delenv("DASHBOARD_AUTH_REQUIRED", raising=False)
+    monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    with TestClient(app) as client:
+        response = client.get("/")
+    assert response.status_code == 503
+
+
+def test_missing_oracle_credentials_fail_closed(monkeypatch):
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setenv("DASHBOARD_AUTH_REQUIRED", "true")
     monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
     monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
     with TestClient(app) as client:
