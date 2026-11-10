@@ -1,8 +1,13 @@
+import base64
+import hmac
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field, model_validator
+
 from .config import settings
 from .database import init_db, connect
 from .exchanges import registry, EXCHANGE_IDS
@@ -10,17 +15,65 @@ from .scanner import scan
 from .paper import open_trade, close_trade, journal, account
 from .risk import risk_manager
 
+
 @asynccontextmanager
 async def lifespan(app):
     init_db()
     yield
     await registry.close()
 
-app = FastAPI(title=settings.app_name, version="2.1.0", lifespan=lifespan)
+
+app = FastAPI(
+    title=settings.app_name,
+    version="2.1.0",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
+
+
+@app.middleware("http")
+async def dashboard_auth_and_security_headers(request: Request, call_next):
+    # Render health checks stay public; every dashboard/API route requires Basic Auth.
+    if request.url.path != "/api/health":
+        username = os.getenv("DASHBOARD_USERNAME", "")
+        password = os.getenv("DASHBOARD_PASSWORD", "")
+        if not username or not password:
+            if os.getenv("RENDER"):
+                return JSONResponse(
+                    {"detail": "Dashboard credentials are not configured."},
+                    status_code=503,
+                )
+        else:
+            header = request.headers.get("authorization", "")
+            supplied_user = supplied_password = ""
+            if header.startswith("Basic "):
+                try:
+                    decoded = base64.b64decode(header[6:], validate=True).decode("utf-8")
+                    supplied_user, supplied_password = decoded.split(":", 1)
+                except (ValueError, UnicodeDecodeError):
+                    pass
+            valid_user = hmac.compare_digest(supplied_user, username)
+            valid_password = hmac.compare_digest(supplied_password, password)
+            if not (valid_user and valid_password):
+                return JSONResponse(
+                    {"detail": "Authentication required."},
+                    status_code=401,
+                    headers={"WWW-Authenticate": 'Basic realm="AI Crypto Trader"'},
+                )
+
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
+
 
 class PaperOpen(BaseModel):
     exchange: str = "binance"
-    symbol: str = Field(min_length=3)
+    symbol: str = Field(min_length=3, max_length=30)
     market_type: str = "spot"
     side: str
     entry: float = Field(gt=0)
@@ -49,16 +102,20 @@ class PaperOpen(BaseModel):
                 raise ValueError("SHORT target must be below entry")
         return self
 
+
 class PaperClose(BaseModel):
     exit_price: float = Field(gt=0)
+
 
 @app.get("/api/health")
 def health():
     return {"status": "ok", "version": "2.1.0", "mode": "paper-only"}
 
+
 @app.get("/api/exchanges")
 def exchanges():
     return {"exchanges": list(EXCHANGE_IDS), "connection": "public market data only"}
+
 
 @app.get("/api/markets/{exchange}/{symbol:path}")
 async def market(exchange, symbol, market_type="spot"):
@@ -77,12 +134,15 @@ async def market(exchange, symbol, market_type="spot"):
     except Exception as exc:
         raise HTTPException(502, str(exc))
 
+
 @app.post("/api/scan")
 async def run_scan(exchange="binance", market_type="spot", symbols=None, timeframe="1h"):
     if exchange not in EXCHANGE_IDS:
         raise HTTPException(400, "Unsupported exchange")
     if market_type not in ("spot", "futures"):
         raise HTTPException(400, "market_type must be spot or futures")
+    if symbols and len([s for s in symbols.split(",") if s.strip()]) > 20:
+        raise HTTPException(400, "A scan can contain at most 20 symbols")
     try:
         return {"results": await scan(
             exchange, [s.strip() for s in symbols.split(",") if s.strip()] if symbols else None,
@@ -90,6 +150,7 @@ async def run_scan(exchange="binance", market_type="spot", symbols=None, timefra
         )}
     except Exception as exc:
         raise HTTPException(400, str(exc))
+
 
 @app.get("/api/signals")
 def signals(limit: int = 100):
@@ -99,9 +160,11 @@ def signals(limit: int = 100):
         ).fetchall()
     return {"signals": [dict(row) for row in rows]}
 
+
 @app.get("/api/account")
 def get_account():
     return account()
+
 
 @app.get("/api/risk")
 def risk():
@@ -112,12 +175,14 @@ def risk():
         "max_position_notional_pct": risk_manager.max_notional_pct,
     }
 
+
 @app.post("/api/paper/open")
 def paper_open(body: PaperOpen):
     try:
         return open_trade(**body.model_dump())
     except Exception as exc:
         raise HTTPException(400, str(exc))
+
 
 @app.post("/api/paper/{trade_id}/close")
 def paper_close(trade_id: int, body: PaperClose):
@@ -126,9 +191,11 @@ def paper_close(trade_id: int, body: PaperClose):
     except Exception as exc:
         raise HTTPException(404, str(exc))
 
+
 @app.get("/api/journal")
 def get_journal():
     return journal()
+
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard():
