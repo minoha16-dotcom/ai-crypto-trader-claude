@@ -2,6 +2,9 @@ from .database import connect
 from .config import settings
 from .risk import risk_manager
 
+MAX_OPEN_TRADES = 5
+REWARD_RISK_RATIO = 2.0
+
 
 def account():
     with connect() as db:
@@ -18,7 +21,8 @@ def account():
     }
 
 
-def open_trade(exchange, symbol, market_type, side, entry, stop, target=None, signal_id=None):
+def open_trade(exchange, symbol, market_type, side, entry, stop, target=None,
+               signal_id=None, unrealized_pnl=0.0, prices_complete=True):
     if side not in ("LONG", "SHORT"):
         raise ValueError("Side must be LONG or SHORT")
     if market_type not in ("spot", "futures"):
@@ -27,20 +31,34 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None, si
         raise ValueError("SHORT paper positions are not supported for spot markets; select futures.")
     if (side == "LONG" and stop >= entry) or (side == "SHORT" and stop <= entry):
         raise ValueError("Stop must be below entry for LONG and above entry for SHORT")
-    if target is not None and ((side == "LONG" and target <= entry) or (side == "SHORT" and target >= entry)):
+    if target is None:
+        reward = abs(float(entry) - float(stop)) * REWARD_RISK_RATIO
+        target = float(entry) + reward if side == "LONG" else float(entry) - reward
+    if (side == "LONG" and target <= entry) or (side == "SHORT" and target >= entry):
         raise ValueError("Target must be above entry for LONG and below entry for SHORT")
+    if not prices_complete:
+        raise ValueError("Cannot open a trade: live price unavailable for at least one open position.")
 
     with connect() as db:
-        # SQLite obtains a write reservation; PostgreSQL takes a transaction-scoped
-        # advisory lock in the adapter so concurrent requests share one risk budget.
+        # Serializes all risk checks and inserts across concurrent requests.
         db.execute("BEGIN IMMEDIATE")
+        opened = db.execute(
+            "SELECT exchange, symbol, market_type, quantity, entry, stop FROM trades WHERE status='OPEN'"
+        ).fetchall()
+        if len(opened) >= MAX_OPEN_TRADES:
+            raise ValueError(f"Maximum open paper positions reached ({MAX_OPEN_TRADES}).")
+        duplicate = any(
+            str(row["exchange"]).lower() == str(exchange).lower()
+            and str(row["symbol"]).upper() == str(symbol).upper()
+            and row["market_type"] == market_type
+            for row in opened
+        )
+        if duplicate:
+            raise ValueError("An open position already exists for this exchange, symbol and market.")
         realized = db.execute(
             "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE status='CLOSED'"
         ).fetchone()["total"]
         equity = settings.paper_starting_balance + float(realized or 0)
-        opened = db.execute(
-            "SELECT quantity, entry, stop FROM trades WHERE status='OPEN'"
-        ).fetchall()
         open_risk = sum(
             abs(float(row["entry"]) - float(row["stop"])) * float(row["quantity"])
             for row in opened
@@ -53,17 +71,17 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None, si
             "SELECT starting_equity FROM daily_equity_snapshots WHERE trading_date=date('now')"
         ).fetchone()
         if today_start is None:
+            daily_start_equity = equity - float(today_pnl or 0)
             db.execute(
                 "INSERT INTO daily_equity_snapshots(trading_date, starting_equity) "
-                "VALUES(date('now'), ?)", (equity - float(today_pnl or 0),)
+                "VALUES(date('now'), ?)", (daily_start_equity,)
             )
-            daily_start_equity = equity - float(today_pnl or 0)
         else:
             daily_start_equity = float(today_start["starting_equity"])
-
+        combined_daily_pnl = float(today_pnl or 0) + float(unrealized_pnl or 0)
         decision = risk_manager.size(
             equity, float(entry), float(stop), open_risk=open_risk,
-            daily_pnl=float(today_pnl or 0), daily_start_equity=daily_start_equity,
+            daily_pnl=combined_daily_pnl, daily_start_equity=daily_start_equity,
         )
         if not decision.approved:
             raise ValueError(decision.reason)
@@ -75,7 +93,8 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None, si
         trade_id = cursor.fetchone()["id"]
     return {
         "id": trade_id, "quantity": decision.quantity, "notional": decision.notional,
-        "risk_amount": decision.risk_amount, "status": "OPEN",
+        "risk_amount": decision.risk_amount, "target": target, "reward_risk_ratio": REWARD_RISK_RATIO,
+        "status": "OPEN",
     }
 
 

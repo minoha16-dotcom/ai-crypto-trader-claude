@@ -294,19 +294,57 @@ async def get_positions():
 
 
 @app.get("/api/risk")
-def risk():
+async def risk():
+    marked = await get_positions()
+    positions = marked["positions"]
+    prices_complete = all(p.get("unrealized_pnl") is not None for p in positions)
+    floating = sum(float(p["unrealized_pnl"]) for p in positions if p.get("unrealized_pnl") is not None)
+    with connect() as db:
+        today_realized = float(db.execute(
+            "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades "
+            "WHERE status='CLOSED' AND date(closed_at)=date('now')"
+        ).fetchone()["total"] or 0)
+        snapshot = db.execute(
+            "SELECT starting_equity FROM daily_equity_snapshots WHERE trading_date=date('now')"
+        ).fetchone()
+        realized_all = float(db.execute(
+            "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE status='CLOSED'"
+        ).fetchone()["total"] or 0)
+    daily_start = float(snapshot["starting_equity"]) if snapshot else settings.paper_starting_balance + realized_all - today_realized
+    daily_pnl = today_realized + floating
+    open_risk = sum(abs(float(p["entry"])-float(p["stop"]))*float(p["quantity"]) for p in positions)
+    equity = settings.paper_starting_balance + realized_all
+    remaining_daily_loss = max(0.0, daily_start * risk_manager.max_daily_loss_pct / 100 + daily_pnl)
+    available_open_risk = max(0.0, equity * risk_manager.max_open_risk_pct / 100 - open_risk)
     return {
         "risk_per_trade_pct": risk_manager.risk_pct,
         "max_open_risk_pct": risk_manager.max_open_risk_pct,
         "max_daily_loss_pct": risk_manager.max_daily_loss_pct,
         "max_position_notional_pct": risk_manager.max_notional_pct,
+        "max_open_trades": 5,
+        "open_trades": len(positions),
+        "open_risk": open_risk,
+        "available_open_risk": available_open_risk,
+        "daily_pnl": daily_pnl,
+        "remaining_daily_loss": remaining_daily_loss,
+        "prices_complete": prices_complete,
+        "status": "BLOCKED" if not prices_complete or remaining_daily_loss <= 0 or len(positions) >= 5 else "ACTIVE",
+        "reward_risk_ratio": 2.0,
     }
 
 
 @app.post("/api/paper/open")
-def paper_open(body: PaperOpen):
+async def paper_open(body: PaperOpen):
     try:
-        return open_trade(**body.model_dump())
+        marked = await get_positions()
+        positions = marked["positions"]
+        prices_complete = all(p.get("unrealized_pnl") is not None for p in positions)
+        floating_pnl = sum(float(p["unrealized_pnl"]) for p in positions if p.get("unrealized_pnl") is not None)
+        return open_trade(
+            **body.model_dump(),
+            unrealized_pnl=floating_pnl,
+            prices_complete=prices_complete,
+        )
     except Exception as exc:
         raise HTTPException(400, str(exc))
 
