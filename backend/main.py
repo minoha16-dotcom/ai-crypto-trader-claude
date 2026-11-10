@@ -14,6 +14,7 @@ from .exchanges import registry, EXCHANGE_IDS
 from .scanner import scan
 from .paper import open_trade, close_trade, journal, account
 from .risk import risk_manager
+from .backtest import run_backtest
 
 
 @asynccontextmanager
@@ -133,6 +134,23 @@ async def market(exchange, symbol, market_type="spot"):
         }
     except Exception as exc:
         raise HTTPException(502, str(exc))
+
+
+@app.get("/api/backtest")
+async def backtest(exchange="binance", symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000):
+    if exchange not in EXCHANGE_IDS:
+        raise HTTPException(400, "Unsupported exchange")
+    if market_type not in ("spot", "futures"):
+        raise HTTPException(400, "market_type must be spot or futures")
+    if limit < 52 or limit > 5000:
+        raise HTTPException(400, "limit must be between 52 and 5000")
+    try:
+        candles = await registry.ohlcv(exchange, symbol, timeframe, limit, market_type)
+        # The final exchange candle may still be forming; never use it for signals.
+        return {"exchange": exchange, "symbol": symbol, "market_type": market_type,
+                "timeframe": timeframe, **run_backtest(candles[:-1])}
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
 
 
 @app.post("/api/scan")
