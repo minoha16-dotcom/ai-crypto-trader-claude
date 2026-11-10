@@ -1,5 +1,6 @@
 import base64
 import hmac
+import math
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -77,9 +78,9 @@ class PaperOpen(BaseModel):
     symbol: str = Field(min_length=3, max_length=30)
     market_type: str = "spot"
     side: str
-    entry: float = Field(gt=0)
-    stop: float = Field(gt=0)
-    target: float | None = Field(default=None, gt=0)
+    entry: float = Field(gt=0, allow_inf_nan=False)
+    stop: float = Field(gt=0, allow_inf_nan=False)
+    target: float | None = Field(default=None, gt=0, allow_inf_nan=False)
     signal_id: int | None = None
 
     @model_validator(mode="after")
@@ -105,7 +106,7 @@ class PaperOpen(BaseModel):
 
 
 class PaperClose(BaseModel):
-    exit_price: float = Field(gt=0)
+    exit_price: float = Field(gt=0, allow_inf_nan=False)
 
 
 @app.get("/api/health")
@@ -379,6 +380,21 @@ async def risk():
 @app.post("/api/paper/open")
 async def paper_open(body: PaperOpen):
     try:
+        # Resolve the symbol against the selected exchange/market before accepting
+        # a manually entered paper position. This prevents arbitrary symbols and
+        # spot/futures market mismatches from entering the journal.
+        ticker = await registry.ticker(body.exchange, body.symbol, body.market_type)
+        last = ticker.get("last")
+        if last is None or not math.isfinite(float(last)) or float(last) <= 0:
+            raise ValueError("Exchange returned an invalid market price")
+        last = float(last)
+        deviation_pct = abs(float(body.entry) - last) / last * 100
+        max_deviation_pct = float(settings.paper_entry_max_deviation_pct)
+        if deviation_pct > max_deviation_pct:
+            raise ValueError(
+                f"Entry price is {deviation_pct:.2f}% away from live market price; "
+                f"maximum allowed deviation is {max_deviation_pct:.2f}%"
+            )
         marked = await get_positions()
         positions = marked["positions"]
         prices_complete = all(p.get("unrealized_pnl") is not None for p in positions)
@@ -389,7 +405,7 @@ async def paper_open(body: PaperOpen):
             prices_complete=prices_complete,
         )
     except Exception as exc:
-        raise HTTPException(400, str(exc))
+        raise HTTPException(400, f"Unable to validate/open paper trade: {exc}")
 
 
 @app.post("/api/paper/{trade_id}/close")
