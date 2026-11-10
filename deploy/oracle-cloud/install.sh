@@ -66,6 +66,7 @@ fi
 if [[ -n "${DOMAIN}" ]]; then
   apt-get install -y debian-keyring debian-archive-keyring apt-transport-https gnupg
   install -d -m 0755 /etc/apt/keyrings
+  rm -f /etc/apt/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
     | gpg --dearmor -o /etc/apt/keyrings/caddy-stable-archive-keyring.gpg
   curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
