@@ -255,16 +255,23 @@ async def get_positions():
             stop_proximity = max(0.0, 1.0 - stop_gap / stop_span) if stop_span else 0.0
             target_proximity = max(0.0, 1.0 - target_gap / target_span) if target_gap is not None and target_span else None
             alert = None
+            exit_reason = None
             if (row["side"] == "LONG" and last <= float(row["stop"])) or (row["side"] == "SHORT" and last >= float(row["stop"])):
                 alert = "STOP_REACHED"
+                exit_reason = "STOP"
             elif target is not None and ((row["side"] == "LONG" and last >= float(target)) or (row["side"] == "SHORT" and last <= float(target))):
                 alert = "TARGET_REACHED"
+                exit_reason = "TARGET"
             elif stop_proximity >= 0.8:
                 alert = "NEAR_STOP"
             elif target_proximity is not None and target_proximity >= 0.8:
                 alert = "NEAR_TARGET"
+            exit_result = close_trade(row["id"], last) if exit_reason else None
             return {
                 **row,
+                "status": "CLOSED" if exit_result else row["status"],
+                "exit_reason": exit_reason,
+                "exit_result": exit_result,
                 "live_price": last,
                 "unrealized_pnl": unrealized,
                 "unrealized_pnl_pct": (unrealized / notional * 100) if notional else 0,
@@ -321,14 +328,14 @@ async def risk():
         "max_open_risk_pct": risk_manager.max_open_risk_pct,
         "max_daily_loss_pct": risk_manager.max_daily_loss_pct,
         "max_position_notional_pct": risk_manager.max_notional_pct,
-        "max_open_trades": 5,
+        "max_open_trades": 3,
         "open_trades": len(positions),
         "open_risk": open_risk,
         "available_open_risk": available_open_risk,
         "daily_pnl": daily_pnl,
         "remaining_daily_loss": remaining_daily_loss,
         "prices_complete": prices_complete,
-        "status": "BLOCKED" if not prices_complete or remaining_daily_loss <= 0 or len(positions) >= 5 else "ACTIVE",
+        "status": "BLOCKED" if not prices_complete or remaining_daily_loss <= 0 or len(positions) >= 3 else "ACTIVE",
         "reward_risk_ratio": 2.0,
     }
 
