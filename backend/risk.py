@@ -38,6 +38,10 @@ class RiskManager:
         cost_rate = float(settings.taker_fee_rate) + float(settings.slippage_bps) / 10000
         per_unit_risk = abs(entry - stop) + (entry + stop) * cost_rate
         quantity = risk_target / per_unit_risk
+        # Avoid a floating-point rounding overshoot of the configured risk budget.
+        if quantity * per_unit_risk > risk_target:
+            import math
+            quantity = math.nextafter(quantity, 0.0)
         max_notional = equity * self.max_notional_pct / 100
         notional = quantity * entry
         sizing_reason = "risk_target"
