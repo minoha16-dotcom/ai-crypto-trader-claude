@@ -56,3 +56,28 @@ def test_api_rejects_spot_short(isolated_db):
             "side": "SHORT", "entry": 100, "stop": 105
         })
     assert response.status_code == 422
+
+
+def test_missing_live_prices_block_new_trade(isolated_db):
+    with pytest.raises(ValueError, match="live price unavailable"):
+        open_trade("binance", "BTC/USDT", "spot", "LONG", 100, 95,
+                   prices_complete=False)
+
+
+def test_duplicate_open_symbol_is_rejected(isolated_db):
+    open_trade("binance", "BTC/USDT", "spot", "LONG", 100, 95)
+    with pytest.raises(ValueError, match="already exists"):
+        open_trade("BINANCE", "btc/usdt", "spot", "LONG", 100, 95)
+
+
+def test_default_target_is_two_to_one(isolated_db):
+    opened = open_trade("binance", "ETH/USDT", "spot", "LONG", 100, 95)
+    assert opened["target"] == pytest.approx(110)
+    short = open_trade("bybit", "ETH/USDT:USDT", "futures", "SHORT", 100, 105)
+    assert short["target"] == pytest.approx(90)
+
+
+def test_floating_daily_loss_blocks_new_trade(isolated_db):
+    with pytest.raises(ValueError, match="Daily loss limit"):
+        open_trade("binance", "BTC/USDT", "spot", "LONG", 100, 95,
+                   unrealized_pnl=-300)
