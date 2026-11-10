@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: ai-crypto-trader-v2
+    runtime: python
+    plan: starter
+    region: frankfurt
+    branch: deploy/render-paper-dashboard
+    buildCommand: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    disk:
+      name: trader-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.18
+      - key: DATABASE_URL
+        value: sqlite:////var/data/trader.db
+      - key: DASHBOARD_USERNAME
+        value: admin
+      - key: DASHBOARD_PASSWORD
+        generateValue: true
+      - key: PYTHONUNBUFFERED
+        value: "1"
