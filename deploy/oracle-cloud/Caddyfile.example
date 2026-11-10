@@ -1,0 +1,6 @@
+# Replace trader.example.com with a DNS name whose A record points to
+# this OCI instance's reserved public IPv4 address.
+trader.example.com {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8000
+}
