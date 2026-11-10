@@ -8,7 +8,7 @@ services:
     buildCommand: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
-    autoDeploy: true
+    autoDeployTrigger: checksPass
     disk:
       name: trader-data
       mountPath: /var/data
