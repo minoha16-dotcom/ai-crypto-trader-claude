@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     max_position_notional_pct: float = 20.0
     taker_fee_rate: float = 0.0006
     slippage_bps: float = 2.0
+    signal_min_adx: float = 20.0
+    signal_min_volume_ratio: float = 1.0
+    signal_min_atr_pct: float = 0.1
     paper_starting_balance: float = 10000.0
     scan_symbols: str = 'BTC/USDT,ETH/USDT,SOL/USDT'
     scan_timeframe: str = '1h'
