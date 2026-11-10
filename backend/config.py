@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     signal_min_volume_ratio: float = 1.0
     signal_min_atr_pct: float = 0.1
     paper_starting_balance: float = 10000.0
+    paper_entry_max_deviation_pct: float = 5.0
     scan_symbols: str = 'BTC/USDT,ETH/USDT,SOL/USDT'
     scan_timeframe: str = '1h'
     @property
