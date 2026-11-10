@@ -51,7 +51,7 @@ def run_backtest(candles, starting_balance=10000.0):
             break
         exit_price *= (1 - slippage if side == "LONG" else 1 + slippage)
         gross = (exit_price - entry) * qty * direction
-        costs = (entry + exit_price) * qty * (fee_rate + slippage)
+        costs = (entry + exit_price) * qty * fee_rate
         pnl = gross - costs
         initial_risk = distance * qty + (entry + stop) * qty * (fee_rate + slippage)
         r_multiple = pnl / initial_risk if initial_risk else 0.0
