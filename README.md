@@ -236,3 +236,8 @@ A Render Blueprint is provided in `render.yaml`. In Render choose **New → Blue
 - The app remains paper-only and uses public market data; it does not need exchange API keys or submit live orders.
 
 After deployment, check `/api/health` and sign in at the service URL. Rotate the generated password in Render if it is exposed. Render paid compute plans and persistent disks are paid features; review current pricing before applying the Blueprint.
+
+
+## Oracle Cloud Always Free deployment (persistent SQLite)
+
+An OCI deployment guide and installer are available in [deploy/oracle-cloud/README.md](deploy/oracle-cloud/README.md). This option runs the dashboard on an Ubuntu ARM64 VM, stores SQLite on the persistent boot volume at `/var/lib/ai-crypto-trader/trader.db`, protects dashboard/API routes with Basic Authentication, and optionally configures Caddy for HTTPS. The scanner remains manual and the application remains paper-only. Review Oracle's current Always Free limits, home-region requirements, and idle-instance policy before provisioning.

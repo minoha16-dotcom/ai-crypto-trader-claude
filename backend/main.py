@@ -35,12 +35,19 @@ app = FastAPI(
 
 @app.middleware("http")
 async def dashboard_auth_and_security_headers(request: Request, call_next):
-    # Render health checks stay public; every dashboard/API route requires Basic Auth.
+    # Only the health endpoint is public. Hosted deployments must fail closed
+    # if either credential is missing or DASHBOARD_AUTH_REQUIRED is enabled.
     if request.url.path != "/api/health":
         username = os.getenv("DASHBOARD_USERNAME", "")
         password = os.getenv("DASHBOARD_PASSWORD", "")
+        auth_required = (
+            os.getenv("DASHBOARD_AUTH_REQUIRED", "").strip().lower()
+            in ("1", "true", "yes", "on")
+            or bool(os.getenv("RENDER"))
+        )
+
         if not username or not password:
-            if os.getenv("RENDER"):
+            if auth_required or username or password:
                 return JSONResponse(
                     {"detail": "Dashboard credentials are not configured."},
                     status_code=503,
