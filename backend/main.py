@@ -387,6 +387,14 @@ async def paper_open(body: PaperOpen):
         last = ticker.get("last")
         if last is None or not math.isfinite(float(last)) or float(last) <= 0:
             raise ValueError("Exchange returned an invalid market price")
+        last = float(last)
+        deviation_pct = abs(float(body.entry) - last) / last * 100
+        max_deviation_pct = float(settings.paper_entry_max_deviation_pct)
+        if deviation_pct > max_deviation_pct:
+            raise ValueError(
+                f"Entry price is {deviation_pct:.2f}% away from live market price; "
+                f"maximum allowed deviation is {max_deviation_pct:.2f}%"
+            )
         marked = await get_positions()
         positions = marked["positions"]
         prices_complete = all(p.get("unrealized_pnl") is not None for p in positions)
