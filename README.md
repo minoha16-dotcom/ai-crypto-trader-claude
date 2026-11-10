@@ -236,3 +236,23 @@ A Render Blueprint is provided in `render.yaml`. In Render choose **New → Blue
 - The app remains paper-only and uses public market data; it does not need exchange API keys or submit live orders.
 
 After deployment, check `/api/health` and sign in at the service URL. Rotate the generated password in Render if it is exposed. Render paid compute plans and persistent disks are paid features; review current pricing before applying the Blueprint.
+
+
+## Render + Supabase deployment (PostgreSQL)
+
+For a Render web service that uses Supabase for persistent paper-trading data:
+
+1. Create a Supabase project and select **Connect → Direct → Session pooler → URI**. Use the Session Pooler for Render's IPv4 network path.
+2. In Render, create a Python Web Service from this repository and select the `deploy/render-supabase-postgres` branch.
+3. Set the build command to `pip install -r requirements.txt`.
+4. Set the start command to `uvicorn backend.main:app --host 0.0.0.0 --port $PORT`.
+5. Add these Render environment variables:
+   - `DATABASE_URL`: the complete Supabase Session Pooler URI, with the database password substituted for `[YOUR-PASSWORD]`. Keep it secret; do not commit it.
+   - `DASHBOARD_USERNAME`: a private dashboard username.
+   - `DASHBOARD_PASSWORD`: a long, unique password.
+6. Do not add Supabase `service_role`, `anon`, or exchange keys to the repository. The backend connects to PostgreSQL using the database connection string.
+7. Deploy, then verify `/api/health` and test opening and closing a paper trade. Restart the Render service and confirm the journal remains present.
+
+The backend creates its PostgreSQL tables on startup. Existing SQLite files are not automatically migrated; this deployment path starts with a new Supabase database unless you separately export and import existing data. Use the Session Pooler URI and keep SSL enabled. Paper trading remains simulated only; no exchange private keys or live-order endpoints are added.
+
+**Free-tier note:** Render's free web service may sleep when idle. Supabase Free projects can pause after a period of inactivity. This setup is suitable for testing, not guaranteed always-on operation. Review current provider limits before relying on it.
