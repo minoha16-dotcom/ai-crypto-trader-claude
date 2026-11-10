@@ -229,10 +229,10 @@ MIT. See [LICENSE](LICENSE).
 
 A Render Blueprint is provided in `render.yaml`. In Render choose **New → Blueprint**, connect this repository, and select the `deploy/render-paper-dashboard` branch.
 
-- The service uses the paid **Starter** plan and a persistent 1 GB disk mounted at `/var/data`; SQLite is stored at `/var/data/trader.db`.
+- The service uses the paid `0.5c-512mb` compute plan and a persistent 1 GB disk mounted at `/var/data`; SQLite is stored at `/var/data/trader.db`.
 - Render generates `DASHBOARD_PASSWORD`. The initial dashboard username is `admin`; retrieve the generated password from the Render service Environment page and keep it private.
 - HTTP Basic Authentication protects the dashboard and every API route except `/api/health`, which is public for health checks. API docs are disabled.
 - Scanning is manual: use the dashboard Scan button. No scheduler or unattended trading process is enabled.
 - The app remains paper-only and uses public market data; it does not need exchange API keys or submit live orders.
 
-After deployment, check `/api/health` and sign in at the service URL. Rotate the generated password in Render if it is exposed. Render Starter and persistent disks are paid features; review current pricing before applying the Blueprint.
+After deployment, check `/api/health` and sign in at the service URL. Rotate the generated password in Render if it is exposed. Render paid compute plans and persistent disks are paid features; review current pricing before applying the Blueprint.
