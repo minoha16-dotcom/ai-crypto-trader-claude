@@ -300,13 +300,23 @@ def risk():
         "max_open_risk_pct": risk_manager.max_open_risk_pct,
         "max_daily_loss_pct": risk_manager.max_daily_loss_pct,
         "max_position_notional_pct": risk_manager.max_notional_pct,
+        "max_open_trades": 5,
+        "reward_risk_ratio": 2.0,
     }
 
 
 @app.post("/api/paper/open")
-def paper_open(body: PaperOpen):
+async def paper_open(body: PaperOpen):
     try:
-        return open_trade(**body.model_dump())
+        marked = await get_positions()
+        positions = marked["positions"]
+        prices_complete = all(p.get("unrealized_pnl") is not None for p in positions)
+        floating_pnl = sum(float(p["unrealized_pnl"]) for p in positions if p.get("unrealized_pnl") is not None)
+        return open_trade(
+            **body.model_dump(),
+            unrealized_pnl=floating_pnl,
+            prices_complete=prices_complete,
+        )
     except Exception as exc:
         raise HTTPException(400, str(exc))
 
