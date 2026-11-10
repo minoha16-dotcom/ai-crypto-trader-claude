@@ -97,7 +97,7 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None,
         "id": trade_id, "quantity": decision.quantity, "notional": decision.notional,
         "risk_amount": decision.risk_amount, "target": target, "reward_risk_ratio": REWARD_RISK_RATIO,
         "risk_pct_actual": decision.risk_amount / equity * 100,
-        "sizing_reason": decision.reason,
+        "sizing_reason": decision.sizing_reason,
         "fees_estimated": decision.quantity * (float(entry) + float(stop)) * (float(settings.taker_fee_rate) + float(settings.slippage_bps) / 10000),
         "status": "OPEN",
     }
