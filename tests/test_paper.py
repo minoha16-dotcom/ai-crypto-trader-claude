@@ -85,7 +85,7 @@ def test_floating_daily_loss_blocks_new_trade(isolated_db):
 
 
 def test_open_trade_reports_actual_risk_after_notional_cap(isolated_db):
-    opened = open_trade("binance", "BTC/USDT", "spot", "LONG", 100, 95)
+    opened = open_trade("binance", "BTC/USDT", "spot", "LONG", 100, 99)
     assert opened["risk_pct_actual"] < settings.risk_per_trade_pct
     assert opened["sizing_reason"] == "position_notional_cap"
     assert opened["fees_estimated"] > 0
