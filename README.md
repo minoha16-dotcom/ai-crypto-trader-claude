@@ -205,7 +205,7 @@ It checks BTC/USDT Spot and a supported BTC/USDT Futures contract on Binance, By
 
 ## Futures backtesting
 
-The backtest resolves the exchange's canonical Futures symbol and loads its contract metadata before calculating results. Linear and inverse contracts use their own contract-size and P&L formulas, exchange amount precision, min/max quantity, and notional caps. Profit Factor is `null` when there are no losing trades so the response remains valid JSON. Funding, margin, and liquidation are not simulated.
+The backtest resolves the exchange's canonical Futures symbol and loads its contract metadata before calculating results. Linear and inverse contracts use their own contract-size and P&L formulas, exchange amount precision, min/max quantity, and notional caps. Stop-market exits account for adverse opening gaps; favorable target gaps fill at the opening price. A position still open at the end of the data is returned separately with mark-to-market unrealized P&L, while realized balance remains distinct. Drawdown uses adverse intrabar OHLC extremes. Profit Factor is `null` when there are no losing trades so the response remains valid JSON. Funding, margin, and liquidation are not simulated.
 
 ## Fine print
 
@@ -250,10 +250,12 @@ MIT. See [LICENSE](LICENSE).
 
 `render.yaml` describes the current PostgreSQL deployment branch `deploy/render-supabase-postgres`. It requires `DATABASE_URL`, `DASHBOARD_USERNAME`, and `DASHBOARD_PASSWORD` to be supplied as private Render environment values. Do not use the former SQLite/persistent-disk Blueprint for the current service.
 
-- The Blueprint uses the Render Free web-service plan in Frankfurt and connects to Supabase PostgreSQL. Free instances may sleep while idle; verify current provider limits.
+- The web service uses the Render Free plan in Frankfurt and connects to Supabase PostgreSQL. Free web services spin down after 15 minutes without inbound HTTP/WebSocket traffic; they are not suitable as the only host for continuous stop/target monitoring.
+- The Blueprint defines a separate Frankfurt Background Worker (`ai-crypto-trader-position-monitor`) running `python -m backend.monitor_worker`. It must use the exact same PostgreSQL `DATABASE_URL` as the web service. A PostgreSQL session advisory lock ensures only one monitor loop leads at a time.
+- The Background Worker requires an always-on paid compute plan (configured as `0.5c-512mb`). Adding its definition does not create or bill the service; a separate Blueprint sync/approval is required. Review the displayed plan and cost before approving.
 - Set a unique `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` in Render. Both values are required; the dashboard and API are protected by HTTP Basic Authentication.
 - HTTP Basic Authentication protects the dashboard and every API route except `/api/health`, which is public for health checks. API docs are disabled.
-- Scanning is manual: use the dashboard Scan button. The server-side paper-position monitor runs separately to evaluate existing paper stops and targets.
+- Scanning is manual: use the dashboard Scan button. The web process can monitor while awake, while the dedicated Background Worker keeps monitoring when the Free web service sleeps. Until that worker is provisioned and verified against the shared PostgreSQL database, continuous monitoring is not guaranteed.
 - The app remains paper-only and uses public market data; it does not need exchange API keys or submit live orders.
 
 After deployment, check `/api/health` and sign in with the username and password you configured in Render. Store those credentials in a password manager; never place them in source control.

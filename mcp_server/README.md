@@ -81,7 +81,10 @@ private; do not publish it to a public directory.
 - "Check the AI Crypto Trader backend status."
 - "Get the public BTC/USDT ticker from OKX Spot."
 - "Scan BTC/USDT and ETH/USDT on OKX Spot using 1h candles."
-- "Show my paper account and risk limits."
+- "Show my paper account, risk limits, and open positions."
+- "Show the latest trading opportunities."
+- "Get Binance BTC/USDT Spot instrument precision and order limits."
+- "Backtest BTC/USDT Futures on OKX using 4h candles."
 - "Open a paper LONG on BTC/USDT with entry 60000 and stop 59000."
 - "Close paper trade 1 at exit price 61000."
 
@@ -91,6 +94,6 @@ stop and optional target before asking ChatGPT to call the write tool.
 ## Important version note
 
 This MCP bridge is an integration layer, not a new trading engine. It calls
-the existing V2.1 FastAPI endpoints and uses the same configured backend database. It does
-not change the V2.1 release status or resolve outstanding exchange-geography,
-security-review, or local-runtime verification work.
+the V2.1 FastAPI endpoints for market data, instrument metadata, scanning,
+backtesting, opportunities, open positions, risk and the paper journal. It uses
+the same configured backend database and does not place exchange orders.
