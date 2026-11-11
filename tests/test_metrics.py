@@ -6,7 +6,7 @@ from backend.database import init_db
 from backend.exchanges import registry
 from backend.main import app
 from backend.metrics import position_pnl, position_risk, trading_cost_rate
-from backend.paper import open_trade
+from backend.paper import open_trade, close_trade, journal
 
 
 def test_position_pnl_includes_both_sides_costs():
@@ -54,3 +54,15 @@ def test_account_positions_and_risk_api_share_same_net_metrics(tmp_path, monkeyp
     assert risk_data["daily_pnl"] == pytest.approx(
         risk_data["unrealized_pnl"] + risk_data["realized_pnl"]
     )
+
+
+def test_close_trade_uses_same_net_pnl_as_live_mark(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{tmp_path / 'close-metrics.db'}")
+    init_db()
+    opened = open_trade("binance", "ETH/USDT", "spot", "LONG", 100, 95)
+    expected = position_pnl(100, opened["quantity"], "LONG", 103)
+    closed = close_trade(opened["id"], 103)
+    trade = next(t for t in journal()["trades"] if t["id"] == opened["id"])
+    assert closed["pnl"] == pytest.approx(expected["unrealized_pnl"])
+    assert trade["pnl"] == pytest.approx(expected["unrealized_pnl"])
+    assert trade["r_multiple"] == pytest.approx(closed["r_multiple"])
