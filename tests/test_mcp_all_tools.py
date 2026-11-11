@@ -53,7 +53,7 @@ def test_all_mcp_tools_route_to_paper_backend_endpoints(monkeypatch):
         ("GET", "/api/account", None, None),
         ("GET", "/api/risk", None, None),
         ("GET", "/api/journal", None, None),
-        ("POST", "/api/paper/open", {
+        ("POST", "/api/paper/open", None, {
             "exchange": "binance", "symbol": "BTC/USDT",
             "market_type": "spot", "side": "LONG",
             "entry": 100.0, "stop": 95.0, "target": 110.0,

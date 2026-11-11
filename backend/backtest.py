@@ -134,6 +134,19 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
             risk_budget / per_contract_risk,
             notional_cap / per_contract_notional,
         )
+        # Cap to the venue's maximum amount before precision rounding, matching
+        # the live RiskManager and avoiding a valid capped order being skipped.
+        max_amount = spec.get("max_amount")
+        if max_amount is not None:
+            max_amount = float(max_amount)
+            if not math.isfinite(max_amount) or max_amount < 0:
+                skipped_signals.append({
+                    "index": i, "reason": "Invalid exchange maximum amount"
+                })
+                i += 1
+                continue
+            if max_amount > 0:
+                quantity = min(quantity, max_amount)
         try:
             quantity = normalize_amount(
                 quantity,
