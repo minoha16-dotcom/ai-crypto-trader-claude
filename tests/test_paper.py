@@ -45,7 +45,7 @@ def test_daily_realized_loss_blocks_new_trade(isolated_db, monkeypatch):
 
 
 def test_futures_short_is_allowed_in_paper_mode(isolated_db):
-    opened = open_trade("bybit", "BTC/USDT:USDT", "futures", "SHORT", 100, 105)
+    opened = open_trade("bybit", "BTC/USDT:USDT", "futures", "SHORT", 100, 105, instrument={"contract_size": 0.001, "contract_type": "linear", "amount_precision": 3, "precision_mode": 2, "min_amount": 0.001})
     assert opened["status"] == "OPEN"
 
 
@@ -73,7 +73,7 @@ def test_duplicate_open_symbol_is_rejected(isolated_db):
 def test_default_target_is_two_to_one(isolated_db):
     opened = open_trade("binance", "ETH/USDT", "spot", "LONG", 100, 95)
     assert opened["target"] == pytest.approx(110)
-    short = open_trade("bybit", "ETH/USDT:USDT", "futures", "SHORT", 100, 105)
+    short = open_trade("bybit", "ETH/USDT:USDT", "futures", "SHORT", 100, 105, instrument={"contract_size": 0.001, "contract_type": "linear", "amount_precision": 3, "precision_mode": 2, "min_amount": 0.001})
     assert short["target"] == pytest.approx(90)
 
 
