@@ -18,6 +18,7 @@ from .paper import open_trade, close_trade, journal, account
 from .risk import risk_manager
 from .backtest import run_backtest
 from .position_monitor import run_position_monitor
+from .metrics import position_pnl, position_risk
 
 
 @asynccontextmanager
@@ -207,7 +208,7 @@ async def get_account():
         "equity": float(data["starting_balance"]) + float(data["realized_pnl"]) + unrealized,
         "unpriced_open_positions": len(positions_data["positions"]) - len(priced),
         "equity_is_partial": missing,
-        "unrealized_pnl_note": "Includes live-marked open positions; excludes positions whose exchange price is unavailable." if missing else "Includes live-marked open positions; estimate before fees and slippage.",
+        "unrealized_pnl_note": "Net estimate includes configured entry/exit fees and slippage; positions without live prices are excluded." if missing else "Net unrealized estimate includes configured fees and slippage; not an exchange account balance.",
     })
     return data
 
@@ -278,8 +279,8 @@ async def get_positions():
             if last is None or not math.isfinite(float(last)) or float(last) <= 0:
                 raise ValueError("Exchange did not return a valid last price")
             last = float(last)
-            direction = 1 if row["side"] == "LONG" else -1
-            unrealized = (last - float(row["entry"])) * float(row["quantity"]) * direction
+            pnl_metrics = position_pnl(row["entry"], row["quantity"], row["side"], last)
+            unrealized = pnl_metrics["unrealized_pnl"]
             notional = float(row["entry"]) * float(row["quantity"])
             stop_gap = abs(last - float(row["stop"]))
             stop_span = abs(float(row["entry"]) - float(row["stop"]))
@@ -309,8 +310,7 @@ async def get_positions():
                 "exit_reason": exit_reason,
                 "exit_result": None,
                 "live_price": last,
-                "unrealized_pnl": unrealized,
-                "unrealized_pnl_pct": (unrealized / notional * 100) if notional else 0,
+                **pnl_metrics,
                 "stop_distance": stop_gap,
                 "stop_distance_pct": stop_gap / last * 100,
                 "target_distance": target_gap,
@@ -355,10 +355,7 @@ async def risk():
         ).fetchone()["total"] or 0)
     daily_start = float(snapshot["starting_equity"]) if snapshot else settings.paper_starting_balance + realized_all - today_realized
     daily_pnl = today_realized + floating
-    cost_rate = float(settings.taker_fee_rate) + float(settings.slippage_bps) / 10000
-    open_risk = sum((abs(float(p["entry"])-float(p["stop"]))
-                     + (float(p["entry"])+float(p["stop"]))*cost_rate)*float(p["quantity"])
-                    for p in positions)
+    open_risk = sum(position_risk(p["entry"], p["stop"], p["quantity"]) for p in positions)
     equity = settings.paper_starting_balance + realized_all
     remaining_daily_loss = max(0.0, daily_start * risk_manager.max_daily_loss_pct / 100 + daily_pnl)
     available_open_risk = max(0.0, equity * risk_manager.max_open_risk_pct / 100 - open_risk)
@@ -370,6 +367,9 @@ async def risk():
         "max_open_trades": 3,
         "open_trades": len(positions),
         "open_risk": open_risk,
+        "realized_pnl": realized_all,
+        "unrealized_pnl": floating,
+        "equity": equity,
         "available_open_risk": available_open_risk,
         "daily_pnl": daily_pnl,
         "remaining_daily_loss": remaining_daily_loss,
