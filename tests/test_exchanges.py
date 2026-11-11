@@ -34,3 +34,32 @@ def test_registry_creates_distinct_clients_per_market():
         await registry.close()
         assert registry._clients == {}
     asyncio.run(run())
+
+
+def test_market_spec_loads_and_normalizes_contract_metadata(monkeypatch):
+    class FakeClient:
+        precisionMode = 2
+        async def load_markets(self):
+            return {}
+        def market(self, symbol):
+            assert symbol == "BTC/USDT:USDT"
+            return {
+                "symbol": symbol, "contract": True, "swap": True,
+                "linear": True, "inverse": False, "contractSize": 0.001,
+                "precision": {"amount": 3},
+                "limits": {"amount": {"min": 0.001, "max": 100000}},
+                "base": "BTC", "quote": "USDT", "settle": "USDT",
+            }
+
+    async def run():
+        registry = ExchangeRegistry()
+        fake = FakeClient()
+        async def fake_get(exchange_id, market_type):
+            return fake
+        monkeypatch.setattr(registry, "get", fake_get)
+        spec = await registry.market_spec("bybit", "BTC/USDT:USDT", "futures")
+        assert spec["contract_type"] == "linear"
+        assert spec["contract_size"] == pytest.approx(0.001)
+        assert spec["precision_mode"] == 2
+        assert spec["min_amount"] == pytest.approx(0.001)
+    asyncio.run(run())
