@@ -5,6 +5,12 @@ No API keys, private account endpoints, or orders are used.
 """
 import asyncio
 import math
+import sys
+from pathlib import Path
+
+# Running "python scripts/check_exchanges.py" puts scripts/, not always the
+# repository root, at sys.path[0] (notably on GitHub-hosted runners).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.exchanges import ExchangeRegistry
 

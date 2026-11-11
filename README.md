@@ -169,6 +169,7 @@ curl -X POST "http://127.0.0.1:8000/api/scan?exchange=binance&market_type=spot&s
 - **CCXT** connects to public market-data endpoints for Binance, Bybit, and OKX.
 - The Spot and Futures CCXT clients for each exchange share one weighted rate limiter, so their public REST request budgets are coordinated per venue.
 - Identical concurrent ticker requests are coalesced into one network request; successful ticker results are cached for 2 seconds per exchange, market type, and symbol.
+- HTTP 418/429 responses activate an exchange-wide cooldown shared by Spot and Futures. The registry honors `Retry-After` headers or exchange ban timestamps, logs the header/cooldown, and blocks queued and new requests until the cooldown expires without automatic retries.
 - **FastAPI** serves the backend and REST API.
 - **Python standard library** calculations and CCXT candle data support the indicators and portfolio simulation.
 - **EMA 20/50, RSI 14, ATR 14** provide basic trend, momentum, and volatility context.

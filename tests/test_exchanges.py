@@ -303,3 +303,134 @@ def test_ticker_cache_expires_and_fetches_fresh_price(monkeypatch):
 def test_registry_rejects_invalid_ticker_cache_ttl():
     with pytest.raises(ValueError, match="ticker_cache_ttl"):
         ExchangeRegistry(ticker_cache_ttl=-1)
+
+
+
+def test_rate_limit_429_sets_shared_cooldown_and_logs_retry_after(monkeypatch, caplog):
+    import logging
+    from backend.exchanges import ExchangeRateLimitCooldown
+
+    class FakeRateLimitError(Exception):
+        status_code = 429
+
+    class FakeClient:
+        last_response_headers = {"Retry-After": "30"}
+        last_http_response = '{"msg":"Too many requests"}'
+        def __init__(self):
+            self.fetch_count = 0
+        async def fetch_ticker(self, symbol):
+            self.fetch_count += 1
+            raise FakeRateLimitError("HTTP 429 Too Many Requests")
+
+    async def run():
+        registry = ExchangeRegistry()
+        fake = FakeClient()
+
+        async def fake_load_markets(exchange_id, market_type):
+            return fake
+
+        async def fake_resolve_symbol(exchange_id, symbol, market_type):
+            return "BTC/USDT" if market_type == "spot" else "BTC/USDT:USDT"
+
+        monkeypatch.setattr(registry, "_load_markets", fake_load_markets)
+        monkeypatch.setattr(registry, "resolve_symbol", fake_resolve_symbol)
+
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(ExchangeRateLimitCooldown) as first:
+                await registry.ticker("binance", "BTC/USDT", "spot")
+            assert first.value.status_code == 429
+            assert first.value.retry_after >= 30
+
+            # Cooldown applies to the other market-type client as well.
+            with pytest.raises(ExchangeRateLimitCooldown) as second:
+                await registry.ticker("binance", "BTC/USDT", "futures")
+            assert second.value.status_code == 429
+            assert fake.fetch_count == 1
+            assert "Retry-After=30" in caplog.text
+            assert "cooldown_seconds=30" in caplog.text
+        await registry.close()
+
+    asyncio.run(run())
+
+
+def test_rate_limit_418_uses_exchange_ban_timestamp_when_available(monkeypatch):
+    import time
+    from backend.exchanges import ExchangeRateLimitCooldown
+
+    class FakeDDoSError(Exception):
+        status_code = 418
+
+    class FakeClient:
+        last_response_headers = {}
+        def __init__(self):
+            self.fetch_count = 0
+            self.last_http_response = ""
+        async def fetch_ticker(self, symbol):
+            self.fetch_count += 1
+            self.last_http_response = (
+                '{"msg":"Way too much request weight used; '
+                f'IP banned until {int((time.time() + 600) * 1000)}."}}'
+            )
+            raise FakeDDoSError("HTTP 418 I'm a teapot")
+
+    async def run():
+        registry = ExchangeRegistry()
+        fake = FakeClient()
+
+        async def fake_load_markets(exchange_id, market_type):
+            return fake
+
+        async def fake_resolve_symbol(exchange_id, symbol, market_type):
+            return symbol
+
+        monkeypatch.setattr(registry, "_load_markets", fake_load_markets)
+        monkeypatch.setattr(registry, "resolve_symbol", fake_resolve_symbol)
+
+        with pytest.raises(ExchangeRateLimitCooldown) as error:
+            await registry.ticker("binance", "BTC/USDT", "spot")
+        assert error.value.status_code == 418
+        assert error.value.retry_after >= 590
+        assert fake.fetch_count == 1
+        await registry.close()
+
+    asyncio.run(run())
+
+
+def test_guarded_shared_throttler_checks_cooldown_after_queue_wait(monkeypatch):
+    import time
+    from backend.exchanges import ExchangeRateLimitCooldown
+
+    class BlockingThrottler:
+        def __init__(self):
+            self.release = asyncio.Event()
+        async def __call__(self, cost=None):
+            await self.release.wait()
+
+    class FakeClient:
+        def __init__(self, config):
+            self.options = config["options"]
+            self.throttler = BlockingThrottler()
+        async def close(self):
+            pass
+
+    monkeypatch.setattr("backend.exchanges.ccxt.binance", FakeClient)
+
+    async def run():
+        registry = ExchangeRegistry()
+        spot = await registry.get("binance", "spot")
+        futures = await registry.get("binance", "futures")
+        assert spot.throttler is futures.throttler
+
+        queued = asyncio.create_task(spot.throttler(1))
+        await asyncio.sleep(0)
+        registry._rate_limit_until["binance"] = time.monotonic() + 30
+        registry._rate_limit_status["binance"] = 418
+        spot.throttler.release.set()
+
+        with pytest.raises(ExchangeRateLimitCooldown) as error:
+            await queued
+        assert error.value.status_code == 418
+        assert error.value.retry_after >= 29
+        await registry.close()
+
+    asyncio.run(run())
