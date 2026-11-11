@@ -129,3 +129,59 @@ def test_futures_symbol_alias_rejects_ambiguous_settlement():
         assert await registry.resolve_symbol("okx", "BTC/USD:USDT", "futures") == "BTC/USD:USDT"
         await registry.close()
     asyncio.run(run())
+
+
+
+def test_futures_symbol_does_not_match_same_pair_spot_market():
+    async def run():
+        registry = ExchangeRegistry()
+
+        class FakeClient:
+            markets = {
+                "BTC/USDT": {
+                    "symbol": "BTC/USDT", "type": "spot", "spot": True,
+                    "contract": False, "base": "BTC", "quote": "USDT",
+                    "active": True,
+                },
+                "BTC/USDT:USDT": {
+                    "symbol": "BTC/USDT:USDT", "type": "swap", "spot": False,
+                    "contract": True, "swap": True, "future": False,
+                    "linear": True, "inverse": False, "contractSize": 0.001,
+                    "precision": {"amount": 3},
+                    "limits": {"amount": {"min": 0.001}},
+                    "base": "BTC", "quote": "USDT", "settle": "USDT",
+                    "active": True,
+                },
+            }
+
+            async def load_markets(self):
+                return self.markets
+
+            def market(self, symbol):
+                return self.markets[symbol]
+
+            async def close(self):
+                pass
+
+        fake = FakeClient()
+
+        async def fake_get(exchange_id, market_type):
+            return fake
+
+        registry.get = fake_get
+
+        # The exact BTC/USDT key is Spot, but Futures resolution must continue
+        # and select the canonical linear contract symbol instead.
+        assert await registry.resolve_symbol(
+            "binance", "BTC/USDT", "spot"
+        ) == "BTC/USDT"
+        assert await registry.resolve_symbol(
+            "binance", "BTC/USDT", "futures"
+        ) == "BTC/USDT:USDT"
+
+        spec = await registry.market_spec("binance", "BTC/USDT", "futures")
+        assert spec["symbol"] == "BTC/USDT:USDT"
+        assert spec["contract_type"] == "linear"
+        await registry.close()
+
+    asyncio.run(run())
