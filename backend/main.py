@@ -172,8 +172,8 @@ async def backtest(exchange="binance", symbol="BTC/USDT", market_type="spot", ti
         raise HTTPException(400, "Unsupported exchange")
     if market_type not in ("spot", "futures"):
         raise HTTPException(400, "market_type must be spot or futures")
-    if limit < 52 or limit > 5000:
-        raise HTTPException(400, "limit must be between 52 and 5000")
+    if limit < 53 or limit > 5000:
+        raise HTTPException(400, "limit must be between 53 and 5000 so 52 closed candles remain after excluding the forming candle")
     try:
         resolved_symbol = await registry.resolve_symbol(exchange, symbol, market_type)
         instrument = (

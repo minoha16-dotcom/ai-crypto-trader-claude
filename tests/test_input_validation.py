@@ -1,4 +1,7 @@
+import asyncio
+
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -148,3 +151,8 @@ def test_paper_open_endpoint_resolves_and_persists_canonical_futures_symbol(monk
     assert response.status_code == 200
     assert seen["ticker_symbol"] == "BTC/USDT:USDT"
     assert seen["trade_symbol"] == "BTC/USDT:USDT"
+
+
+def test_backtest_endpoint_requires_53_candles_to_keep_52_closed(monkeypatch):
+    with pytest.raises(HTTPException, match="between 53 and 5000"):
+        asyncio.run(main.backtest(limit=52))
