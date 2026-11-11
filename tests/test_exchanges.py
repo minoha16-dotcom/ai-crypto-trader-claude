@@ -52,6 +52,8 @@ def test_market_spec_loads_and_normalizes_contract_metadata(monkeypatch):
         }
         def market(self, symbol):
             return self.markets[symbol]
+        async def close(self):
+            pass
 
     async def run():
         registry = ExchangeRegistry()
@@ -86,6 +88,8 @@ def test_futures_symbol_alias_prefers_quote_settled_linear_perpetual():
             }
             async def load_markets(self):
                 return self.markets
+            async def close(self):
+                pass
         fake = FakeClient()
         async def fake_get(exchange_id, market_type):
             return fake
