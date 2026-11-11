@@ -39,6 +39,8 @@ class ExchangeRegistry:
             raise ValueError("ticker_cache_ttl must be a finite non-negative number")
         self._clients = {}
         self._markets_loaded = set()
+        self._markets_inflight = {}
+        self._markets_lock = asyncio.Lock()
         # CCXT creates one throttler per client. Spot and Futures clients for the
         # same venue must share one throttler because exchanges commonly account
         # public REST request weight at the IP/platform level.
@@ -216,12 +218,31 @@ class ExchangeRegistry:
                 ) from error
             raise
 
+    async def _load_markets_once(self, key, exchange_id, client):
+        current_task = asyncio.current_task()
+        try:
+            await self._request(exchange_id, client, client.load_markets)
+            self._markets_loaded.add(key)
+            return client
+        finally:
+            async with self._markets_lock:
+                if self._markets_inflight.get(key) is current_task:
+                    self._markets_inflight.pop(key, None)
+
     async def _load_markets(self, exchange_id, market_type):
         client = await self.get(exchange_id, market_type)
         key = (exchange_id, market_type)
-        if key not in self._markets_loaded:
-            await self._request(exchange_id, client, client.load_markets)
-            self._markets_loaded.add(key)
+        async with self._markets_lock:
+            if key in self._markets_loaded:
+                return client
+            task = self._markets_inflight.get(key)
+            if task is None:
+                task = asyncio.create_task(
+                    self._load_markets_once(key, exchange_id, client)
+                )
+                self._markets_inflight[key] = task
+        # One caller's cancellation must not cancel the shared market download.
+        await asyncio.shield(task)
         return client
 
     @staticmethod
@@ -382,12 +403,13 @@ class ExchangeRegistry:
         )
 
     async def close(self):
-        pending = list(self._ticker_inflight.values())
+        pending = list(self._ticker_inflight.values()) + list(self._markets_inflight.values())
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
         await asyncio.gather(*(client.close() for client in self._clients.values()), return_exceptions=True)
         self._clients.clear()
         self._markets_loaded.clear()
+        self._markets_inflight.clear()
         self._shared_throttlers.clear()
         self._ticker_cache.clear()
         self._ticker_inflight.clear()
