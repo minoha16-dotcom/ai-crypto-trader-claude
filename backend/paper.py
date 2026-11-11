@@ -1,6 +1,7 @@
 from .database import connect
 from .config import settings
 from .risk import risk_manager
+from .metrics import position_risk, position_pnl
 
 MAX_OPEN_TRADES = 3
 REWARD_RISK_RATIO = 2.0
@@ -59,12 +60,7 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None,
             "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE status='CLOSED'"
         ).fetchone()["total"]
         equity = settings.paper_starting_balance + float(realized or 0)
-        cost_rate = float(settings.taker_fee_rate) + float(settings.slippage_bps) / 10000
-        open_risk = sum(
-            (abs(float(row["entry"]) - float(row["stop"]))
-             + (float(row["entry"]) + float(row["stop"])) * cost_rate) * float(row["quantity"])
-            for row in opened
-        )
+        open_risk = sum(position_risk(row["entry"], row["stop"], row["quantity"]) for row in opened)
         today_pnl = db.execute(
             "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades "
             "WHERE status='CLOSED' AND date(closed_at)=date('now')"
@@ -113,22 +109,17 @@ def close_trade(trade_id, exit_price):
         ).fetchone()
         if not row:
             raise ValueError("Open paper trade not found")
-        direction = 1 if row["side"] == "LONG" else -1
-        gross_pnl = (exit_price - row["entry"]) * row["quantity"] * direction
-        fee_rate = float(settings.taker_fee_rate)
-        slip_rate = float(settings.slippage_bps) / 10000
-        entry_cost = float(row["entry"]) * float(row["quantity"]) * (fee_rate + slip_rate)
-        exit_cost = float(exit_price) * float(row["quantity"]) * (fee_rate + slip_rate)
-        pnl = gross_pnl - entry_cost - exit_cost
+        marked = position_pnl(row["entry"], row["quantity"], row["side"], exit_price)
+        gross_pnl = marked["gross_pnl"]
+        pnl = marked["unrealized_pnl"]
+        costs = marked["estimated_costs"]
         db.execute(
             "UPDATE trades SET status='CLOSED',closed_at=CURRENT_TIMESTAMP,exit_price=?,pnl=? "
             "WHERE id=? AND status='OPEN'", (exit_price, pnl, trade_id)
         )
-    initial_risk = abs(float(row["entry"]) - float(row["stop"])) * float(row["quantity"])
-    initial_risk += float(row["entry"]) * float(row["quantity"]) * (float(settings.taker_fee_rate) + float(settings.slippage_bps) / 10000)
-    initial_risk += float(row["stop"]) * float(row["quantity"]) * (float(settings.taker_fee_rate) + float(settings.slippage_bps) / 10000)
+    initial_risk = position_risk(row["entry"], row["stop"], row["quantity"])
     return {"id": trade_id, "exit_price": exit_price, "gross_pnl": gross_pnl,
-            "costs": entry_cost + exit_cost, "pnl": pnl,
+            "costs": costs, "pnl": pnl,
             "r_multiple": pnl / initial_risk if initial_risk else 0.0, "status": "CLOSED"}
 
 
@@ -138,9 +129,7 @@ def journal():
         signals = [dict(row) for row in db.execute("SELECT * FROM signals ORDER BY id DESC LIMIT 300").fetchall()]
     for trade in trades:
         if trade.get("status") == "CLOSED":
-            initial_risk = abs(float(trade["entry"]) - float(trade["stop"])) * float(trade["quantity"])
-            cost_rate = float(settings.taker_fee_rate) + float(settings.slippage_bps) / 10000
-            initial_risk += (float(trade["entry"]) + float(trade["stop"])) * float(trade["quantity"]) * cost_rate
+            initial_risk = position_risk(trade["entry"], trade["stop"], trade["quantity"])
             trade["r_multiple"] = float(trade["pnl"] or 0) / initial_risk if initial_risk else 0.0
         else:
             trade["r_multiple"] = None
