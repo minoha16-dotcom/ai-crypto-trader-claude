@@ -33,21 +33,35 @@ class ExchangeRegistry:
             self._markets_loaded.add(key)
         return client
 
+    @staticmethod
+    def _matches_market_type(market, market_type):
+        """Do not mistake a same-pair Spot entry for a Futures contract."""
+        if market_type == "spot":
+            return bool(market.get("spot")) or market.get("type") == "spot"
+        return bool(market.get("contract")) and bool(
+            market.get("swap") or market.get("future")
+        )
+
     async def resolve_symbol(self, exchange_id, symbol, market_type="spot"):
         """Resolve common BASE/QUOTE input to one canonical CCXT market symbol."""
         client = await self._load_markets(exchange_id, market_type)
         requested = str(symbol).strip()
         if not requested:
             raise ValueError("A market symbol is required")
+        if market_type not in MARKET_TYPES:
+            raise ValueError("market_type must be spot or futures")
 
         markets = client.markets or {}
         exact = markets.get(requested)
-        if exact is not None:
+        if exact is not None and self._matches_market_type(exact, market_type):
             return exact.get("symbol", requested)
 
         if market_type == "spot":
-            # Let CCXT provide its normal, exchange-specific invalid-symbol error.
-            return client.market(requested)["symbol"]
+            # Let CCXT resolve aliases, but reject a result of the wrong market type.
+            market = client.market(requested)
+            if not self._matches_market_type(market, "spot"):
+                raise ValueError(f"Selected market '{requested}' is not a Spot market")
+            return market["symbol"]
 
         pair, separator, requested_settle = requested.partition(":")
         if "/" not in pair:
