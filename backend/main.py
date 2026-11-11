@@ -135,6 +135,18 @@ def exchanges():
     return {"exchanges": list(EXCHANGE_IDS), "connection": "public market data only"}
 
 
+@app.get("/api/instruments/{exchange}/{symbol:path}")
+async def instrument(exchange, symbol, market_type="spot"):
+    if exchange not in EXCHANGE_IDS:
+        raise HTTPException(400, "Unsupported exchange")
+    if market_type not in ("spot", "futures"):
+        raise HTTPException(400, "market_type must be spot or futures")
+    try:
+        return await registry.market_spec(exchange, symbol, market_type)
+    except Exception as exc:
+        raise HTTPException(400, f"Unable to resolve exchange instrument: {exc}")
+
+
 @app.get("/api/markets/{exchange}/{symbol:path}")
 async def market(exchange, symbol, market_type="spot"):
     if exchange not in EXCHANGE_IDS:
@@ -142,9 +154,10 @@ async def market(exchange, symbol, market_type="spot"):
     if market_type not in ("spot", "futures"):
         raise HTTPException(400, "market_type must be spot or futures")
     try:
-        ticker = await registry.ticker(exchange, symbol, market_type)
+        resolved_symbol = await registry.resolve_symbol(exchange, symbol, market_type)
+        ticker = await registry.ticker(exchange, resolved_symbol, market_type)
         return {
-            "exchange": exchange, "symbol": symbol, "market_type": market_type,
+            "exchange": exchange, "symbol": resolved_symbol, "market_type": market_type,
             "last": ticker.get("last"), "bid": ticker.get("bid"),
             "ask": ticker.get("ask"), "base_volume": ticker.get("baseVolume"),
             "timestamp": ticker.get("timestamp"),
@@ -162,9 +175,10 @@ async def backtest(exchange="binance", symbol="BTC/USDT", market_type="spot", ti
     if limit < 52 or limit > 5000:
         raise HTTPException(400, "limit must be between 52 and 5000")
     try:
-        candles = await registry.ohlcv(exchange, symbol, timeframe, limit, market_type)
+        resolved_symbol = await registry.resolve_symbol(exchange, symbol, market_type)
+        candles = await registry.ohlcv(exchange, resolved_symbol, timeframe, limit, market_type)
         # The final exchange candle may still be forming; never use it for signals.
-        return {"exchange": exchange, "symbol": symbol, "market_type": market_type,
+        return {"exchange": exchange, "symbol": resolved_symbol, "market_type": market_type,
                 "timeframe": timeframe, **run_backtest(candles[:-1])}
     except Exception as exc:
         raise HTTPException(400, str(exc))
@@ -279,7 +293,7 @@ async def get_positions():
             if last is None or not math.isfinite(float(last)) or float(last) <= 0:
                 raise ValueError("Exchange did not return a valid last price")
             last = float(last)
-            pnl_metrics = position_pnl(row["entry"], row["quantity"], row["side"], last)
+            pnl_metrics = position_pnl(row["entry"], row["quantity"], row["side"], last, row.get("contract_size", 1.0), row.get("contract_type", "spot"))
             unrealized = pnl_metrics["unrealized_pnl"]
             stop_gap = abs(last - float(row["stop"]))
             stop_span = abs(float(row["entry"]) - float(row["stop"]))
@@ -354,7 +368,7 @@ async def risk():
         ).fetchone()["total"] or 0)
     daily_start = float(snapshot["starting_equity"]) if snapshot else settings.paper_starting_balance + realized_all - today_realized
     daily_pnl = today_realized + floating
-    open_risk = sum(position_risk(p["entry"], p["stop"], p["quantity"]) for p in positions)
+    open_risk = sum(position_risk(p["entry"], p["stop"], p["quantity"], p.get("contract_size", 1.0), p.get("contract_type", "spot")) for p in positions)
     sizing_equity = settings.paper_starting_balance + realized_all
     equity = sizing_equity + floating
     remaining_daily_loss = max(0.0, daily_start * risk_manager.max_daily_loss_pct / 100 + daily_pnl)
@@ -385,7 +399,9 @@ async def paper_open(body: PaperOpen):
         # Resolve the symbol against the selected exchange/market before accepting
         # a manually entered paper position. This prevents arbitrary symbols and
         # spot/futures market mismatches from entering the journal.
-        ticker = await registry.ticker(body.exchange, body.symbol, body.market_type)
+        instrument = await registry.market_spec(body.exchange, body.symbol, body.market_type)
+        resolved_symbol = instrument.get("symbol", body.symbol)
+        ticker = await registry.ticker(body.exchange, resolved_symbol, body.market_type)
         last = ticker.get("last")
         if last is None or not math.isfinite(float(last)) or float(last) <= 0:
             raise ValueError("Exchange returned an invalid market price")
@@ -401,10 +417,13 @@ async def paper_open(body: PaperOpen):
         positions = marked["positions"]
         prices_complete = all(p.get("unrealized_pnl") is not None for p in positions)
         floating_pnl = sum(float(p["unrealized_pnl"]) for p in positions if p.get("unrealized_pnl") is not None)
+        trade_data = body.model_dump()
+        trade_data["symbol"] = resolved_symbol
         return open_trade(
-            **body.model_dump(),
+            **trade_data,
             unrealized_pnl=floating_pnl,
             prices_complete=prices_complete,
+            instrument=instrument,
         )
     except Exception as exc:
         raise HTTPException(400, f"Unable to validate/open paper trade: {exc}")

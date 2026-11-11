@@ -31,7 +31,7 @@ def test_server_monitor_closes_long_when_stop_is_crossed(isolated_db, monkeypatc
 
 
 def test_server_monitor_closes_short_when_target_is_crossed(isolated_db, monkeypatch):
-    opened = open_trade("bybit", "BTC/USDT:USDT", "futures", "SHORT", 100, 105, 90)
+    opened = open_trade("bybit", "BTC/USDT:USDT", "futures", "SHORT", 100, 105, 90, instrument={"contract_size": 0.001, "contract_type": "linear", "amount_precision": 3, "precision_mode": 2, "min_amount": 0.001})
 
     async def fake_ticker(exchange, symbol, market_type):
         return {"last": 89.5}
