@@ -3,7 +3,7 @@ import math
 
 from .config import settings
 from .contracts import contract_notional, contract_risk_amount, normalize_amount
-from .metrics import trading_cost_rate, validate_trading_configuration
+from .metrics import validate_trading_configuration
 
 
 @dataclass
