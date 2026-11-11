@@ -244,3 +244,28 @@ def test_monitor_worker_refuses_non_shared_sqlite_database(monkeypatch):
     monkeypatch.setattr(settings, "database_url", "sqlite:///./local.db")
     with pytest.raises(RuntimeError, match="shared PostgreSQL"):
         asyncio.run(monitor_worker.serve())
+
+
+
+@pytest.mark.parametrize("upstream_status", [418, 429])
+def test_rate_limit_api_preserves_upstream_http_status(monkeypatch, upstream_status):
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+
+    async def fake_resolve_symbol(exchange, symbol, market_type):
+        return symbol
+
+    async def fake_ticker(exchange, symbol, market_type):
+        raise ExchangeRateLimitCooldown(exchange, upstream_status, 11)
+
+    monkeypatch.setattr(main.registry, "resolve_symbol", fake_resolve_symbol)
+    monkeypatch.setattr(main.registry, "ticker", fake_ticker)
+
+    with TestClient(main.app) as client:
+        response = client.get("/api/markets/bybit/BTC/USDT?market_type=spot")
+
+    assert response.status_code == upstream_status
+    assert response.headers["Retry-After"] == "11"
+    assert response.headers["X-Exchange-RateLimit-Status"] == str(upstream_status)
+    assert response.json()["upstream_status"] == upstream_status

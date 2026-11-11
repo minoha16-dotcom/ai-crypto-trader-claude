@@ -50,7 +50,7 @@ async def _api(method: str, path: str, *, params: dict | None = None, payload: d
             body = {}
             detail = "Backend request failed"
         retry_after = exc.response.headers.get("Retry-After")
-        if exc.response.status_code == 429 and retry_after:
+        if exc.response.status_code in (418, 429) and retry_after:
             detail = f"{detail} (Retry-After: {retry_after}s)"
         raise ValueError(f"Trader backend rejected the request: {detail}") from None
     except httpx.RequestError:

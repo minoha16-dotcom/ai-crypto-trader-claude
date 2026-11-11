@@ -55,7 +55,7 @@ app = FastAPI(
 async def exchange_rate_limit_handler(request: Request, exc: ExchangeRateLimitCooldown):
     retry_after = str(max(1, int(exc.retry_after)))
     return JSONResponse(
-        status_code=429,
+        status_code=exc.status_code,
         content={
             "detail": str(exc),
             "exchange": exc.exchange_id,
