@@ -104,9 +104,10 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None,
         "target": target, "reward_risk_ratio": REWARD_RISK_RATIO,
         "risk_pct_actual": decision.risk_amount / equity * 100,
         "sizing_reason": decision.sizing_reason,
-        "fees_estimated": position_risk(entry, stop, decision.quantity,
-                                         spec["contract_size"], spec["contract_type"])
-                          - abs(float(entry) - float(stop)) * decision.quantity * float(spec["contract_size"]),
+        "fees_estimated": position_pnl(
+            entry, decision.quantity, side, stop,
+            spec["contract_size"], spec["contract_type"],
+        )["estimated_costs"],
         "status": "OPEN",
     }
 
