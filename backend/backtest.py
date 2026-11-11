@@ -157,13 +157,13 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
             })
             i += 1
             continue
-        if spec.get("min_cost") is not None and notional < float(spec["min_cost"]):
+        if spec.get("min_cost") is not None and float(spec["min_cost"]) > 0 and notional < float(spec["min_cost"]):
             skipped_signals.append({
                 "index": i, "reason": "Order notional is below exchange minimum"
             })
             i += 1
             continue
-        if spec.get("max_cost") is not None and notional > float(spec["max_cost"]):
+        if spec.get("max_cost") is not None and float(spec["max_cost"]) > 0 and notional > float(spec["max_cost"]):
             skipped_signals.append({
                 "index": i, "reason": "Order notional exceeds exchange maximum"
             })

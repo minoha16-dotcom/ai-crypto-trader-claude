@@ -44,12 +44,18 @@ def normalize_amount(amount, precision, precision_mode, min_amount=None, max_amo
     if result <= 0:
         raise ValueError("Calculated order amount is below exchange precision")
     if min_amount is not None:
-        minimum = _positive(min_amount, "minimum amount")
-        if result < minimum:
+        minimum = float(min_amount)
+        if not math.isfinite(minimum) or minimum < 0:
+            raise ValueError("Invalid exchange minimum amount")
+        # CCXT often uses zero to mean that no minimum is published.
+        if minimum > 0 and result < minimum:
             raise ValueError(f"Amount {result} is below exchange minimum {min_amount}")
     if max_amount is not None:
-        maximum = _positive(max_amount, "maximum amount")
-        if result > maximum:
+        maximum = float(max_amount)
+        if not math.isfinite(maximum) or maximum < 0:
+            raise ValueError("Invalid exchange maximum amount")
+        # A zero max is an unset limit, not a zero-sized market.
+        if maximum > 0 and result > maximum:
             raise ValueError(f"Amount {result} exceeds exchange maximum {max_amount}")
     return result
 

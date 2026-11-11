@@ -85,7 +85,11 @@ class RiskManager:
             "position_notional_cap"
             if quantity < raw_quantity else "risk_target"
         )
-        if spec.get("max_amount") is not None and quantity > float(spec["max_amount"]):
+        if (
+            spec.get("max_amount") is not None
+            and float(spec["max_amount"]) > 0
+            and quantity > float(spec["max_amount"])
+        ):
             quantity = float(spec["max_amount"])
             sizing_reason = "exchange_max_amount"
 
@@ -101,12 +105,12 @@ class RiskManager:
             return RiskDecision(False, 0, 0, 0, str(exc))
 
         notional = contract_notional(entry, quantity, contract_size, contract_type)
-        if spec.get("min_cost") is not None and notional < float(spec["min_cost"]):
+        if spec.get("min_cost") is not None and float(spec["min_cost"]) > 0 and notional < float(spec["min_cost"]):
             return RiskDecision(
                 False, 0, 0, 0,
                 f"Order notional {notional:.8g} is below exchange minimum {spec['min_cost']}",
             )
-        if spec.get("max_cost") is not None and notional > float(spec["max_cost"]):
+        if spec.get("max_cost") is not None and float(spec["max_cost"]) > 0 and notional > float(spec["max_cost"]):
             return RiskDecision(
                 False, 0, 0, 0,
                 f"Order notional {notional:.8g} exceeds exchange maximum {spec['max_cost']}",
