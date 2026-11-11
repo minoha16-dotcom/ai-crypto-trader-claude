@@ -142,7 +142,9 @@ uvicorn backend.main:app --reload
 Open:
 
 - Dashboard: http://127.0.0.1:8000
-- API documentation: http://127.0.0.1:8000/docs
+- Health check: http://127.0.0.1:8000/api/health
+
+Interactive OpenAPI documentation is disabled by default in this paper-trading deployment.
 
 ## How to use it
 
@@ -166,13 +168,13 @@ curl -X POST "http://127.0.0.1:8000/api/scan?exchange=binance&market_type=spot&s
 
 - **CCXT** connects to public market-data endpoints for Binance, Bybit, and OKX.
 - **FastAPI** serves the backend and REST API.
-- **Pandas / NumPy** support data handling and indicator calculations.
+- **Python standard library** calculations and CCXT candle data support the indicators and portfolio simulation.
 - **EMA 20/50, RSI 14, ATR 14** provide basic trend, momentum, and volatility context.
 
 ### Risk and persistence
 
 - Central risk checks include per-trade risk, aggregate open risk, daily realized-loss limits, and a maximum position-notional cap.
-- **SQLite** stores paper trades and research signals locally.
+- **SQLite** is used for local development; the current Render deployment uses Supabase PostgreSQL for persistent paper trades and signals.
 - The browser dashboard displays scans, simulated positions, account summary, performance, and journal history.
 
 ### Useful API routes
@@ -188,15 +190,19 @@ curl -X POST "http://127.0.0.1:8000/api/scan?exchange=binance&market_type=spot&s
 - `POST /api/paper/open`
 - `POST /api/paper/{trade_id}/close`
 
+## Futures backtesting
+
+The backtest resolves the exchange's canonical Futures symbol and loads its contract metadata before calculating results. Linear and inverse contracts use their own contract-size and P&L formulas, exchange amount precision, min/max quantity, and notional caps. Profit Factor is `null` when there are no losing trades so the response remains valid JSON. Funding, margin, and liquidation are not simulated.
+
 ## Fine print
 
 - **Paper trading only:** the project does not place real orders or connect to private account endpoints.
 - **No credentials required:** market adapters use public data. Do not add exchange secrets to the repository.
 - **Futures limitations:** Futures mode selects swap markets through CCXT; symbols, contract availability, and venue behavior vary.
-- **Simulation limitations:** paper exits are entered manually. The starter does not fully simulate order-book slippage, funding payments, liquidation, or automatic stop-loss/take-profit execution.
+- **Simulation limitations:** the server-side monitor checks public ticker prices on a polling interval and closes simulated positions when a stop or target is crossed. Dashboard closes are manual. Backtests support Spot and exchange-aware linear/inverse contract quantities, but do not model funding, margin, liquidation, order-book depth, or real fills.
 - **Signals are heuristic:** indicator-based scans are not validated predictive models and can be wrong.
 - **Risk controls are not a guarantee:** configured limits do not eliminate market, software, or execution risk.
-- **Local storage:** SQLite is intended for local use. Set up backups and persistent storage before any deployment.
+- **Storage:** local development uses SQLite; Render uses PostgreSQL. Back up the PostgreSQL database and test restore procedures before relying on the journal.
 - **Testing:** run `pytest -q` in the repository. GitHub Actions is configured to run the test suite on pushes and pull requests; check the Actions tab for the actual result.
 - **Not financial advice:** make independent decisions and comply with applicable laws and exchange terms.
 
@@ -207,13 +213,15 @@ curl -X POST "http://127.0.0.1:8000/api/scan?exchange=binance&market_type=spot&s
 ├── .claude-plugin/
 │   └── marketplace.json
 ├── .github/workflows/
-│   └── tests.yml
+│   ├── tests.yml
+│   └── exchange-smoke.yml
 ├── plugins/ai-crypto-trader/
 │   ├── .claude-plugin/plugin.json
 │   ├── commands/
 │   └── skills/
 ├── backend/
 ├── tests/
+│   └── test_postgres_integration.py
 ├── .env.example
 ├── requirements.txt
 ├── README.md
@@ -227,12 +235,12 @@ MIT. See [LICENSE](LICENSE).
 
 ## Render deployment (persistent paper dashboard)
 
-A Render Blueprint is provided in `render.yaml`. In Render choose **New → Blueprint**, connect this repository, and select the `deploy/render-paper-dashboard` branch.
+`render.yaml` describes the current PostgreSQL deployment branch `deploy/render-supabase-postgres`. It requires `DATABASE_URL`, `DASHBOARD_USERNAME`, and `DASHBOARD_PASSWORD` to be supplied as private Render environment values. Do not use the former SQLite/persistent-disk Blueprint for the current service.
 
-- The service uses the paid `0.5c-512mb` compute plan and a persistent 1 GB disk mounted at `/var/data`; SQLite is stored at `/var/data/trader.db`.
-- Render generates `DASHBOARD_PASSWORD`. The initial dashboard username is `admin`; retrieve the generated password from the Render service Environment page and keep it private.
+- The Blueprint uses the Render Free web-service plan in Frankfurt and connects to Supabase PostgreSQL. Free instances may sleep while idle; verify current provider limits.
+- Set a unique `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` in Render. Both values are required; the dashboard and API are protected by HTTP Basic Authentication.
 - HTTP Basic Authentication protects the dashboard and every API route except `/api/health`, which is public for health checks. API docs are disabled.
-- Scanning is manual: use the dashboard Scan button. No scheduler or unattended trading process is enabled.
+- Scanning is manual: use the dashboard Scan button. The server-side paper-position monitor runs separately to evaluate existing paper stops and targets.
 - The app remains paper-only and uses public market data; it does not need exchange API keys or submit live orders.
 
 After deployment, check `/api/health` and sign in at the service URL. Rotate the generated password in Render if it is exposed. Render paid compute plans and persistent disks are paid features; review current pricing before applying the Blueprint.
@@ -253,6 +261,6 @@ For a Render web service that uses Supabase for persistent paper-trading data:
 6. Do not add Supabase `service_role`, `anon`, or exchange keys to the repository. The backend connects to PostgreSQL using the database connection string.
 7. Deploy, then verify `/api/health` and test opening and closing a paper trade. Restart the Render service and confirm the journal remains present.
 
-The backend creates its PostgreSQL tables on startup. Existing SQLite files are not automatically migrated; this deployment path starts with a new Supabase database unless you separately export and import existing data. Use the Session Pooler URI and keep SSL enabled. Paper trading remains simulated only; no exchange private keys or live-order endpoints are added.
+The backend creates and incrementally migrates its PostgreSQL tables on startup. Existing SQLite files are not automatically migrated; export and import separately if historical local records must be retained. Use the Supabase Session Pooler URI and keep SSL enabled. `render.yaml` sets `autoDeployTrigger: checksPass` for Blueprint-managed deployments; verify the live Render service's auto-deploy setting separately because syncing a Blueprint is an explicit configuration change. Paper trading remains simulated only; no exchange private keys or live-order endpoints are added.
 
 **Free-tier note:** Render's free web service may sleep when idle. Supabase Free projects can pause after a period of inactivity. This setup is suitable for testing, not guaranteed always-on operation. Review current provider limits before relying on it.

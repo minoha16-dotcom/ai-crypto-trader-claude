@@ -7,7 +7,7 @@ intended for one user's private development setup.
 
 - Public exchange market data only; no exchange API keys or private account endpoints.
 - No live order placement, cancellation, transfers or withdrawals.
-- `open_paper_trade` writes a simulated position to SQLite only.
+- `open_paper_trade` writes a simulated position to the backend's configured database (SQLite locally, PostgreSQL on the Render deployment).
 - `close_paper_trade` closes a simulated position at the exit price supplied by the user.
 - Spot SHORT is rejected by the backend.
 - Futures simulation remains simplified; it does not fully model contract sizing,
@@ -47,6 +47,19 @@ The Streamable HTTP endpoint is:
 http://127.0.0.1:8001/mcp
 ```
 
+### Use the authenticated Render API as the backend
+
+The MCP process can remain local/private while calling the deployed FastAPI service:
+
+```powershell
+$env:TRADER_API_URL = "https://ai-crypto-trader-claude.onrender.com"
+$env:TRADER_API_USERNAME = "<your Render dashboard username>"
+$env:TRADER_API_PASSWORD = "<your Render dashboard password>"
+python -m mcp_server.server
+```
+
+Supply the credentials through your local environment or a secret manager; do not commit them. Set both variables or neither. Keep the MCP listener bound to loopback and use the private tunnel for ChatGPT.
+
 ## Connect ChatGPT privately
 
 ChatGPT does not connect directly to a localhost URL. Use OpenAI's Secure MCP
@@ -78,6 +91,6 @@ stop and optional target before asking ChatGPT to call the write tool.
 ## Important version note
 
 This MCP bridge is an integration layer, not a new trading engine. It calls
-the existing V2.1 FastAPI endpoints and uses the same SQLite database. It does
+the existing V2.1 FastAPI endpoints and uses the same configured backend database. It does
 not change the V2.1 release status or resolve outstanding exchange-geography,
 security-review, or local-runtime verification work.
