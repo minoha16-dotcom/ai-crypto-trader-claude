@@ -107,3 +107,44 @@ def test_paper_open_endpoint_rejects_non_finite_ticker(monkeypatch):
     response = make_client(monkeypatch).post("/api/paper/open", json=valid_trade())
     assert response.status_code == 400
     assert "invalid market price" in response.json()["detail"]
+
+
+
+def test_paper_open_endpoint_resolves_and_persists_canonical_futures_symbol(monkeypatch):
+    seen = {}
+
+    async def fake_market_spec(exchange, symbol, market_type):
+        assert symbol == "BTC/USDT"
+        assert market_type == "futures"
+        return {
+            "symbol": "BTC/USDT:USDT",
+            "contract_size": 0.001,
+            "contract_type": "linear",
+            "amount_precision": 3,
+            "precision_mode": 2,
+        }
+
+    async def fake_ticker(exchange, symbol, market_type):
+        seen["ticker_symbol"] = symbol
+        return {"last": 60000}
+
+    async def fake_positions():
+        return {"positions": []}
+
+    def fake_open(**kwargs):
+        seen["trade_symbol"] = kwargs["symbol"]
+        return {"status": "OPEN", **kwargs}
+
+    monkeypatch.setattr(main.registry, "market_spec", fake_market_spec)
+    monkeypatch.setattr(main.registry, "ticker", fake_ticker)
+    monkeypatch.setattr(main, "get_positions", fake_positions)
+    monkeypatch.setattr(main, "open_trade", fake_open)
+
+    payload = valid_trade(
+        market_type="futures", side="LONG", entry=60000, stop=59000,
+        target=62000, symbol="BTC/USDT",
+    )
+    response = make_client(monkeypatch).post("/api/paper/open", json=payload)
+    assert response.status_code == 200
+    assert seen["ticker_symbol"] == "BTC/USDT:USDT"
+    assert seen["trade_symbol"] == "BTC/USDT:USDT"
