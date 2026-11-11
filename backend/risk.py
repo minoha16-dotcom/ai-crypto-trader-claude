@@ -62,6 +62,9 @@ class RiskManager:
             sizing_reason = "position_notional_cap"
 
         if contract_type != "spot":
+            if spec.get("max_amount") is not None and quantity > float(spec["max_amount"]):
+                quantity = float(spec["max_amount"])
+                sizing_reason = "exchange_max_amount"
             try:
                 quantity = normalize_amount(
                     quantity, spec.get("amount_precision"), spec.get("precision_mode"),
