@@ -418,6 +418,7 @@ async def paper_open(body: PaperOpen):
             **body.model_dump(),
             unrealized_pnl=floating_pnl,
             prices_complete=prices_complete,
+            instrument=instrument,
         )
     except Exception as exc:
         raise HTTPException(400, f"Unable to validate/open paper trade: {exc}")
