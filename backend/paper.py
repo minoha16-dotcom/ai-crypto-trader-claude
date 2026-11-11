@@ -41,7 +41,12 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None,
         raise ValueError("Cannot open a trade: live price unavailable for at least one open position.")
     if market_type == "futures" and not instrument:
         raise ValueError("Futures paper positions require validated exchange contract metadata.")
-    spec = instrument or {"contract_size": 1.0, "contract_type": "spot"}
+    # Direct engine callers without venue metadata are kept deterministic for
+    # local research; API-created trades always pass real CCXT market limits.
+    spec = instrument or {
+        "contract_size": 1.0, "contract_type": "spot",
+        "amount_precision": 12, "precision_mode": 2,
+    }
     if market_type == "futures" and spec.get("contract_type") not in ("linear", "inverse"):
         raise ValueError("Futures instrument must be a validated linear or inverse contract.")
     if market_type == "spot" and spec.get("contract_type") != "spot":

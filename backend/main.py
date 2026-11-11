@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from .config import settings
 from .database import init_db, connect
-from .exchanges import registry, EXCHANGE_IDS
+from .exchanges import registry, EXCHANGE_IDS, ExchangeRateLimitCooldown
 from .scanner import scan
 from .paper import open_trade, close_trade, journal, account
 from .risk import risk_manager
@@ -49,6 +49,24 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+
+
+@app.exception_handler(ExchangeRateLimitCooldown)
+async def exchange_rate_limit_handler(request: Request, exc: ExchangeRateLimitCooldown):
+    retry_after = str(max(1, int(exc.retry_after)))
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": str(exc),
+            "exchange": exc.exchange_id,
+            "upstream_status": exc.status_code,
+            "retry_after_seconds": int(retry_after),
+        },
+        headers={
+            "Retry-After": retry_after,
+            "X-Exchange-RateLimit-Status": str(exc.status_code),
+        },
+    )
 
 
 @app.middleware("http")
@@ -143,6 +161,8 @@ async def instrument(exchange, symbol, market_type="spot"):
         raise HTTPException(400, "market_type must be spot or futures")
     try:
         return await registry.market_spec(exchange, symbol, market_type)
+    except ExchangeRateLimitCooldown:
+        raise
     except Exception as exc:
         raise HTTPException(400, f"Unable to resolve exchange instrument: {exc}")
 
@@ -162,6 +182,8 @@ async def market(exchange, symbol, market_type="spot"):
             "ask": ticker.get("ask"), "base_volume": ticker.get("baseVolume"),
             "timestamp": ticker.get("timestamp"),
         }
+    except ExchangeRateLimitCooldown:
+        raise
     except Exception as exc:
         raise HTTPException(502, str(exc))
 
@@ -189,6 +211,8 @@ async def backtest(exchange="binance", symbol="BTC/USDT", market_type="spot", ti
             "timeframe": timeframe,
             **run_backtest(candles[:-1], instrument=instrument),
         }
+    except ExchangeRateLimitCooldown:
+        raise
     except Exception as exc:
         raise HTTPException(400, str(exc))
 
@@ -206,6 +230,8 @@ async def run_scan(exchange="binance", market_type="spot", symbols=None, timefra
             exchange, [s.strip() for s in symbols.split(",") if s.strip()] if symbols else None,
             market_type, timeframe
         )}
+    except ExchangeRateLimitCooldown:
+        raise
     except Exception as exc:
         raise HTTPException(400, str(exc))
 
@@ -434,6 +460,8 @@ async def paper_open(body: PaperOpen):
             prices_complete=prices_complete,
             instrument=instrument,
         )
+    except ExchangeRateLimitCooldown:
+        raise
     except Exception as exc:
         raise HTTPException(400, f"Unable to validate/open paper trade: {exc}")
 
@@ -442,6 +470,8 @@ async def paper_open(body: PaperOpen):
 def paper_close(trade_id: int, body: PaperClose):
     try:
         return close_trade(trade_id, body.exit_price)
+    except ExchangeRateLimitCooldown:
+        raise
     except Exception as exc:
         raise HTTPException(404, str(exc))
 

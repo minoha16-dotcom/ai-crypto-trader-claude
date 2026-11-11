@@ -22,3 +22,24 @@ services:
         value: "10"
       - key: PYTHONUNBUFFERED
         value: "1"
+
+  # An always-on worker keeps stop/target monitoring alive while the Free web
+  # service sleeps. Approval/sync is required to provision this paid resource.
+  - type: worker
+    name: ai-crypto-trader-position-monitor
+    runtime: python
+    plan: 0.5c-512mb
+    region: frankfurt
+    branch: deploy/render-supabase-postgres
+    buildCommand: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+    startCommand: python -m backend.monitor_worker
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.18"
+      - key: DATABASE_URL
+        sync: false
+      - key: POSITION_MONITOR_INTERVAL_SECONDS
+        value: "10"
+      - key: PYTHONUNBUFFERED
+        value: "1"
