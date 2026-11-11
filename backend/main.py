@@ -1,224 +1,492 @@
-"""Private ChatGPT MCP bridge for AI Crypto Trader.
-
-This server only calls the project's local FastAPI endpoints. It never connects
-to exchange private APIs and never places live orders.
-"""
-from __future__ import annotations
-
+import asyncio
+import base64
+import hmac
 import math
 import os
-from typing import Literal
+from contextlib import asynccontextmanager
+from pathlib import Path
 
-import httpx
-from mcp.server.fastmcp import FastMCP
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel, Field, model_validator
 
-API_BASE_URL = os.getenv("TRADER_API_URL", "http://127.0.0.1:8000").rstrip("/")
-REQUEST_TIMEOUT = float(os.getenv("TRADER_API_TIMEOUT", "25"))
+from .config import settings
+from .database import init_db, connect
+from .exchanges import registry, EXCHANGE_IDS, ExchangeRateLimitCooldown
+from .scanner import scan
+from .paper import open_trade, close_trade, journal, account
+from .risk import risk_manager
+from .backtest import run_backtest
+from .position_monitor import run_position_monitor
+from .metrics import position_pnl, position_risk
 
-mcp = FastMCP(
-    "AI Crypto Trader",
-    instructions=(
-        "Crypto market research and paper trading only. Exchange data is public. "
-        "Never claim to place a live order. Opening and closing positions only "
-        "create or update simulated paper trades in the configured database."
-    ),
-    host="127.0.0.1",
-    port=int(os.getenv("MCP_PORT", "8001")),
-    json_response=True,
+
+@asynccontextmanager
+async def lifespan(app):
+    init_db()
+    stop_monitor = asyncio.Event()
+    monitor_task = asyncio.create_task(
+        run_position_monitor(stop_monitor), name="paper-position-monitor"
+    )
+    try:
+        yield
+    finally:
+        stop_monitor.set()
+        try:
+            # Do not let a slow exchange request stall application shutdown.
+            await asyncio.wait_for(monitor_task, timeout=20)
+        except asyncio.TimeoutError:
+            monitor_task.cancel()
+            await asyncio.gather(monitor_task, return_exceptions=True)
+        await registry.close()
+
+
+app = FastAPI(
+    title=settings.app_name,
+    version="2.1.0",
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
 )
 
 
-async def _api(method: str, path: str, *, params: dict | None = None, payload: dict | None = None):
-    """Call the local FastAPI service and return JSON with safe error handling."""
-    try:
-        username = os.getenv("TRADER_API_USERNAME", "")
-        password = os.getenv("TRADER_API_PASSWORD", "")
-        if bool(username) != bool(password):
-            raise ValueError("Set both TRADER_API_USERNAME and TRADER_API_PASSWORD, or neither.")
-        auth = (username, password) if username and password else None
-        async with httpx.AsyncClient(
-            base_url=API_BASE_URL, timeout=REQUEST_TIMEOUT, auth=auth
-        ) as client:
-            response = await client.request(method, path, params=params, json=payload)
-            response.raise_for_status()
-            return response.json()
-    except httpx.HTTPStatusError as exc:
-        try:
-            detail = exc.response.json().get("detail", "Backend request failed")
-        except Exception:
-            detail = "Backend request failed"
-        raise ValueError(f"Trader backend rejected the request: {detail}") from None
-    except httpx.RequestError:
-        raise ValueError(
-            "Cannot reach the local AI Crypto Trader API. Start it first at "
-            f"{API_BASE_URL}."
-        ) from None
-
-
-@mcp.tool()
-async def get_status() -> dict:
-    """Check that the local trader backend is running in paper-only mode."""
-    return await _api("GET", "/api/health")
-
-
-@mcp.tool()
-async def list_exchanges() -> dict:
-    """List supported exchanges. Connections use public market data only."""
-    return await _api("GET", "/api/exchanges")
-
-
-@mcp.tool()
-async def get_market_data(
-    exchange: Literal["binance", "bybit", "okx"],
-    symbol: str,
-    market_type: Literal["spot", "futures"] = "spot",
-) -> dict:
-    """Fetch a public ticker for one symbol; does not access private accounts."""
-    symbol = symbol.strip().upper()
-    if not symbol or len(symbol) > 30 or "/" not in symbol:
-        raise ValueError("Use a CCXT symbol such as BTC/USDT.")
-    return await _api("GET", f"/api/markets/{exchange}/{symbol}", params={"market_type": market_type})
-
-
-@mcp.tool()
-async def scan_opportunities(
-    exchange: Literal["binance", "bybit", "okx"] = "binance",
-    market_type: Literal["spot", "futures"] = "spot",
-    symbols: str = "BTC/USDT,ETH/USDT",
-    timeframe: Literal["5m", "15m", "30m", "1h", "2h", "4h", "1d"] = "1h",
-) -> dict:
-    """Scan up to 20 comma-separated markets using the project's EMA/RSI/ATR rules."""
-    items = [item.strip().upper() for item in symbols.split(",") if item.strip()]
-    if not items or len(items) > 20 or any("/" not in item or len(item) > 30 for item in items):
-        raise ValueError("Provide 1–20 CCXT symbols, e.g. BTC/USDT,ETH/USDT.")
-    return await _api(
-        "POST", "/api/scan",
-        params={"exchange": exchange, "market_type": market_type,
-                "symbols": ",".join(items), "timeframe": timeframe},
-    )
-
-
-@mcp.tool()
-async def get_instrument_spec(
-    exchange: Literal["binance", "bybit", "okx"],
-    symbol: str,
-    market_type: Literal["spot", "futures"] = "spot",
-) -> dict:
-    """Get normalized public Spot/Futures contract size, precision and limits."""
-    symbol = symbol.strip().upper()
-    if not symbol or len(symbol) > 30 or "/" not in symbol:
-        raise ValueError("Use a CCXT symbol such as BTC/USDT.")
-    return await _api(
-        "GET", f"/api/instruments/{exchange}/{symbol}",
-        params={"market_type": market_type},
-    )
-
-
-@mcp.tool()
-async def get_open_positions() -> dict:
-    """Read open paper positions with live marks, unrealized P&L and stop/target alerts."""
-    return await _api("GET", "/api/positions")
-
-
-@mcp.tool()
-async def get_opportunities(limit: int = 12) -> dict:
-    """Read the latest distinct scanner opportunities with refreshed public prices."""
-    if not 1 <= limit <= 30:
-        raise ValueError("limit must be between 1 and 30.")
-    return await _api("GET", "/api/opportunities", params={"limit": limit})
-
-
-@mcp.tool()
-async def run_backtest(
-    exchange: Literal["binance", "bybit", "okx"],
-    symbol: str,
-    market_type: Literal["spot", "futures"] = "spot",
-    timeframe: Literal["5m", "15m", "30m", "1h", "2h", "4h", "1d"] = "1h",
-    limit: int = 1000,
-) -> dict:
-    """Run the backend's historical OHLCV paper backtest; does not submit orders."""
-    symbol = symbol.strip().upper()
-    if not symbol or len(symbol) > 30 or "/" not in symbol:
-        raise ValueError("Use a CCXT symbol such as BTC/USDT.")
-    if not 53 <= limit <= 5000:
-        raise ValueError("limit must be between 53 and 5000.")
-    return await _api(
-        "GET", "/api/backtest",
-        params={
-            "exchange": exchange,
-            "symbol": symbol,
-            "market_type": market_type,
-            "timeframe": timeframe,
-            "limit": limit,
+@app.exception_handler(ExchangeRateLimitCooldown)
+async def exchange_rate_limit_handler(request: Request, exc: ExchangeRateLimitCooldown):
+    retry_after = str(max(1, int(exc.retry_after)))
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": str(exc),
+            "exchange": exc.exchange_id,
+            "upstream_status": exc.status_code,
+            "retry_after_seconds": int(retry_after),
+        },
+        headers={
+            "Retry-After": retry_after,
+            "X-Exchange-RateLimit-Status": str(exc.status_code),
         },
     )
 
 
-@mcp.tool()
-async def get_signals(limit: int = 30) -> dict:
-    """Read recent scanner signals saved in the local database."""
-    if not 1 <= limit <= 100:
-        raise ValueError("limit must be between 1 and 100.")
-    return await _api("GET", "/api/signals", params={"limit": limit})
+@app.middleware("http")
+async def dashboard_auth_and_security_headers(request: Request, call_next):
+    # Render health checks stay public; every dashboard/API route requires Basic Auth.
+    if request.url.path != "/api/health":
+        username = os.getenv("DASHBOARD_USERNAME", "")
+        password = os.getenv("DASHBOARD_PASSWORD", "")
+        if not username or not password:
+            if os.getenv("RENDER"):
+                return JSONResponse(
+                    {"detail": "Dashboard credentials are not configured."},
+                    status_code=503,
+                )
+        else:
+            header = request.headers.get("authorization", "")
+            supplied_user = supplied_password = ""
+            if header.startswith("Basic "):
+                try:
+                    decoded = base64.b64decode(header[6:], validate=True).decode("utf-8")
+                    supplied_user, supplied_password = decoded.split(":", 1)
+                except (ValueError, UnicodeDecodeError):
+                    pass
+            valid_user = hmac.compare_digest(supplied_user, username)
+            valid_password = hmac.compare_digest(supplied_password, password)
+            if not (valid_user and valid_password):
+                return JSONResponse(
+                    {"detail": "Authentication required."},
+                    status_code=401,
+                    headers={"WWW-Authenticate": 'Basic realm="AI Crypto Trader"'},
+                )
+
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
 
 
-@mcp.tool()
-async def get_paper_account() -> dict:
-    """Read simulated account balance, realized PnL and open paper positions."""
-    return await _api("GET", "/api/account")
+class PaperOpen(BaseModel):
+    exchange: str = "binance"
+    symbol: str = Field(min_length=3, max_length=30)
+    market_type: str = "spot"
+    side: str
+    entry: float = Field(gt=0, allow_inf_nan=False)
+    stop: float = Field(gt=0, allow_inf_nan=False)
+    target: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    signal_id: int | None = None
+
+    @model_validator(mode="after")
+    def validate_trade(self):
+        if self.exchange not in EXCHANGE_IDS:
+            raise ValueError("Unsupported exchange")
+        if self.market_type not in ("spot", "futures"):
+            raise ValueError("market_type must be spot or futures")
+        if self.side not in ("LONG", "SHORT"):
+            raise ValueError("side must be LONG or SHORT")
+        if self.market_type == "spot" and self.side == "SHORT":
+            raise ValueError("SHORT paper positions are not supported for spot markets")
+        if self.side == "LONG" and self.stop >= self.entry:
+            raise ValueError("LONG stop must be below entry")
+        if self.side == "SHORT" and self.stop <= self.entry:
+            raise ValueError("SHORT stop must be above entry")
+        if self.target is not None:
+            if self.side == "LONG" and self.target <= self.entry:
+                raise ValueError("LONG target must be above entry")
+            if self.side == "SHORT" and self.target >= self.entry:
+                raise ValueError("SHORT target must be below entry")
+        return self
 
 
-@mcp.tool()
-async def get_risk_limits() -> dict:
-    """Read configured risk limits used by the paper-trading engine."""
-    return await _api("GET", "/api/risk")
+class PaperClose(BaseModel):
+    exit_price: float = Field(gt=0, allow_inf_nan=False)
 
 
-@mcp.tool()
-async def get_trade_journal() -> dict:
-    """Read paper trades and saved signals from the local journal."""
-    return await _api("GET", "/api/journal")
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "version": "2.1.0", "mode": "paper-only"}
 
 
-@mcp.tool()
-async def open_paper_trade(
-    exchange: Literal["binance", "bybit", "okx"],
-    symbol: str,
-    market_type: Literal["spot", "futures"],
-    side: Literal["LONG", "SHORT"],
-    entry: float,
-    stop: float,
-    target: float | None = None,
-) -> dict:
-    """Open a simulated paper position only; no exchange order is submitted.
+@app.get("/api/exchanges")
+def exchanges():
+    return {"exchanges": list(EXCHANGE_IDS), "connection": "public market data only"}
 
-    Spot SHORT positions are rejected. Futures mode is a simplified simulation,
-    not a full contract, funding, margin or liquidation model.
-    """
-    symbol = symbol.strip().upper()
-    if not symbol or len(symbol) > 30 or "/" not in symbol:
-        raise ValueError("Use a CCXT symbol such as BTC/USDT.")
-    if side == "SHORT" and market_type == "spot":
-        raise ValueError("Spot SHORT is not supported; choose Futures paper mode.")
-    if not all(math.isfinite(value) and value > 0 for value in (entry, stop)) or (target is not None and (not math.isfinite(target) or target <= 0)):
-        raise ValueError("Entry, stop and target must be positive.")
-    return await _api("POST", "/api/paper/open", payload={
-        "exchange": exchange, "symbol": symbol, "market_type": market_type,
-        "side": side, "entry": entry, "stop": stop, "target": target,
+
+@app.get("/api/instruments/{exchange}/{symbol:path}")
+async def instrument(exchange, symbol, market_type="spot"):
+    if exchange not in EXCHANGE_IDS:
+        raise HTTPException(400, "Unsupported exchange")
+    if market_type not in ("spot", "futures"):
+        raise HTTPException(400, "market_type must be spot or futures")
+    try:
+        return await registry.market_spec(exchange, symbol, market_type)
+    except ExchangeRateLimitCooldown:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, f"Unable to resolve exchange instrument: {exc}")
+
+
+@app.get("/api/markets/{exchange}/{symbol:path}")
+async def market(exchange, symbol, market_type="spot"):
+    if exchange not in EXCHANGE_IDS:
+        raise HTTPException(400, "Unsupported exchange")
+    if market_type not in ("spot", "futures"):
+        raise HTTPException(400, "market_type must be spot or futures")
+    try:
+        resolved_symbol = await registry.resolve_symbol(exchange, symbol, market_type)
+        ticker = await registry.ticker(exchange, resolved_symbol, market_type)
+        return {
+            "exchange": exchange, "symbol": resolved_symbol, "market_type": market_type,
+            "last": ticker.get("last"), "bid": ticker.get("bid"),
+            "ask": ticker.get("ask"), "base_volume": ticker.get("baseVolume"),
+            "timestamp": ticker.get("timestamp"),
+        }
+    except ExchangeRateLimitCooldown:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, str(exc))
+
+
+@app.get("/api/backtest")
+async def backtest(exchange="binance", symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000):
+    if exchange not in EXCHANGE_IDS:
+        raise HTTPException(400, "Unsupported exchange")
+    if market_type not in ("spot", "futures"):
+        raise HTTPException(400, "market_type must be spot or futures")
+    if limit < 53 or limit > 5000:
+        raise HTTPException(400, "limit must be between 53 and 5000 so 52 closed candles remain after excluding the forming candle")
+    try:
+        resolved_symbol = await registry.resolve_symbol(exchange, symbol, market_type)
+        # Both Spot and Futures sizing must use the selected venue's real amount
+        # precision and amount/cost limits.
+        instrument = await registry.market_spec(
+            exchange, resolved_symbol, market_type
+        )
+        candles = await registry.ohlcv(exchange, resolved_symbol, timeframe, limit, market_type)
+        # The final exchange candle may still be forming; never use it for signals.
+        return {
+            "exchange": exchange,
+            "symbol": resolved_symbol,
+            "market_type": market_type,
+            "timeframe": timeframe,
+            **run_backtest(candles[:-1], instrument=instrument),
+        }
+    except ExchangeRateLimitCooldown:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/scan")
+async def run_scan(exchange="binance", market_type="spot", symbols=None, timeframe="1h"):
+    if exchange not in EXCHANGE_IDS:
+        raise HTTPException(400, "Unsupported exchange")
+    if market_type not in ("spot", "futures"):
+        raise HTTPException(400, "market_type must be spot or futures")
+    if symbols and len([s for s in symbols.split(",") if s.strip()]) > 20:
+        raise HTTPException(400, "A scan can contain at most 20 symbols")
+    try:
+        return {"results": await scan(
+            exchange, [s.strip() for s in symbols.split(",") if s.strip()] if symbols else None,
+            market_type, timeframe
+        )}
+    except ExchangeRateLimitCooldown:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.get("/api/signals")
+def signals(limit: int = 100):
+    with connect() as db:
+        rows = db.execute(
+            "SELECT * FROM signals ORDER BY id DESC LIMIT ?", (max(1, min(limit, 500)),)
+        ).fetchall()
+    return {"signals": [dict(row) for row in rows]}
+
+
+@app.get("/api/account")
+async def get_account():
+    data = account()
+    positions_data = await get_positions()
+    priced = [p for p in positions_data["positions"] if p.get("unrealized_pnl") is not None]
+    missing = len(priced) != len(positions_data["positions"])
+    unrealized = sum(float(p["unrealized_pnl"]) for p in priced)
+    data.update({
+        "unrealized_pnl": unrealized,
+        "equity": float(data["starting_balance"]) + float(data["realized_pnl"]) + unrealized,
+        "unpriced_open_positions": len(positions_data["positions"]) - len(priced),
+        "equity_is_partial": missing,
+        "unrealized_pnl_note": "Net estimate includes configured entry/exit fees and slippage; positions without live prices are excluded." if missing else "Net unrealized estimate includes configured fees and slippage; not an exchange account balance.",
     })
+    return data
 
 
-@mcp.tool()
-async def close_paper_trade(trade_id: int, exit_price: float) -> dict:
-    """Close an existing simulated paper position at the user-supplied exit price."""
-    if trade_id <= 0 or not math.isfinite(exit_price) or exit_price <= 0:
-        raise ValueError("Trade ID and exit price must be positive.")
-    return await _api(
-        "POST", f"/api/paper/{trade_id}/close",
-        payload={"exit_price": exit_price},
-    )
+@app.get("/api/opportunities")
+async def opportunities(limit: int = 12):
+    """Latest distinct scanner setups, refreshed with current public ticker prices."""
+    with connect() as db:
+        rows = [dict(row) for row in db.execute(
+            "SELECT * FROM signals ORDER BY id DESC LIMIT 100"
+        ).fetchall()]
+    latest = []
+    seen = set()
+    for row in rows:
+        key = (row["exchange"], row["symbol"], row["market_type"], row["timeframe"])
+        if key in seen:
+            continue
+        seen.add(key)
+        latest.append(row)
+        if len(latest) >= max(1, min(limit, 30)):
+            break
+
+    async def mark_signal(row):
+        try:
+            ticker = await registry.ticker(row["exchange"], row["symbol"], row["market_type"])
+            last = ticker.get("last")
+            if last is None or float(last) <= 0:
+                raise ValueError("No valid live price")
+            return {
+                "exchange": row["exchange"], "symbol": row["symbol"],
+                "market_type": row["market_type"], "timeframe": row["timeframe"],
+                "signal": row["signal"], "trend": row["trend"], "score": row["score"],
+                "rsi": row["rsi"], "live_price": float(last),
+                "signal_price": row["price"], "price_timestamp": ticker.get("timestamp"),
+                "price_error": None,
+            }
+        except Exception as exc:
+            return {
+                "exchange": row["exchange"], "symbol": row["symbol"],
+                "market_type": row["market_type"], "timeframe": row["timeframe"],
+                "signal": row["signal"], "trend": row["trend"], "score": row["score"],
+                "rsi": row["rsi"], "live_price": None, "signal_price": row["price"],
+                "price_timestamp": None,
+                "price_error": str(exc),
+                "price_error_status": 429 if isinstance(exc, ExchangeRateLimitCooldown) else None,
+                "retry_after_seconds": exc.retry_after if isinstance(exc, ExchangeRateLimitCooldown) else None,
+            }
+
+    marked = await __import__("asyncio").gather(*(mark_signal(row) for row in latest))
+    marked.sort(key=lambda item: (int(item["score"] or 0), item["live_price"] is not None), reverse=True)
+    return {"opportunities": marked}
 
 
-if __name__ == "__main__":
-    # ChatGPT connects over Streamable HTTP at http://127.0.0.1:8001/mcp.
-    mcp.run(transport="streamable-http")
+
+@app.get("/api/positions")
+async def get_positions():
+    """Return open paper positions marked to the latest public exchange ticker."""
+    with connect() as db:
+        rows = [
+            dict(row) for row in db.execute(
+                "SELECT * FROM trades WHERE status='OPEN' ORDER BY id DESC"
+            ).fetchall()
+        ]
+
+    async def mark_position(row):
+        try:
+            ticker = await registry.ticker(
+                row["exchange"], row["symbol"], row["market_type"]
+            )
+            last = ticker.get("last")
+            if last is None or not math.isfinite(float(last)) or float(last) <= 0:
+                raise ValueError("Exchange did not return a valid last price")
+            last = float(last)
+            pnl_metrics = position_pnl(row["entry"], row["quantity"], row["side"], last, row.get("contract_size", 1.0), row.get("contract_type", "spot"))
+            unrealized = pnl_metrics["unrealized_pnl"]
+            stop_gap = abs(last - float(row["stop"]))
+            stop_span = abs(float(row["entry"]) - float(row["stop"]))
+            target = row.get("target")
+            target_gap = abs(last - float(target)) if target is not None else None
+            target_span = abs(float(target) - float(row["entry"])) if target is not None else None
+            stop_proximity = max(0.0, 1.0 - stop_gap / stop_span) if stop_span else 0.0
+            target_proximity = max(0.0, 1.0 - target_gap / target_span) if target_gap is not None and target_span else None
+            alert = None
+            exit_reason = None
+            if (row["side"] == "LONG" and last <= float(row["stop"])) or (row["side"] == "SHORT" and last >= float(row["stop"])):
+                alert = "STOP_REACHED"
+                exit_reason = "STOP"
+            elif target is not None and ((row["side"] == "LONG" and last >= float(target)) or (row["side"] == "SHORT" and last <= float(target))):
+                alert = "TARGET_REACHED"
+                exit_reason = "TARGET"
+            elif stop_proximity >= 0.8:
+                alert = "NEAR_STOP"
+            elif target_proximity is not None and target_proximity >= 0.8:
+                alert = "NEAR_TARGET"
+            # This endpoint is read-only: the independent server monitor is
+            # the sole automatic SL/TP closer. Keep alerts visible while it
+            # processes the same observed market price.
+            return {
+                **row,
+                "status": row["status"],
+                "exit_reason": exit_reason,
+                "exit_result": None,
+                "live_price": last,
+                **pnl_metrics,
+                "stop_distance": stop_gap,
+                "stop_distance_pct": stop_gap / last * 100,
+                "target_distance": target_gap,
+                "target_distance_pct": (target_gap / last * 100) if target_gap is not None else None,
+                "stop_proximity_pct": stop_proximity * 100,
+                "target_proximity_pct": target_proximity * 100 if target_proximity is not None else None,
+                "alert": alert,
+                "price_timestamp": ticker.get("timestamp"),
+                "price_error": None,
+            }
+        except Exception as exc:
+            return {
+                **row,
+                "live_price": None,
+                "unrealized_pnl": None,
+                "unrealized_pnl_pct": None,
+                "price_timestamp": None,
+                "price_error": str(exc),
+                "price_error_status": 429 if isinstance(exc, ExchangeRateLimitCooldown) else None,
+                "retry_after_seconds": exc.retry_after if isinstance(exc, ExchangeRateLimitCooldown) else None,
+            }
+
+    return {"positions": await __import__("asyncio").gather(
+        *(mark_position(row) for row in rows)
+    )}
+
+
+@app.get("/api/risk")
+async def risk():
+    marked = await get_positions()
+    positions = marked["positions"]
+    prices_complete = all(p.get("unrealized_pnl") is not None for p in positions)
+    floating = sum(float(p["unrealized_pnl"]) for p in positions if p.get("unrealized_pnl") is not None)
+    with connect() as db:
+        today_realized = float(db.execute(
+            "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades "
+            "WHERE status='CLOSED' AND date(closed_at)=date('now')"
+        ).fetchone()["total"] or 0)
+        snapshot = db.execute(
+            "SELECT starting_equity FROM daily_equity_snapshots WHERE trading_date=date('now')"
+        ).fetchone()
+        realized_all = float(db.execute(
+            "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE status='CLOSED'"
+        ).fetchone()["total"] or 0)
+    daily_start = float(snapshot["starting_equity"]) if snapshot else settings.paper_starting_balance + realized_all - today_realized
+    daily_pnl = today_realized + floating
+    open_risk = sum(position_risk(p["entry"], p["stop"], p["quantity"], p.get("contract_size", 1.0), p.get("contract_type", "spot")) for p in positions)
+    sizing_equity = settings.paper_starting_balance + realized_all
+    equity = sizing_equity + floating
+    remaining_daily_loss = max(0.0, daily_start * risk_manager.max_daily_loss_pct / 100 + daily_pnl)
+    available_open_risk = max(0.0, sizing_equity * risk_manager.max_open_risk_pct / 100 - open_risk)
+    return {
+        "risk_per_trade_pct": risk_manager.risk_pct,
+        "max_open_risk_pct": risk_manager.max_open_risk_pct,
+        "max_daily_loss_pct": risk_manager.max_daily_loss_pct,
+        "max_position_notional_pct": risk_manager.max_notional_pct,
+        "max_open_trades": 3,
+        "open_trades": len(positions),
+        "open_risk": open_risk,
+        "realized_pnl": realized_all,
+        "unrealized_pnl": floating,
+        "equity": equity,
+        "available_open_risk": available_open_risk,
+        "daily_pnl": daily_pnl,
+        "remaining_daily_loss": remaining_daily_loss,
+        "prices_complete": prices_complete,
+        "status": "BLOCKED" if not prices_complete or remaining_daily_loss <= 0 or len(positions) >= 3 else "ACTIVE",
+        "reward_risk_ratio": 2.0,
+    }
+
+
+@app.post("/api/paper/open")
+async def paper_open(body: PaperOpen):
+    try:
+        # Resolve the symbol against the selected exchange/market before accepting
+        # a manually entered paper position. This prevents arbitrary symbols and
+        # spot/futures market mismatches from entering the journal.
+        instrument = await registry.market_spec(body.exchange, body.symbol, body.market_type)
+        resolved_symbol = instrument.get("symbol", body.symbol)
+        ticker = await registry.ticker(body.exchange, resolved_symbol, body.market_type)
+        last = ticker.get("last")
+        if last is None or not math.isfinite(float(last)) or float(last) <= 0:
+            raise ValueError("Exchange returned an invalid market price")
+        last = float(last)
+        deviation_pct = abs(float(body.entry) - last) / last * 100
+        max_deviation_pct = float(settings.paper_entry_max_deviation_pct)
+        if deviation_pct > max_deviation_pct:
+            raise ValueError(
+                f"Entry price is {deviation_pct:.2f}% away from live market price; "
+                f"maximum allowed deviation is {max_deviation_pct:.2f}%"
+            )
+        marked = await get_positions()
+        positions = marked["positions"]
+        prices_complete = all(p.get("unrealized_pnl") is not None for p in positions)
+        floating_pnl = sum(float(p["unrealized_pnl"]) for p in positions if p.get("unrealized_pnl") is not None)
+        trade_data = body.model_dump()
+        trade_data["symbol"] = resolved_symbol
+        return open_trade(
+            **trade_data,
+            unrealized_pnl=floating_pnl,
+            prices_complete=prices_complete,
+            instrument=instrument,
+        )
+    except ExchangeRateLimitCooldown:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, f"Unable to validate/open paper trade: {exc}")
+
+
+@app.post("/api/paper/{trade_id}/close")
+def paper_close(trade_id: int, body: PaperClose):
+    try:
+        return close_trade(trade_id, body.exit_price)
+    except ExchangeRateLimitCooldown:
+        raise
+    except Exception as exc:
+        raise HTTPException(404, str(exc))
+
+
+@app.get("/api/journal")
+def get_journal():
+    return journal()
+
+
+@app.get("/", response_class=HTMLResponse)
+def dashboard():
+    return (Path(__file__).parent / "dashboard.html").read_text(encoding="utf-8")
