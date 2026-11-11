@@ -8,6 +8,7 @@ import asyncio
 import logging
 import signal
 
+from .config import settings
 from .database import init_db
 from .exchanges import registry
 from .position_monitor import run_position_monitor
@@ -16,6 +17,11 @@ logger = logging.getLogger("ai_crypto_trader.monitor_worker")
 
 
 async def serve():
+    if not settings.database_url.startswith(("postgres://", "postgresql://")):
+        raise RuntimeError(
+            "The dedicated monitor worker requires the same shared PostgreSQL DATABASE_URL "
+            "as the web service; SQLite cannot coordinate across separate services."
+        )
     init_db()
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()

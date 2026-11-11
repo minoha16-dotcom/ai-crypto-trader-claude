@@ -228,9 +228,19 @@ def test_dedicated_monitor_worker_initializes_and_closes(monkeypatch):
     async def fake_close():
         called["closed"] = True
 
+    monkeypatch.setattr(monitor_worker.settings, "database_url", "postgresql://user:pass@host/db")
     monkeypatch.setattr(monitor_worker, "init_db", fake_init_db)
     monkeypatch.setattr(monitor_worker, "run_position_monitor", fake_monitor)
     monkeypatch.setattr(monitor_worker.registry, "close", fake_close)
 
     asyncio.run(monitor_worker.serve())
     assert called == {"init": True, "monitor": True, "closed": True}
+
+
+
+def test_monitor_worker_refuses_non_shared_sqlite_database(monkeypatch):
+    from backend import monitor_worker
+
+    monkeypatch.setattr(settings, "database_url", "sqlite:///./local.db")
+    with pytest.raises(RuntimeError, match="shared PostgreSQL"):
+        asyncio.run(monitor_worker.serve())
