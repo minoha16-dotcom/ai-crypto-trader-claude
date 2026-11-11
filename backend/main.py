@@ -279,7 +279,7 @@ async def get_positions():
             if last is None or not math.isfinite(float(last)) or float(last) <= 0:
                 raise ValueError("Exchange did not return a valid last price")
             last = float(last)
-            pnl_metrics = position_pnl(row["entry"], row["quantity"], row["side"], last)
+            pnl_metrics = position_pnl(row["entry"], row["quantity"], row["side"], last, row.get("contract_size", 1.0), row.get("contract_type", "spot"))
             unrealized = pnl_metrics["unrealized_pnl"]
             stop_gap = abs(last - float(row["stop"]))
             stop_span = abs(float(row["entry"]) - float(row["stop"]))
@@ -354,7 +354,7 @@ async def risk():
         ).fetchone()["total"] or 0)
     daily_start = float(snapshot["starting_equity"]) if snapshot else settings.paper_starting_balance + realized_all - today_realized
     daily_pnl = today_realized + floating
-    open_risk = sum(position_risk(p["entry"], p["stop"], p["quantity"]) for p in positions)
+    open_risk = sum(position_risk(p["entry"], p["stop"], p["quantity"], p.get("contract_size", 1.0), p.get("contract_type", "spot")) for p in positions)
     sizing_equity = settings.paper_starting_balance + realized_all
     equity = sizing_equity + floating
     remaining_daily_loss = max(0.0, daily_start * risk_manager.max_daily_loss_pct / 100 + daily_pnl)
@@ -385,6 +385,7 @@ async def paper_open(body: PaperOpen):
         # Resolve the symbol against the selected exchange/market before accepting
         # a manually entered paper position. This prevents arbitrary symbols and
         # spot/futures market mismatches from entering the journal.
+        instrument = await registry.market_spec(body.exchange, body.symbol, body.market_type)
         ticker = await registry.ticker(body.exchange, body.symbol, body.market_type)
         last = ticker.get("last")
         if last is None or not math.isfinite(float(last)) or float(last) <= 0:
