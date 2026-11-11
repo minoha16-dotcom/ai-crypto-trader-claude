@@ -409,7 +409,8 @@ def test_guarded_shared_throttler_checks_cooldown_after_queue_wait(monkeypatch):
     class FakeClient:
         def __init__(self, config):
             self.options = config["options"]
-            self.throttler = BlockingThrottler()
+            self.base_throttler = BlockingThrottler()
+            self.throttler = self.base_throttler
         async def close(self):
             pass
 
@@ -425,7 +426,7 @@ def test_guarded_shared_throttler_checks_cooldown_after_queue_wait(monkeypatch):
         await asyncio.sleep(0)
         registry._rate_limit_until["binance"] = time.monotonic() + 30
         registry._rate_limit_status["binance"] = 418
-        spot.throttler.release.set()
+        spot.base_throttler.release.set()
 
         with pytest.raises(ExchangeRateLimitCooldown) as error:
             await queued

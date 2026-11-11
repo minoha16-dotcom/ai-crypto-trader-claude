@@ -103,7 +103,7 @@ class ExchangeRegistry:
                 return 418
             if name == "ratelimitexceeded":
                 return 429
-            match = re.search(r"(?<!\\d)(418|429)(?!\\d)", str(current))
+            match = re.search(r"(?<!\d)(418|429)(?!\d)", str(current))
             if match:
                 return int(match.group(1))
             current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
@@ -148,7 +148,7 @@ class ExchangeRegistry:
     @staticmethod
     def _ban_timestamp_delay(error_text):
         # Binance can return "IP banned until <epoch-ms>" in its JSON body.
-        match = re.search(r"(?:IP\\s+)?banned\\s+until\\s+(\\d{10,13})", error_text, re.IGNORECASE)
+        match = re.search(r"(?:IP\s+)?banned\s+until\s+(\d{10,13})", error_text, re.IGNORECASE)
         if not match:
             return None
         timestamp = int(match.group(1))
@@ -206,6 +206,8 @@ class ExchangeRegistry:
         self._ensure_request_allowed(exchange_id)
         try:
             return await operation(*args, **kwargs)
+        except ExchangeRateLimitCooldown:
+            raise
         except Exception as error:
             status_code = self._status_code_from_error(error)
             if status_code in (418, 429):
