@@ -135,6 +135,18 @@ def exchanges():
     return {"exchanges": list(EXCHANGE_IDS), "connection": "public market data only"}
 
 
+@app.get("/api/instruments/{exchange}/{symbol:path}")
+async def instrument(exchange, symbol, market_type="spot"):
+    if exchange not in EXCHANGE_IDS:
+        raise HTTPException(400, "Unsupported exchange")
+    if market_type not in ("spot", "futures"):
+        raise HTTPException(400, "market_type must be spot or futures")
+    try:
+        return await registry.market_spec(exchange, symbol, market_type)
+    except Exception as exc:
+        raise HTTPException(400, f"Unable to resolve exchange instrument: {exc}")
+
+
 @app.get("/api/markets/{exchange}/{symbol:path}")
 async def market(exchange, symbol, market_type="spot"):
     if exchange not in EXCHANGE_IDS:
