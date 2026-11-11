@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from backend.config import settings
@@ -13,7 +15,6 @@ def isolated_db(tmp_path, monkeypatch):
     init_db()
 
 
-@pytest.mark.asyncio
 async def test_server_monitor_closes_long_when_stop_is_crossed(isolated_db, monkeypatch):
     opened = open_trade("binance", "BTC/USDT", "spot", "LONG", 100, 95, 110)
 
@@ -21,7 +22,7 @@ async def test_server_monitor_closes_long_when_stop_is_crossed(isolated_db, monk
         return {"last": 94.5}
 
     monkeypatch.setattr(registry, "ticker", fake_ticker)
-    assert await monitor_open_positions_once() == 1
+    assert asyncio.run(monitor_open_positions_once()) == 1
 
     with connect() as db:
         row = db.execute("SELECT status, exit_price FROM trades WHERE id=?", (opened["id"],)).fetchone()
@@ -56,7 +57,7 @@ async def test_server_monitor_keeps_position_open_when_price_is_invalid(
         return {"last": bad_price}
 
     monkeypatch.setattr(registry, "ticker", fake_ticker)
-    assert await monitor_open_positions_once() == 0
+    assert asyncio.run(monitor_open_positions_once()) == 0
 
     with connect() as db:
         row = db.execute("SELECT status FROM trades WHERE id=?", (opened["id"],)).fetchone()
