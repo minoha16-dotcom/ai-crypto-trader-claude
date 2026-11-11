@@ -31,7 +31,12 @@ async def lifespan(app):
         yield
     finally:
         stop_monitor.set()
-        await monitor_task
+        try:
+            # Do not let a slow exchange request stall application shutdown.
+            await asyncio.wait_for(monitor_task, timeout=20)
+        except asyncio.TimeoutError:
+            monitor_task.cancel()
+            await asyncio.gather(monitor_task, return_exceptions=True)
         await registry.close()
 
 
