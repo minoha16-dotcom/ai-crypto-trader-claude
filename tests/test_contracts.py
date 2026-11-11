@@ -36,6 +36,11 @@ def test_amount_below_exchange_minimum_is_rejected():
         normalize_amount(0.0004, 3, 2, min_amount=0.001)
 
 
+def test_amount_truncated_to_zero_without_minimum_reports_precision_error():
+    with pytest.raises(ValueError, match="below exchange precision"):
+        normalize_amount(0.0004, 3, 2)
+
+
 def test_futures_market_requires_contract_metadata():
     with pytest.raises(ValueError, match="supported Futures contract"):
         validate_instrument("futures", {
