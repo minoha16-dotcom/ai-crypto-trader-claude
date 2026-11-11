@@ -68,14 +68,14 @@ def test_backtest_rejects_non_finite_starting_balance():
 
 
 @pytest.mark.parametrize(
-    "contract_type,contract_size,precision,expected_notional",
+    "contract_type,contract_size,precision,expected_gross_pnl",
     [
-        ("linear", 0.01, 1, 100.0),
+        ("linear", 0.01, 1, 80.0),
         ("inverse", 100.0, 1, 100.0),
     ],
 )
 def test_futures_backtest_uses_contract_value_and_precision(
-    monkeypatch, contract_type, contract_size, precision, expected_notional
+    monkeypatch, contract_type, contract_size, precision, expected_gross_pnl
 ):
     monkeypatch.setattr(settings, "taker_fee_rate", 0.0)
     monkeypatch.setattr(settings, "slippage_bps", 0.0)
@@ -101,7 +101,7 @@ def test_futures_backtest_uses_contract_value_and_precision(
     assert trade["quantity"] > 0
     assert trade["quantity"] == round(trade["quantity"], 1)
     assert trade["notional"] <= 2000
-    assert trade["gross_pnl"] == pytest.approx(100.0, rel=0.05)
+    assert trade["gross_pnl"] == pytest.approx(expected_gross_pnl, rel=0.05)
     assert result["instrument"]["contract_type"] == contract_type
 
 

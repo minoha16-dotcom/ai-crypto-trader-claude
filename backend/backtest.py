@@ -89,6 +89,16 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
         notional_cap = equity * max_notional_pct / 100.0
         quantity = min(risk_budget / per_contract_risk, notional_cap / per_contract_notional)
         if contract_type != "spot":
+            # Respect the exchange maximum before precision normalization.
+            # This reduces size rather than rejecting an otherwise valid setup.
+            maximum_amount = spec.get("max_amount")
+            if maximum_amount is not None:
+                maximum_amount = float(maximum_amount)
+                if not math.isfinite(maximum_amount) or maximum_amount <= 0:
+                    skipped_signals.append({"index": i, "reason": "Invalid exchange maximum amount"})
+                    i += 1
+                    continue
+                quantity = min(quantity, maximum_amount)
             try:
                 quantity = normalize_amount(
                     quantity,
