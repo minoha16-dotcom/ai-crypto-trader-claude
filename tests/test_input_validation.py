@@ -65,6 +65,10 @@ def stub_open_dependencies(monkeypatch, ticker):
     async def fake_positions():
         return {"positions": []}
 
+    async def fake_market_spec(exchange, symbol, market_type):
+        return {"contract_size": 1.0, "contract_type": "spot", "amount_precision": None, "precision_mode": 2}
+
+    monkeypatch.setattr(main.registry, "market_spec", fake_market_spec)
     monkeypatch.setattr(main.registry, "ticker", fake_ticker)
     monkeypatch.setattr(main, "get_positions", fake_positions)
     monkeypatch.setattr(main, "open_trade", lambda **kwargs: {"status": "OPEN", **kwargs})
