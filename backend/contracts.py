@@ -15,7 +15,9 @@ def normalize_amount(amount, precision, precision_mode, min_amount=None, max_amo
     amount = _positive(amount, "amount")
     if precision is None:
         raise ValueError("Exchange did not provide amount precision")
-    precision = _positive(precision, "amount precision")
+    precision = float(precision)
+    if not math.isfinite(precision) or precision < 0 or (precision_mode != 2 and precision == 0):
+        raise ValueError("Invalid exchange amount precision")
     if precision_mode == 4:  # CCXT TICK_SIZE
         step = Decimal(str(precision))
     elif precision_mode == 2:  # CCXT DECIMAL_PLACES
@@ -54,8 +56,8 @@ def validate_instrument(market_type, market):
             raise ValueError("Futures contract must be explicitly linear or inverse")
         contract_type = "linear" if linear else "inverse"
         contract_size = _positive(market.get("contractSize"), "contractSize")
-    if amount_precision is None:
-        raise ValueError("Exchange did not publish amount precision for this market")
+    if market_type == "futures" and amount_precision is None:
+        raise ValueError("Exchange did not publish amount precision for this Futures market")
     return {
         "contract_size": contract_size,
         "contract_type": contract_type,
