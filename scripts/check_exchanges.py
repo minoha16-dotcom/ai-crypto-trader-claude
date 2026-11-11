@@ -5,6 +5,7 @@ No API keys, private account endpoints, or orders are used.
 """
 import asyncio
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -12,7 +13,7 @@ from pathlib import Path
 # repository root, at sys.path[0] (notably on GitHub-hosted runners).
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from backend.exchanges import ExchangeRegistry
+from backend.exchanges import ExchangeRegistry, ExchangeRateLimitCooldown
 
 EXCHANGES = ("binance", "bybit", "okx")
 
@@ -66,50 +67,59 @@ def is_region_restriction(error):
 
 async def main():
     registry = ExchangeRegistry()
+    pause_seconds = max(0.0, float(os.getenv("SMOKE_REQUEST_PAUSE_SECONDS", "1.5")))
+    failed = 0
+    passed = 0
+    skipped = 0
+    cooldown_blocked = 0
     checks = [
         (exchange_id, market_type)
         for exchange_id in EXCHANGES
         for market_type in ("spot", "futures")
     ]
     try:
-        results = await asyncio.gather(
-            *(
-                check(registry, exchange_id, market_type)
-                for exchange_id, market_type in checks
-            ),
-            return_exceptions=True,
-        )
+        for index, (exchange_id, market_type) in enumerate(checks):
+            if index and pause_seconds:
+                await asyncio.sleep(pause_seconds)
+            try:
+                result = await check(registry, exchange_id, market_type)
+            except Exception as error:
+                if is_region_restriction(error):
+                    skipped += 1
+                    print(
+                        f"SKIP {exchange_id} {market_type}: provider blocked this runner region; "
+                        "this is not a successful connectivity check."
+                    )
+                elif isinstance(error, ExchangeRateLimitCooldown):
+                    cooldown_blocked += 1
+                    print(
+                        f"COOLDOWN {exchange_id} {market_type}: HTTP {error.status_code}; "
+                        f"request suppressed for another {error.retry_after}s."
+                    )
+                else:
+                    failed += 1
+                    print(f"FAIL {exchange_id} {market_type}: {type(error).__name__}: {error}")
+            else:
+                passed += 1
+                suffix = (
+                    f" contract={result['contract_type']} size={result['contract_size']} "
+                    f"amount_precision={result['amount_precision']}"
+                    if market_type == "futures" else
+                    f" amount_precision={result['amount_precision']}"
+                )
+                print(
+                    f"PASS {exchange_id} {market_type} {result['symbol']} "
+                    f"last={result['last']}{suffix}"
+                )
     finally:
         await registry.close()
 
-    failed = False
-    passed = 0
-    skipped = 0
-    for (exchange_id, market_type), result in zip(checks, results):
-        if isinstance(result, Exception):
-            if is_region_restriction(result):
-                skipped += 1
-                print(
-                    f"SKIP {exchange_id} {market_type}: provider blocked the runner's region; "
-                    "this is not a successful connectivity check."
-                )
-            else:
-                failed = True
-                print(f"FAIL {exchange_id} {market_type}: {type(result).__name__}: {result}")
-        else:
-            passed += 1
-            suffix = (
-                f" contract={result['contract_type']} size={result['contract_size']} "
-                f"amount_precision={result['amount_precision']}"
-                if market_type == "futures" else ""
-            )
-            print(
-                f"PASS {exchange_id} {market_type} {result['symbol']} "
-                f"last={result['last']}{suffix}"
-            )
-    print(f"SUMMARY passed={passed} region_skipped={skipped} failed={int(failed)}")
+    print(
+        f"SUMMARY passed={passed} region_skipped={skipped} "
+        f"cooldown_blocked={cooldown_blocked} failed={failed}"
+    )
     if passed == 0:
-        failed = True
+        failed += 1
         print("FAIL no exchange check completed successfully from this runner region")
     if failed:
         raise SystemExit(1)

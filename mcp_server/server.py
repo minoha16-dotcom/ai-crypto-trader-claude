@@ -99,6 +99,62 @@ async def scan_opportunities(
 
 
 @mcp.tool()
+async def get_instrument_spec(
+    exchange: Literal["binance", "bybit", "okx"],
+    symbol: str,
+    market_type: Literal["spot", "futures"] = "spot",
+) -> dict:
+    """Get normalized public Spot/Futures contract size, precision and limits."""
+    symbol = symbol.strip().upper()
+    if not symbol or len(symbol) > 30 or "/" not in symbol:
+        raise ValueError("Use a CCXT symbol such as BTC/USDT.")
+    return await _api(
+        "GET", f"/api/instruments/{exchange}/{symbol}",
+        params={"market_type": market_type},
+    )
+
+
+@mcp.tool()
+async def get_open_positions() -> dict:
+    """Read open paper positions with live marks, unrealized P&L and stop/target alerts."""
+    return await _api("GET", "/api/positions")
+
+
+@mcp.tool()
+async def get_opportunities(limit: int = 12) -> dict:
+    """Read the latest distinct scanner opportunities with refreshed public prices."""
+    if not 1 <= limit <= 30:
+        raise ValueError("limit must be between 1 and 30.")
+    return await _api("GET", "/api/opportunities", params={"limit": limit})
+
+
+@mcp.tool()
+async def run_backtest(
+    exchange: Literal["binance", "bybit", "okx"],
+    symbol: str,
+    market_type: Literal["spot", "futures"] = "spot",
+    timeframe: Literal["5m", "15m", "30m", "1h", "2h", "4h", "1d"] = "1h",
+    limit: int = 1000,
+) -> dict:
+    """Run the backend's historical OHLCV paper backtest; does not submit orders."""
+    symbol = symbol.strip().upper()
+    if not symbol or len(symbol) > 30 or "/" not in symbol:
+        raise ValueError("Use a CCXT symbol such as BTC/USDT.")
+    if not 53 <= limit <= 5000:
+        raise ValueError("limit must be between 53 and 5000.")
+    return await _api(
+        "GET", "/api/backtest",
+        params={
+            "exchange": exchange,
+            "symbol": symbol,
+            "market_type": market_type,
+            "timeframe": timeframe,
+            "limit": limit,
+        },
+    )
+
+
+@mcp.tool()
 async def get_signals(limit: int = 30) -> dict:
     """Read recent scanner signals saved in the local database."""
     if not 1 <= limit <= 100:
