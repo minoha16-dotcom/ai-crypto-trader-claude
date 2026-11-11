@@ -9,7 +9,5 @@ paper-trading-only write tools. It does not execute real exchange orders.
 - FastAPI backend: `http://127.0.0.1:8000`
 - MCP Streamable HTTP: `http://127.0.0.1:8001/mcp`
 
-ChatGPT needs a remote connection path. Prefer OpenAI Secure MCP Tunnel for the
-private MCP listener; do not publish the MCP endpoint. The local MCP process may
-use the deployed Render API by setting `TRADER_API_URL`, `TRADER_API_USERNAME`,
-and `TRADER_API_PASSWORD` locally. Keep the dashboard credentials private.
+ChatGPT needs a remote connection path. Prefer OpenAI Secure MCP Tunnel for a
+private local server; do not publish the unauthenticated development endpoint.

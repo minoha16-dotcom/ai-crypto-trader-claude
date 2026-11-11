@@ -1,24 +1,26 @@
 services:
   - type: web
-    name: ai-crypto-trader-claude
+    name: ai-crypto-trader-v2
     runtime: python
-    plan: free
+    plan: 0.5c-512mb
     region: frankfurt
-    branch: deploy/render-supabase-postgres
+    branch: deploy/render-paper-dashboard
     buildCommand: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
     startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     autoDeployTrigger: checksPass
+    disk:
+      name: trader-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
-        value: "3.11.18"
+        value: 3.11.18
       - key: DATABASE_URL
-        sync: false
+        value: sqlite:////var/data/trader.db
       - key: DASHBOARD_USERNAME
-        sync: false
+        value: admin
       - key: DASHBOARD_PASSWORD
-        sync: false
-      - key: POSITION_MONITOR_INTERVAL_SECONDS
-        value: "10"
+        generateValue: true
       - key: PYTHONUNBUFFERED
         value: "1"

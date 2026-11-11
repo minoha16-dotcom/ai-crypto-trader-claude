@@ -3,7 +3,7 @@ name: Public exchange connectivity smoke test
 on:
   workflow_dispatch:
   pull_request:
-    branches: [deploy/render-supabase-postgres]
+    branches: [main, master]
 
 permissions:
   contents: read
@@ -11,16 +11,13 @@ permissions:
 jobs:
   public-market-data:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.11.18"
+          python-version: "3.11"
           cache: pip
       - name: Install CCXT
-        run: python -m pip install --upgrade pip "ccxt>=4.4,<5"
-      - name: Check public Spot and Futures endpoints for Binance, Bybit and OKX
+        run: python -m pip install --upgrade pip ccxt
+      - name: Check Binance, Bybit and OKX public spot endpoints
         run: python scripts/check_exchanges.py

@@ -32,7 +32,8 @@ def _monitor_leader_lock():
     import psycopg
 
     connection = psycopg.connect(
-        url, connect_timeout=10, sslmode="require", autocommit=True
+        url, connect_timeout=10,
+        sslmode=os.getenv("DATABASE_SSLMODE", "require"), autocommit=True
     )
     acquired = False
     try:

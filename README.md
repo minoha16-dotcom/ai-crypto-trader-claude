@@ -233,7 +233,7 @@ The backtest resolves the exchange's canonical Futures symbol and loads its cont
 MIT. See [LICENSE](LICENSE).
 
 
-## Render deployment (persistent paper dashboard)
+## Render Blueprint deployment (current Supabase PostgreSQL setup)
 
 `render.yaml` describes the current PostgreSQL deployment branch `deploy/render-supabase-postgres`. It requires `DATABASE_URL`, `DASHBOARD_USERNAME`, and `DASHBOARD_PASSWORD` to be supplied as private Render environment values. Do not use the former SQLite/persistent-disk Blueprint for the current service.
 
@@ -243,7 +243,7 @@ MIT. See [LICENSE](LICENSE).
 - Scanning is manual: use the dashboard Scan button. The server-side paper-position monitor runs separately to evaluate existing paper stops and targets.
 - The app remains paper-only and uses public market data; it does not need exchange API keys or submit live orders.
 
-After deployment, check `/api/health` and sign in at the service URL. Rotate the generated password in Render if it is exposed. Render paid compute plans and persistent disks are paid features; review current pricing before applying the Blueprint.
+After deployment, check `/api/health` and sign in with the username and password you configured in Render. Store those credentials in a password manager; never place them in source control.
 
 
 ## Render + Supabase deployment (PostgreSQL)
@@ -261,6 +261,6 @@ For a Render web service that uses Supabase for persistent paper-trading data:
 6. Do not add Supabase `service_role`, `anon`, or exchange keys to the repository. The backend connects to PostgreSQL using the database connection string.
 7. Deploy, then verify `/api/health` and test opening and closing a paper trade. Restart the Render service and confirm the journal remains present.
 
-The backend creates and incrementally migrates its PostgreSQL tables on startup. Existing SQLite files are not automatically migrated; export and import separately if historical local records must be retained. Use the Supabase Session Pooler URI and keep SSL enabled. `render.yaml` sets `autoDeployTrigger: checksPass` for Blueprint-managed deployments; verify the live Render service's auto-deploy setting separately because syncing a Blueprint is an explicit configuration change. Paper trading remains simulated only; no exchange private keys or live-order endpoints are added.
+The backend creates and incrementally migrates its PostgreSQL tables on startup. Existing SQLite files are not automatically migrated; export and import separately if historical local records must be retained. Use the Supabase Session Pooler URI and keep SSL enabled. `render.yaml` sets `autoDeployTrigger: checksPass` for Blueprint-managed deployments; verify the live Render service's auto-deploy setting separately because syncing a Blueprint is an explicit configuration change. The current service is connected directly to the production branch; this repository file does not silently change the live Render service. Paper trading remains simulated only; no exchange private keys or live-order endpoints are added.
 
 **Free-tier note:** Render's free web service may sleep when idle. Supabase Free projects can pause after a period of inactivity. This setup is suitable for testing, not guaranteed always-on operation. Review current provider limits before relying on it.

@@ -14,6 +14,7 @@ def postgres_db(monkeypatch):
     if not url:
         pytest.skip("POSTGRES_TEST_URL is not configured")
     monkeypatch.setattr(settings, "database_url", url)
+    monkeypatch.setenv("DATABASE_SSLMODE", "disable")
 
     import psycopg
 
@@ -120,3 +121,12 @@ def test_postgres_futures_contract_metadata_persists(postgres_db):
     assert row["quantity"] == pytest.approx(opened["quantity"])
     assert row["contract_size"] == pytest.approx(0.001)
     assert row["contract_type"] == "linear"
+
+
+def test_postgres_monitor_advisory_lock_has_one_leader(postgres_db):
+    from backend.position_monitor import _monitor_leader_lock
+
+    with _monitor_leader_lock() as first:
+        assert first is True
+        with _monitor_leader_lock() as second:
+            assert second is False

@@ -5,7 +5,6 @@ to exchange private APIs and never places live orders.
 """
 from __future__ import annotations
 
-import math
 import os
 from typing import Literal
 
@@ -20,7 +19,7 @@ mcp = FastMCP(
     instructions=(
         "Crypto market research and paper trading only. Exchange data is public. "
         "Never claim to place a live order. Opening and closing positions only "
-        "create or update simulated paper trades in the configured database."
+        "create or update simulated paper trades in the local SQLite database."
     ),
     host="127.0.0.1",
     port=int(os.getenv("MCP_PORT", "8001")),
@@ -31,14 +30,7 @@ mcp = FastMCP(
 async def _api(method: str, path: str, *, params: dict | None = None, payload: dict | None = None):
     """Call the local FastAPI service and return JSON with safe error handling."""
     try:
-        username = os.getenv("TRADER_API_USERNAME", "")
-        password = os.getenv("TRADER_API_PASSWORD", "")
-        if bool(username) != bool(password):
-            raise ValueError("Set both TRADER_API_USERNAME and TRADER_API_PASSWORD, or neither.")
-        auth = (username, password) if username and password else None
-        async with httpx.AsyncClient(
-            base_url=API_BASE_URL, timeout=REQUEST_TIMEOUT, auth=auth
-        ) as client:
+        async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=REQUEST_TIMEOUT) as client:
             response = await client.request(method, path, params=params, json=payload)
             response.raise_for_status()
             return response.json()
@@ -144,7 +136,7 @@ async def open_paper_trade(
         raise ValueError("Use a CCXT symbol such as BTC/USDT.")
     if side == "SHORT" and market_type == "spot":
         raise ValueError("Spot SHORT is not supported; choose Futures paper mode.")
-    if not all(math.isfinite(value) and value > 0 for value in (entry, stop)) or (target is not None and (not math.isfinite(target) or target <= 0)):
+    if entry <= 0 or stop <= 0 or (target is not None and target <= 0):
         raise ValueError("Entry, stop and target must be positive.")
     return await _api("POST", "/api/paper/open", payload={
         "exchange": exchange, "symbol": symbol, "market_type": market_type,
@@ -155,7 +147,7 @@ async def open_paper_trade(
 @mcp.tool()
 async def close_paper_trade(trade_id: int, exit_price: float) -> dict:
     """Close an existing simulated paper position at the user-supplied exit price."""
-    if trade_id <= 0 or not math.isfinite(exit_price) or exit_price <= 0:
+    if trade_id <= 0 or exit_price <= 0:
         raise ValueError("Trade ID and exit price must be positive.")
     return await _api(
         "POST", f"/api/paper/{trade_id}/close",

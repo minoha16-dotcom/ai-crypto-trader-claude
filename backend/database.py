@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from pathlib import Path
+import os
 import sqlite3
 
 from .config import settings
@@ -41,7 +42,10 @@ def connect():
         import psycopg
         from psycopg.rows import dict_row
 
-        connection = psycopg.connect(url, row_factory=dict_row, connect_timeout=10, sslmode="require")
+        connection = psycopg.connect(
+            url, row_factory=dict_row, connect_timeout=10,
+            sslmode=os.getenv("DATABASE_SSLMODE", "require"),
+        )
         db = _PostgresConnection(connection)
         try:
             yield db
