@@ -42,6 +42,10 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None,
     if market_type == "futures" and not instrument:
         raise ValueError("Futures paper positions require validated exchange contract metadata.")
     spec = instrument or {"contract_size": 1.0, "contract_type": "spot"}
+    if market_type == "futures" and spec.get("contract_type") not in ("linear", "inverse"):
+        raise ValueError("Futures instrument must be a validated linear or inverse contract.")
+    if market_type == "spot" and spec.get("contract_type") != "spot":
+        raise ValueError("Spot instrument metadata is inconsistent with market type.")
 
     with connect() as db:
         db.execute("BEGIN IMMEDIATE")
