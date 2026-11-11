@@ -101,15 +101,15 @@ def test_futures_symbol_alias_rejects_ambiguous_settlement():
         registry = ExchangeRegistry()
         class FakeClient:
             markets = {
-                "BTC/USD:USD": {
-                    "symbol": "BTC/USD:USD", "contract": True, "swap": True,
+                "BTC/USD:USDT": {
+                    "symbol": "BTC/USD:USDT", "contract": True, "swap": True,
                     "linear": True, "base": "BTC", "quote": "USD",
-                    "settle": "USD", "active": True,
+                    "settle": "USDT", "active": True,
                 },
-                "BTC/USD:BTC": {
-                    "symbol": "BTC/USD:BTC", "contract": True, "swap": True,
-                    "inverse": True, "base": "BTC", "quote": "USD",
-                    "settle": "BTC", "active": True,
+                "BTC/USD:USDC": {
+                    "symbol": "BTC/USD:USDC", "contract": True, "swap": True,
+                    "linear": True, "base": "BTC", "quote": "USD",
+                    "settle": "USDC", "active": True,
                 },
             }
             async def load_markets(self):
@@ -120,6 +120,6 @@ def test_futures_symbol_alias_rejects_ambiguous_settlement():
         registry.get = fake_get
         with pytest.raises(ValueError, match="ambiguous"):
             await registry.resolve_symbol("okx", "BTC/USD", "futures")
-        assert await registry.resolve_symbol("okx", "BTC/USD:BTC", "futures") == "BTC/USD:BTC"
+        assert await registry.resolve_symbol("okx", "BTC/USD:USDT", "futures") == "BTC/USD:USDT"
         await registry.close()
     asyncio.run(run())
