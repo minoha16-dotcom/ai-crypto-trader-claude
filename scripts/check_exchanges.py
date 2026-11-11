@@ -114,6 +114,9 @@ async def main():
     finally:
         await registry.close()
 
+    # A cooldown is never a successful connectivity check.
+    if cooldown_blocked:
+        failed += 1
     print(
         f"SUMMARY passed={passed} region_skipped={skipped} "
         f"cooldown_blocked={cooldown_blocked} failed={failed}"
