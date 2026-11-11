@@ -186,3 +186,120 @@ def test_futures_symbol_does_not_match_same_pair_spot_market():
         await registry.close()
 
     asyncio.run(run())
+
+
+
+def test_registry_shares_rate_limiter_across_spot_and_futures(monkeypatch):
+    from backend import exchanges as exchange_module
+
+    class FakeClient:
+        def __init__(self, config):
+            self.options = config["options"]
+            self.throttler = object()
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(exchange_module.ccxt, "binance", FakeClient)
+    monkeypatch.setattr(exchange_module.ccxt, "bybit", FakeClient)
+
+    async def run():
+        registry = ExchangeRegistry()
+        binance_spot = await registry.get("binance", "spot")
+        binance_futures = await registry.get("binance", "futures")
+        bybit_spot = await registry.get("bybit", "spot")
+
+        assert binance_spot is not binance_futures
+        assert binance_spot.throttler is binance_futures.throttler
+        assert binance_spot.throttler is not bybit_spot.throttler
+        assert binance_spot.options["defaultType"] == "spot"
+        assert binance_futures.options["defaultType"] == "swap"
+        await registry.close()
+
+    asyncio.run(run())
+
+
+def test_ticker_cache_deduplicates_concurrent_and_repeated_requests(monkeypatch):
+    class FakeClient:
+        def __init__(self):
+            self.fetch_count = 0
+
+        async def fetch_ticker(self, symbol):
+            self.fetch_count += 1
+            await asyncio.sleep(0.01)
+            return {"symbol": symbol, "last": 123.45}
+
+    async def run():
+        registry = ExchangeRegistry(ticker_cache_ttl=10)
+        fake = FakeClient()
+
+        async def fake_load_markets(exchange_id, market_type):
+            return fake
+
+        async def fake_resolve_symbol(exchange_id, symbol, market_type):
+            return "BTC/USDT" if market_type == "spot" else "BTC/USDT:USDT"
+
+        monkeypatch.setattr(registry, "_load_markets", fake_load_markets)
+        monkeypatch.setattr(registry, "resolve_symbol", fake_resolve_symbol)
+
+        results = await asyncio.gather(*[
+            registry.ticker("binance", "BTC/USDT", "spot")
+            for _ in range(12)
+        ])
+        assert fake.fetch_count == 1
+        assert all(result["last"] == pytest.approx(123.45) for result in results)
+
+        # Returned objects are copies; a caller cannot corrupt the cache.
+        results[0]["last"] = -1
+        cached = await registry.ticker("binance", "BTC/USDT", "spot")
+        assert cached["last"] == pytest.approx(123.45)
+        assert fake.fetch_count == 1
+
+        # Spot and Futures are distinct cache keys even for the same base pair.
+        futures = await registry.ticker("binance", "BTC/USDT", "futures")
+        assert futures["symbol"] == "BTC/USDT:USDT"
+        assert fake.fetch_count == 2
+        await registry.close()
+
+    asyncio.run(run())
+
+
+def test_ticker_cache_expires_and_fetches_fresh_price(monkeypatch):
+    class FakeClient:
+        def __init__(self):
+            self.fetch_count = 0
+
+        async def fetch_ticker(self, symbol):
+            self.fetch_count += 1
+            return {"symbol": symbol, "last": float(self.fetch_count)}
+
+    async def run():
+        registry = ExchangeRegistry(ticker_cache_ttl=0.01)
+        fake = FakeClient()
+
+        async def fake_load_markets(exchange_id, market_type):
+            return fake
+
+        async def fake_resolve_symbol(exchange_id, symbol, market_type):
+            return symbol
+
+        monkeypatch.setattr(registry, "_load_markets", fake_load_markets)
+        monkeypatch.setattr(registry, "resolve_symbol", fake_resolve_symbol)
+
+        first = await registry.ticker("bybit", "BTC/USDT", "spot")
+        second = await registry.ticker("bybit", "BTC/USDT", "spot")
+        assert first["last"] == second["last"] == 1
+        assert fake.fetch_count == 1
+
+        await asyncio.sleep(0.02)
+        fresh = await registry.ticker("bybit", "BTC/USDT", "spot")
+        assert fresh["last"] == 2
+        assert fake.fetch_count == 2
+        await registry.close()
+
+    asyncio.run(run())
+
+
+def test_registry_rejects_invalid_ticker_cache_ttl():
+    with pytest.raises(ValueError, match="ticker_cache_ttl"):
+        ExchangeRegistry(ticker_cache_ttl=-1)
