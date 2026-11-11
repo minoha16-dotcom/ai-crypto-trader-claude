@@ -60,3 +60,28 @@ def test_server_monitor_keeps_position_open_when_price_is_invalid(
     with connect() as db:
         row = db.execute("SELECT status FROM trades WHERE id=?", (opened["id"],)).fetchone()
     assert row["status"] == "OPEN"
+
+
+
+def test_positions_endpoint_alerts_but_does_not_close_trade(isolated_db, monkeypatch):
+    opened = open_trade("binance", "BTC/USDT", "spot", "LONG", 100, 95, 110)
+
+    async def fake_ticker(exchange, symbol, market_type):
+        return {"last": 94.5, "timestamp": 123456789}
+
+    monkeypatch.setattr(registry, "ticker", fake_ticker)
+
+    from backend.main import get_positions
+
+    result = asyncio.run(get_positions())
+    position = next(p for p in result["positions"] if p["id"] == opened["id"])
+
+    assert position["alert"] == "STOP_REACHED"
+    assert position["status"] == "OPEN"
+    assert position["exit_result"] is None
+
+    with connect() as db:
+        row = db.execute(
+            "SELECT status FROM trades WHERE id=?", (opened["id"],)
+        ).fetchone()
+    assert row["status"] == "OPEN"
