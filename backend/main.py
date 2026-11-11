@@ -275,7 +275,7 @@ async def get_positions():
                 row["exchange"], row["symbol"], row["market_type"]
             )
             last = ticker.get("last")
-            if last is None or float(last) <= 0:
+            if last is None or not math.isfinite(float(last)) or float(last) <= 0:
                 raise ValueError("Exchange did not return a valid last price")
             last = float(last)
             direction = 1 if row["side"] == "LONG" else -1
