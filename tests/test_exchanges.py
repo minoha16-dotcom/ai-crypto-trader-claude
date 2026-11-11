@@ -118,6 +118,8 @@ def test_futures_symbol_alias_rejects_ambiguous_settlement():
             }
             async def load_markets(self):
                 return self.markets
+            async def close(self):
+                pass
         fake = FakeClient()
         async def fake_get(exchange_id, market_type):
             return fake
