@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hmac
 import math
@@ -16,13 +17,27 @@ from .scanner import scan
 from .paper import open_trade, close_trade, journal, account
 from .risk import risk_manager
 from .backtest import run_backtest
+from .position_monitor import run_position_monitor
 
 
 @asynccontextmanager
 async def lifespan(app):
     init_db()
-    yield
-    await registry.close()
+    stop_monitor = asyncio.Event()
+    monitor_task = asyncio.create_task(
+        run_position_monitor(stop_monitor), name="paper-position-monitor"
+    )
+    try:
+        yield
+    finally:
+        stop_monitor.set()
+        try:
+            # Do not let a slow exchange request stall application shutdown.
+            await asyncio.wait_for(monitor_task, timeout=20)
+        except asyncio.TimeoutError:
+            monitor_task.cancel()
+            await asyncio.gather(monitor_task, return_exceptions=True)
+        await registry.close()
 
 
 app = FastAPI(
@@ -260,7 +275,7 @@ async def get_positions():
                 row["exchange"], row["symbol"], row["market_type"]
             )
             last = ticker.get("last")
-            if last is None or float(last) <= 0:
+            if last is None or not math.isfinite(float(last)) or float(last) <= 0:
                 raise ValueError("Exchange did not return a valid last price")
             last = float(last)
             direction = 1 if row["side"] == "LONG" else -1
@@ -285,27 +300,14 @@ async def get_positions():
                 alert = "NEAR_STOP"
             elif target_proximity is not None and target_proximity >= 0.8:
                 alert = "NEAR_TARGET"
-            exit_result = None
-            if exit_reason:
-                try:
-                    exit_result = close_trade(row["id"], last)
-                except ValueError:
-                    # Another concurrent dashboard request may have closed this position.
-                    with connect() as db:
-                        already_closed = db.execute(
-                            "SELECT id, pnl, exit_price FROM trades WHERE id=? AND status='CLOSED'",
-                            (row["id"],)
-                        ).fetchone()
-                    if already_closed:
-                        exit_result = {"id": row["id"], "pnl": float(already_closed["pnl"] or 0),
-                                       "exit_price": float(already_closed["exit_price"]), "status": "CLOSED"}
-                    else:
-                        raise
+            # This endpoint is read-only: the independent server monitor is
+            # the sole automatic SL/TP closer. Keep alerts visible while it
+            # processes the same observed market price.
             return {
                 **row,
-                "status": "CLOSED" if exit_result else row["status"],
+                "status": row["status"],
                 "exit_reason": exit_reason,
-                "exit_result": exit_result,
+                "exit_result": None,
                 "live_price": last,
                 "unrealized_pnl": unrealized,
                 "unrealized_pnl_pct": (unrealized / notional * 100) if notional else 0,
