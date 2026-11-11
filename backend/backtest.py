@@ -1,8 +1,9 @@
-"""Conservative OHLCV backtest with Spot and exchange-aware Futures sizing.
+"""Conservative OHLCV backtest with gap-aware fills and mark-to-market equity.
 
 Signals are evaluated on closed candles and entered at the next candle open.
-When one candle touches both stop and target, stop is assumed to fill first.
-This is a research simulation, not a full exchange execution or margin model.
+A stop-market order is assumed to fill at an adverse gap open when the market
+opens beyond the stop. If stop and target both trade inside one candle, stop
+is assumed first. This remains a bar-based simulation, not exchange execution.
 """
 import math
 
@@ -16,14 +17,48 @@ from .contracts import (
 from .indicators import analyze
 
 
+def _costed_pnl(entry, mark, quantity, side, contract_size, contract_type, fee_rate):
+    gross = contract_gross_pnl(
+        entry, mark, quantity, side, contract_size, contract_type
+    )
+    costs = (
+        contract_notional(entry, quantity, contract_size, contract_type)
+        + contract_notional(mark, quantity, contract_size, contract_type)
+    ) * fee_rate
+    return gross - costs, gross, costs
+
+
+def _drawdown(peak, value):
+    return (peak - value) / peak * 100.0 if peak > 0 else 0.0
+
+
+def _validate_candles(candles):
+    for index, candle in enumerate(candles):
+        if len(candle) < 6:
+            raise ValueError(f"Candle {index} must contain timestamp and OHLCV values")
+        timestamp, open_price, high, low, close, volume = map(float, candle[:6])
+        if not all(math.isfinite(value) for value in (
+            timestamp, open_price, high, low, close, volume
+        )):
+            raise ValueError(f"Candle {index} contains a non-finite value")
+        if min(open_price, high, low, close) <= 0 or volume < 0:
+            raise ValueError(f"Candle {index} contains an invalid OHLCV value")
+        if high < max(open_price, close, low) or low > min(open_price, close):
+            raise ValueError(f"Candle {index} has inconsistent high/low values")
+
+
 def run_backtest(candles, starting_balance=10000.0, instrument=None):
     if len(candles) < 52:
         raise ValueError("At least 52 candles are required for next-open backtesting")
+    _validate_candles(candles)
     starting_balance = float(starting_balance)
     if not math.isfinite(starting_balance) or starting_balance <= 0:
         raise ValueError("starting_balance must be finite and positive")
 
-    spec = instrument or {"contract_size": 1.0, "contract_type": "spot"}
+    spec = instrument or {
+        "contract_size": 1.0, "contract_type": "spot",
+        "amount_precision": 12, "precision_mode": 2,
+    }
     contract_type = spec.get("contract_type", "spot")
     contract_size = float(spec.get("contract_size", 1.0))
     if contract_type not in ("spot", "linear", "inverse"):
@@ -37,16 +72,21 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
     slippage = float(settings.slippage_bps) / 10000.0
     risk_pct = float(settings.risk_per_trade_pct)
     max_notional_pct = float(settings.max_position_notional_pct)
-    if any(not math.isfinite(v) or v < 0 for v in (fee_rate, slippage, risk_pct, max_notional_pct)):
-        raise ValueError("Backtest costs and risk settings must be finite and non-negative")
-    if slippage >= 1:
-        raise ValueError("Backtest slippage must be less than 100%")
+    if (
+        not all(math.isfinite(value) for value in
+                (fee_rate, slippage, risk_pct, max_notional_pct))
+        or fee_rate < 0 or not 0 <= slippage < 1
+        or risk_pct <= 0 or max_notional_pct <= 0
+    ):
+        raise ValueError("Backtest costs and risk settings are outside valid ranges")
 
     trades = []
     skipped_signals = []
-    equity = starting_balance
-    peak = equity
+    equity_curve = []
+    equity = starting_balance  # realized balance; open P&L is not booked
+    peak_equity = equity
     max_drawdown = 0.0
+    open_position = None
     i = 49
 
     while i < len(candles) - 1:
@@ -59,16 +99,22 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
         raw_entry = float(candles[i + 1][1])
         reference_price = float(metrics["price"])
         atr_value = float(metrics["atr14"])
-        if not all(math.isfinite(v) and v > 0 for v in (raw_entry, reference_price, atr_value)):
-            skipped_signals.append({"index": i, "reason": "Invalid entry or indicator price"})
+        if not all(math.isfinite(value) and value > 0 for value in
+                   (raw_entry, reference_price, atr_value)):
+            skipped_signals.append({
+                "index": i, "reason": "Invalid entry or indicator price"
+            })
             i += 1
             continue
 
-        direction = 1 if side == "LONG" else -1
         entry = raw_entry * (1 + slippage if side == "LONG" else 1 - slippage)
         distance = max(atr_value * 2, reference_price * 0.005)
         stop = raw_entry - distance if side == "LONG" else raw_entry + distance
         target = raw_entry + 2 * distance if side == "LONG" else raw_entry - 2 * distance
+        if stop <= 0:
+            skipped_signals.append({"index": i, "reason": "Calculated stop is not positive"})
+            i += 1
+            continue
         stop_fill = stop * (1 - slippage if side == "LONG" else 1 + slippage)
 
         per_contract_risk = contract_risk_amount(
@@ -81,83 +127,175 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
             entry, 1.0, contract_size, contract_type
         )
         if per_contract_risk <= 0 or per_contract_notional <= 0:
-            skipped_signals.append({"index": i, "reason": "Invalid contract risk or notional"})
+            skipped_signals.append({
+                "index": i, "reason": "Invalid contract risk or notional"
+            })
             i += 1
             continue
 
         risk_budget = equity * risk_pct / 100.0
         notional_cap = equity * max_notional_pct / 100.0
-        quantity = min(risk_budget / per_contract_risk, notional_cap / per_contract_notional)
-        if contract_type != "spot":
-            # Respect the exchange maximum before precision normalization.
-            # This reduces size rather than rejecting an otherwise valid setup.
-            maximum_amount = spec.get("max_amount")
-            if maximum_amount is not None:
-                maximum_amount = float(maximum_amount)
-                if not math.isfinite(maximum_amount) or maximum_amount <= 0:
-                    skipped_signals.append({"index": i, "reason": "Invalid exchange maximum amount"})
-                    i += 1
-                    continue
-                quantity = min(quantity, maximum_amount)
-            try:
-                quantity = normalize_amount(
-                    quantity,
-                    spec.get("amount_precision"),
-                    spec.get("precision_mode"),
-                    spec.get("min_amount"),
-                    spec.get("max_amount"),
-                )
-            except (TypeError, ValueError) as exc:
-                skipped_signals.append({"index": i, "reason": str(exc)})
-                i += 1
-                continue
-        else:
-            quantity = math.nextafter(quantity, 0.0) if quantity * per_contract_risk > risk_budget else quantity
+        quantity = min(
+            risk_budget / per_contract_risk,
+            notional_cap / per_contract_notional,
+        )
+        try:
+            quantity = normalize_amount(
+                quantity,
+                spec.get("amount_precision"),
+                spec.get("precision_mode"),
+                spec.get("min_amount"),
+                spec.get("max_amount"),
+            )
+        except (TypeError, ValueError) as exc:
+            skipped_signals.append({"index": i, "reason": str(exc)})
+            i += 1
+            continue
 
         notional = contract_notional(entry, quantity, contract_size, contract_type)
         if (
             not math.isfinite(quantity) or quantity <= 0
             or notional > notional_cap * (1 + 1e-12)
         ):
-            skipped_signals.append({"index": i, "reason": "Position is outside risk or notional limits"})
+            skipped_signals.append({
+                "index": i, "reason": "Position is outside risk or notional limits"
+            })
             i += 1
             continue
         if spec.get("min_cost") is not None and notional < float(spec["min_cost"]):
-            skipped_signals.append({"index": i, "reason": "Order notional is below exchange minimum"})
+            skipped_signals.append({
+                "index": i, "reason": "Order notional is below exchange minimum"
+            })
             i += 1
             continue
         if spec.get("max_cost") is not None and notional > float(spec["max_cost"]):
-            skipped_signals.append({"index": i, "reason": "Order notional exceeds exchange maximum"})
+            skipped_signals.append({
+                "index": i, "reason": "Order notional exceeds exchange maximum"
+            })
             i += 1
             continue
 
+        position = {
+            "side": side,
+            "entry": entry,
+            "stop": stop,
+            "target": target,
+            "quantity": quantity,
+            "contract_size": contract_size,
+            "contract_type": contract_type,
+            "notional": notional,
+            "entry_index": i + 1,
+            "entry_timestamp": candles[i + 1][0],
+        }
         exit_reference = None
         exit_reason = None
+        exit_index = None
         j = i + 1
+
         while j < len(candles):
-            high, low = float(candles[j][2]), float(candles[j][3])
-            stop_hit = low <= stop if side == "LONG" else high >= stop
-            target_hit = high >= target if side == "LONG" else low <= target
-            if stop_hit:
-                exit_reference, exit_reason = stop, "STOP"
+            timestamp, candle_open, high, low, close = map(float, candles[j][:5])
+
+            # First honor gaps at the candle open. Stop-market exits fill at the
+            # worse opening price; favorable target gaps fill at the opening price.
+            if side == "LONG" and candle_open <= stop:
+                exit_reference, exit_reason = candle_open, "STOP_GAP"
+            elif side == "SHORT" and candle_open >= stop:
+                exit_reference, exit_reason = candle_open, "STOP_GAP"
+            elif side == "LONG" and candle_open >= target:
+                exit_reference, exit_reason = candle_open, "TARGET_GAP"
+            elif side == "SHORT" and candle_open <= target:
+                exit_reference, exit_reason = candle_open, "TARGET_GAP"
+            else:
+                stop_hit = low <= stop if side == "LONG" else high >= stop
+                target_hit = high >= target if side == "LONG" else low <= target
+                # OHLC cannot reveal intrabar ordering; remain conservative.
+                if stop_hit:
+                    exit_reference, exit_reason = stop, "STOP"
+                elif target_hit:
+                    exit_reference, exit_reason = target, "TARGET"
+
+            if exit_reference is not None:
+                exit_index = j
                 break
-            if target_hit:
-                exit_reference, exit_reason = target, "TARGET"
-                break
+
+            # Mark-to-market drawdown uses adverse intrabar extremes, while the
+            # reported unrealized P&L uses the candle close.
+            favorable_mark = high if side == "LONG" else low
+            adverse_mark = low if side == "LONG" else high
+            favorable_price = favorable_mark * (
+                1 - slippage if side == "LONG" else 1 + slippage
+            )
+            adverse_price = adverse_mark * (
+                1 - slippage if side == "LONG" else 1 + slippage
+            )
+            close_price = close * (
+                1 - slippage if side == "LONG" else 1 + slippage
+            )
+            favorable_pnl = _costed_pnl(
+                entry, favorable_price, quantity, side,
+                contract_size, contract_type, fee_rate
+            )[0]
+            adverse_pnl = _costed_pnl(
+                entry, adverse_price, quantity, side,
+                contract_size, contract_type, fee_rate
+            )[0]
+            close_pnl = _costed_pnl(
+                entry, close_price, quantity, side,
+                contract_size, contract_type, fee_rate
+            )[0]
+            peak_equity = max(peak_equity, equity + favorable_pnl)
+            max_drawdown = max(
+                max_drawdown,
+                _drawdown(peak_equity, equity + adverse_pnl),
+                _drawdown(peak_equity, equity + close_pnl),
+            )
+            equity_curve.append({
+                "index": j,
+                "timestamp": candles[j][0],
+                "balance": equity,
+                "equity": equity + close_pnl,
+                "mark_price": close,
+                "drawdown_pct": _drawdown(peak_equity, equity + close_pnl),
+            })
             j += 1
 
         if exit_reference is None:
+            final_close = float(candles[-1][4])
+            mark = final_close * (
+                1 - slippage if side == "LONG" else 1 + slippage
+            )
+            unrealized, gross_unrealized, unrealized_costs = _costed_pnl(
+                entry, mark, quantity, side, contract_size, contract_type, fee_rate
+            )
+            open_position = {
+                **position,
+                "status": "OPEN",
+                "mark_price": final_close,
+                "gross_unrealized_pnl": gross_unrealized,
+                "estimated_costs": unrealized_costs,
+                "unrealized_pnl": unrealized,
+                "unrealized_pnl_pct": (
+                    unrealized / notional * 100.0 if notional else 0.0
+                ),
+            }
+            final_equity = equity + unrealized
+            max_drawdown = max(max_drawdown, _drawdown(peak_equity, final_equity))
+            equity_curve.append({
+                "index": len(candles) - 1,
+                "timestamp": candles[-1][0],
+                "balance": equity,
+                "equity": final_equity,
+                "mark_price": final_close,
+                "drawdown_pct": _drawdown(peak_equity, final_equity),
+            })
             break
 
-        exit_price = exit_reference * (1 - slippage if side == "LONG" else 1 + slippage)
-        gross = contract_gross_pnl(
-            entry, exit_price, quantity, side, contract_size, contract_type
+        exit_price = exit_reference * (
+            1 - slippage if side == "LONG" else 1 + slippage
         )
-        costs = (
-            contract_notional(entry, quantity, contract_size, contract_type)
-            + contract_notional(exit_price, quantity, contract_size, contract_type)
-        ) * fee_rate
-        pnl = gross - costs
+        pnl, gross, costs = _costed_pnl(
+            entry, exit_price, quantity, side, contract_size, contract_type, fee_rate
+        )
         initial_risk = contract_risk_amount(
             entry, stop_fill, quantity, contract_size, contract_type
         ) + (
@@ -165,60 +303,81 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
             + contract_notional(stop_fill, quantity, contract_size, contract_type)
         ) * fee_rate
         r_multiple = pnl / initial_risk if initial_risk > 0 else 0.0
-
         equity += pnl
-        peak = max(peak, equity)
-        drawdown = (peak - equity) / peak * 100 if peak > 0 else 0.0
-        max_drawdown = max(max_drawdown, drawdown)
+        peak_equity = max(peak_equity, equity)
+        max_drawdown = max(max_drawdown, _drawdown(peak_equity, equity))
         trades.append({
-            "side": side,
-            "entry": entry,
-            "stop": stop,
-            "target": target,
+            **position,
             "exit": exit_price,
             "exit_reason": exit_reason,
-            "quantity": quantity,
-            "contract_size": contract_size,
-            "contract_type": contract_type,
-            "notional": notional,
+            "exit_index": exit_index,
+            "exit_timestamp": candles[exit_index][0],
             "gross_pnl": gross,
             "costs": costs,
             "pnl": pnl,
             "r_multiple": r_multiple,
+            "status": "CLOSED",
         })
-        i = j + 1
+        equity_curve.append({
+            "index": exit_index,
+            "timestamp": candles[exit_index][0],
+            "balance": equity,
+            "equity": equity,
+            "mark_price": exit_price,
+            "drawdown_pct": _drawdown(peak_equity, equity),
+        })
+        i = exit_index + 1
 
     wins = [trade for trade in trades if trade["pnl"] > 0]
     losses = [trade for trade in trades if trade["pnl"] < 0]
     gross_profit = sum(trade["pnl"] for trade in wins)
     gross_loss = abs(sum(trade["pnl"] for trade in losses))
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else None
+    unrealized = float(open_position["unrealized_pnl"]) if open_position else 0.0
+    ending_equity = equity + unrealized
 
     return {
         "trades": trades,
         "trade_count": len(trades),
+        "closed_trade_count": len(trades),
+        "open_positions": [open_position] if open_position else [],
+        "open_position": open_position,
         "skipped_signals": skipped_signals,
         "starting_balance": starting_balance,
         "ending_balance": equity,
-        "net_pnl": equity - starting_balance,
-        "expectancy_r": sum(trade["r_multiple"] for trade in trades) / len(trades) if trades else 0.0,
+        "ending_equity": ending_equity,
+        "realized_pnl": equity - starting_balance,
+        "unrealized_pnl": unrealized,
+        "net_pnl": ending_equity - starting_balance,
+        "expectancy_r": (
+            sum(trade["r_multiple"] for trade in trades) / len(trades)
+            if trades else 0.0
+        ),
         "profit_factor": profit_factor,
         "max_drawdown_pct": max_drawdown,
         "win_rate_pct": len(wins) / len(trades) * 100 if trades else 0.0,
+        "equity_curve": equity_curve,
         "instrument": {
             "contract_type": contract_type,
             "contract_size": contract_size,
         },
         "assumptions": {
             "entry": "next candle open",
+            "stop_gap_fill": "adverse candle open plus exit slippage",
+            "target_gap_fill": "favorable candle open plus exit slippage",
             "same_candle_stop_and_target": "stop first",
+            "drawdown": "mark-to-market with adverse intrabar OHLC extremes",
+            "open_at_end": "reported as unrealized; not added to realized balance",
             "fee_rate_per_side": fee_rate,
             "slippage_bps_per_side": float(settings.slippage_bps),
             "funding": "not modeled",
             "margin_and_liquidation": "not modeled",
             "position_mode": "one position at a time",
             "position_notional_cap_pct": max_notional_pct,
-            "futures_quantity": "exchange contract precision and limits applied" if contract_type != "spot" else "base-asset units",
+            "futures_quantity": (
+                "exchange contract precision and limits applied"
+                if contract_type != "spot" else "base-asset units"
+            ),
             "profit_factor": "null when there are no losing trades",
         },
     }
