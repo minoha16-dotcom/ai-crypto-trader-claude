@@ -168,7 +168,12 @@ class ExchangeRegistry:
         candidates = [value for value in (header_delay, ban_delay) if value is not None]
         if candidates:
             delay = max(candidates)
-            source = "Retry-After header" if header_delay is not None else "response ban timestamp"
+            if header_delay is not None and header_delay >= (ban_delay or 0):
+                source = "Retry-After header"
+            elif ban_delay is not None:
+                source = "response ban timestamp"
+            else:
+                source = "Retry-After header"
         else:
             delay = float(RATE_LIMIT_FALLBACK_SECONDS[status_code])
             source = "local fallback"
