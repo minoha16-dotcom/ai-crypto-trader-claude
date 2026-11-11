@@ -190,6 +190,16 @@ curl -X POST "http://127.0.0.1:8000/api/scan?exchange=binance&market_type=spot&s
 - `POST /api/paper/open`
 - `POST /api/paper/{trade_id}/close`
 
+## Public exchange smoke tests
+
+Run the public connectivity check from a network that can reach the exchange APIs:
+
+```bash
+python scripts/check_exchanges.py
+```
+
+It checks BTC/USDT Spot and a supported BTC/USDT Futures contract on Binance, Bybit, and OKX, including the public ticker, contract type, contract size, and amount precision. It never uses API keys or submits orders. Explicit provider geo-block responses are reported as `SKIP`, not `PASS`; other connection or metadata failures fail the check. A region-restricted GitHub runner therefore cannot certify the blocked exchange—rerun the script from an allowed network to complete that exchange's verification. The GitHub workflow runs on pull requests targeting the production branch and can also be started manually.
+
 ## Futures backtesting
 
 The backtest resolves the exchange's canonical Futures symbol and loads its contract metadata before calculating results. Linear and inverse contracts use their own contract-size and P&L formulas, exchange amount precision, min/max quantity, and notional caps. Profit Factor is `null` when there are no losing trades so the response remains valid JSON. Funding, margin, and liquidation are not simulated.

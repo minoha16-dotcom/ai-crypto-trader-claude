@@ -86,6 +86,16 @@ async def check(exchange_id, market_type):
         await client.close()
 
 
+def is_region_restriction(error):
+    """Identify explicit exchange/provider geo-block responses, not generic failures."""
+    message = str(error).lower()
+    return (
+        "restricted location" in message
+        or "configured to block access from your country" in message
+        or "http 451" in message
+    )
+
+
 async def main():
     checks = [(exchange_id, market_type)
               for exchange_id in EXCHANGES
@@ -95,11 +105,21 @@ async def main():
         return_exceptions=True,
     )
     failed = False
+    passed = 0
+    skipped = 0
     for (exchange_id, market_type), result in zip(checks, results):
         if isinstance(result, Exception):
-            failed = True
-            print(f"FAIL {exchange_id} {market_type}: {type(result).__name__}: {result}")
+            if is_region_restriction(result):
+                skipped += 1
+                print(
+                    f"SKIP {exchange_id} {market_type}: provider blocked the runner's region; "
+                    "this is not a successful connectivity check."
+                )
+            else:
+                failed = True
+                print(f"FAIL {exchange_id} {market_type}: {type(result).__name__}: {result}")
         else:
+            passed += 1
             suffix = (
                 f" contract={result['contract_type']} size={result['contract_size']} "
                 f"amount_precision={result['amount_precision']}"
@@ -109,6 +129,10 @@ async def main():
                 f"PASS {exchange_id} {market_type} {result['symbol']} "
                 f"last={result['last']}{suffix}"
             )
+    print(f"SUMMARY passed={passed} region_skipped={skipped} failed={int(failed)}")
+    if passed == 0:
+        failed = True
+        print("FAIL no exchange check completed successfully from this runner region")
     if failed:
         raise SystemExit(1)
 
