@@ -154,9 +154,10 @@ async def market(exchange, symbol, market_type="spot"):
     if market_type not in ("spot", "futures"):
         raise HTTPException(400, "market_type must be spot or futures")
     try:
-        ticker = await registry.ticker(exchange, symbol, market_type)
+        resolved_symbol = await registry.resolve_symbol(exchange, symbol, market_type)
+        ticker = await registry.ticker(exchange, resolved_symbol, market_type)
         return {
-            "exchange": exchange, "symbol": symbol, "market_type": market_type,
+            "exchange": exchange, "symbol": resolved_symbol, "market_type": market_type,
             "last": ticker.get("last"), "bid": ticker.get("bid"),
             "ask": ticker.get("ask"), "base_volume": ticker.get("baseVolume"),
             "timestamp": ticker.get("timestamp"),
@@ -174,9 +175,10 @@ async def backtest(exchange="binance", symbol="BTC/USDT", market_type="spot", ti
     if limit < 52 or limit > 5000:
         raise HTTPException(400, "limit must be between 52 and 5000")
     try:
-        candles = await registry.ohlcv(exchange, symbol, timeframe, limit, market_type)
+        resolved_symbol = await registry.resolve_symbol(exchange, symbol, market_type)
+        candles = await registry.ohlcv(exchange, resolved_symbol, timeframe, limit, market_type)
         # The final exchange candle may still be forming; never use it for signals.
-        return {"exchange": exchange, "symbol": symbol, "market_type": market_type,
+        return {"exchange": exchange, "symbol": resolved_symbol, "market_type": market_type,
                 "timeframe": timeframe, **run_backtest(candles[:-1])}
     except Exception as exc:
         raise HTTPException(400, str(exc))
