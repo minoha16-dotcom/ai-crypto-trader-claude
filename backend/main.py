@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import hmac
 import math
@@ -16,13 +17,22 @@ from .scanner import scan
 from .paper import open_trade, close_trade, journal, account
 from .risk import risk_manager
 from .backtest import run_backtest
+from .position_monitor import run_position_monitor
 
 
 @asynccontextmanager
 async def lifespan(app):
     init_db()
-    yield
-    await registry.close()
+    stop_monitor = asyncio.Event()
+    monitor_task = asyncio.create_task(
+        run_position_monitor(stop_monitor), name="paper-position-monitor"
+    )
+    try:
+        yield
+    finally:
+        stop_monitor.set()
+        await monitor_task
+        await registry.close()
 
 
 app = FastAPI(
