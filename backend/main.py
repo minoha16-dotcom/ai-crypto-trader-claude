@@ -398,7 +398,8 @@ async def paper_open(body: PaperOpen):
         # a manually entered paper position. This prevents arbitrary symbols and
         # spot/futures market mismatches from entering the journal.
         instrument = await registry.market_spec(body.exchange, body.symbol, body.market_type)
-        ticker = await registry.ticker(body.exchange, body.symbol, body.market_type)
+        resolved_symbol = instrument.get("symbol", body.symbol)
+        ticker = await registry.ticker(body.exchange, resolved_symbol, body.market_type)
         last = ticker.get("last")
         if last is None or not math.isfinite(float(last)) or float(last) <= 0:
             raise ValueError("Exchange returned an invalid market price")
@@ -414,8 +415,10 @@ async def paper_open(body: PaperOpen):
         positions = marked["positions"]
         prices_complete = all(p.get("unrealized_pnl") is not None for p in positions)
         floating_pnl = sum(float(p["unrealized_pnl"]) for p in positions if p.get("unrealized_pnl") is not None)
+        trade_data = body.model_dump()
+        trade_data["symbol"] = resolved_symbol
         return open_trade(
-            **body.model_dump(),
+            **trade_data,
             unrealized_pnl=floating_pnl,
             prices_complete=prices_complete,
             instrument=instrument,
