@@ -15,7 +15,7 @@ def isolated_db(tmp_path, monkeypatch):
     init_db()
 
 
-async def test_server_monitor_closes_long_when_stop_is_crossed(isolated_db, monkeypatch):
+def test_server_monitor_closes_long_when_stop_is_crossed(isolated_db, monkeypatch):
     opened = open_trade("binance", "BTC/USDT", "spot", "LONG", 100, 95, 110)
 
     async def fake_ticker(exchange, symbol, market_type):
@@ -31,14 +31,14 @@ async def test_server_monitor_closes_long_when_stop_is_crossed(isolated_db, monk
 
 
 @pytest.mark.asyncio
-async def test_server_monitor_closes_short_when_target_is_crossed(isolated_db, monkeypatch):
+def test_server_monitor_closes_short_when_target_is_crossed(isolated_db, monkeypatch):
     opened = open_trade("bybit", "BTC/USDT:USDT", "futures", "SHORT", 100, 105, 90)
 
     async def fake_ticker(exchange, symbol, market_type):
         return {"last": 89.5}
 
     monkeypatch.setattr(registry, "ticker", fake_ticker)
-    assert await monitor_open_positions_once() == 1
+    assert asyncio.run(monitor_open_positions_once()) == 1
 
     with connect() as db:
         row = db.execute("SELECT status, exit_price FROM trades WHERE id=?", (opened["id"],)).fetchone()
@@ -48,7 +48,7 @@ async def test_server_monitor_closes_short_when_target_is_crossed(isolated_db, m
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bad_price", [None, 0, -1, float("inf"), float("nan")])
-async def test_server_monitor_keeps_position_open_when_price_is_invalid(
+def test_server_monitor_keeps_position_open_when_price_is_invalid(
     isolated_db, monkeypatch, bad_price
 ):
     opened = open_trade("binance", "BTC/USDT", "spot", "LONG", 100, 95, 110)
