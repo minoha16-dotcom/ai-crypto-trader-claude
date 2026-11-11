@@ -281,7 +281,6 @@ async def get_positions():
             last = float(last)
             pnl_metrics = position_pnl(row["entry"], row["quantity"], row["side"], last)
             unrealized = pnl_metrics["unrealized_pnl"]
-            notional = float(row["entry"]) * float(row["quantity"])
             stop_gap = abs(last - float(row["stop"]))
             stop_span = abs(float(row["entry"]) - float(row["stop"]))
             target = row.get("target")
@@ -356,9 +355,10 @@ async def risk():
     daily_start = float(snapshot["starting_equity"]) if snapshot else settings.paper_starting_balance + realized_all - today_realized
     daily_pnl = today_realized + floating
     open_risk = sum(position_risk(p["entry"], p["stop"], p["quantity"]) for p in positions)
-    equity = settings.paper_starting_balance + realized_all
+    sizing_equity = settings.paper_starting_balance + realized_all
+    equity = sizing_equity + floating
     remaining_daily_loss = max(0.0, daily_start * risk_manager.max_daily_loss_pct / 100 + daily_pnl)
-    available_open_risk = max(0.0, equity * risk_manager.max_open_risk_pct / 100 - open_risk)
+    available_open_risk = max(0.0, sizing_equity * risk_manager.max_open_risk_pct / 100 - open_risk)
     return {
         "risk_per_trade_pct": risk_manager.risk_pct,
         "max_open_risk_pct": risk_manager.max_open_risk_pct,
