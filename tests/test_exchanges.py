@@ -137,6 +137,7 @@ def test_futures_symbol_does_not_match_same_pair_spot_market():
         registry = ExchangeRegistry()
 
         class FakeClient:
+            precisionMode = 2
             markets = {
                 "BTC/USDT": {
                     "symbol": "BTC/USDT", "type": "spot", "spot": True,
