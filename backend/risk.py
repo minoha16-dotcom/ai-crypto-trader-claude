@@ -45,6 +45,8 @@ class RiskManager:
             return RiskDecision(False, 0, 0, 0, "Invalid exchange contract size")
 
         risk_target = equity * self.risk_pct / 100
+        if contract_type == "spot" and open_risk + risk_target > equity * self.max_open_risk_pct / 100:
+            return RiskDecision(False, 0, 0, risk_target, "Maximum open risk would be exceeded")
         per_unit_risk = contract_risk_amount(entry, stop, 1.0, contract_size, contract_type)
         per_unit_risk += (
             contract_notional(entry, 1.0, contract_size, contract_type)
