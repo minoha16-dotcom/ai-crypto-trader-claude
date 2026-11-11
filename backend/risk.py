@@ -3,7 +3,7 @@ import math
 
 from .config import settings
 from .contracts import contract_notional, contract_risk_amount, normalize_amount
-from .metrics import trading_cost_rate
+from .metrics import trading_cost_rate, validate_trading_configuration
 
 
 @dataclass
@@ -24,39 +24,18 @@ class RiskManager:
         self.max_notional_pct = settings.max_position_notional_pct
 
     def _validate_configuration(self):
-        limits = (
-            self.risk_pct, self.max_open_risk_pct,
-            self.max_daily_loss_pct, self.max_notional_pct,
-        )
-        if not all(math.isfinite(float(value)) for value in limits):
-            return "Risk configuration must contain finite percentages"
-        if not 0 < self.risk_pct <= 100:
-            return "risk_per_trade_pct must be greater than 0 and at most 100"
-        if not 0 < self.max_open_risk_pct <= 100:
-            return "max_open_risk_pct must be greater than 0 and at most 100"
-        if self.risk_pct > self.max_open_risk_pct:
-            return "risk_per_trade_pct cannot exceed max_open_risk_pct"
-        if not 0 < self.max_daily_loss_pct <= 100:
-            return "max_daily_loss_pct must be greater than 0 and at most 100"
-        if not 0 < self.max_notional_pct <= 100:
-            return "max_position_notional_pct must be greater than 0 and at most 100"
         try:
-            rate = trading_cost_rate()
-        except (TypeError, ValueError):
-            return "Fee and slippage configuration must be numeric"
-        if not math.isfinite(rate) or rate < 0:
-            return "Fee and slippage configuration must be finite and non-negative"
-        if settings.taker_fee_rate >= 1 or settings.slippage_bps >= 10000:
-            return "Fee or slippage configuration exceeds supported bounds"
-        return None
+            return validate_trading_configuration()
+        except (TypeError, ValueError) as exc:
+            return str(exc)
 
     def size(
         self, equity, entry, stop, open_risk=0, daily_pnl=0,
         daily_start_equity=None, instrument=None,
     ):
-        configuration_error = self._validate_configuration()
-        if configuration_error:
-            return RiskDecision(False, 0, 0, 0, configuration_error)
+        configuration = self._validate_configuration()
+        if isinstance(configuration, str):
+            return RiskDecision(False, 0, 0, 0, configuration)
 
         values = (equity, entry, stop, open_risk, daily_pnl)
         if any(not isinstance(value, (int, float)) for value in values):
@@ -88,7 +67,7 @@ class RiskManager:
         ) + (
             contract_notional(entry, 1.0, contract_size, contract_type)
             + contract_notional(stop, 1.0, contract_size, contract_type)
-        ) * trading_cost_rate()
+        ) * (configuration["fee_rate"] + configuration["slippage"])
         if per_unit_risk <= 0 or not math.isfinite(per_unit_risk):
             return RiskDecision(False, 0, 0, 0, "Invalid per-contract risk")
 

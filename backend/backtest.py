@@ -15,6 +15,7 @@ from .contracts import (
     normalize_amount,
 )
 from .indicators import analyze
+from .metrics import validate_trading_configuration
 
 
 def _costed_pnl(entry, mark, quantity, side, contract_size, contract_type, fee_rate):
@@ -68,17 +69,11 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
     if contract_type == "spot" and instrument and instrument.get("market_type") == "futures":
         raise ValueError("Futures backtests require linear or inverse contract metadata")
 
-    fee_rate = float(settings.taker_fee_rate)
-    slippage = float(settings.slippage_bps) / 10000.0
-    risk_pct = float(settings.risk_per_trade_pct)
-    max_notional_pct = float(settings.max_position_notional_pct)
-    if (
-        not all(math.isfinite(value) for value in
-                (fee_rate, slippage, risk_pct, max_notional_pct))
-        or fee_rate < 0 or not 0 <= slippage < 1
-        or risk_pct <= 0 or max_notional_pct <= 0
-    ):
-        raise ValueError("Backtest costs and risk settings are outside valid ranges")
+    configuration = validate_trading_configuration()
+    fee_rate = configuration["fee_rate"]
+    slippage = configuration["slippage"]
+    risk_pct = configuration["risk_pct"]
+    max_notional_pct = configuration["max_notional_pct"]
 
     trades = []
     skipped_signals = []
@@ -280,14 +275,6 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
             }
             final_equity = equity + unrealized
             max_drawdown = max(max_drawdown, _drawdown(peak_equity, final_equity))
-            equity_curve.append({
-                "index": len(candles) - 1,
-                "timestamp": candles[-1][0],
-                "balance": equity,
-                "equity": final_equity,
-                "mark_price": final_close,
-                "drawdown_pct": _drawdown(peak_equity, final_equity),
-            })
             break
 
         exit_price = exit_reference * (
