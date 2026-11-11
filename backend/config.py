@@ -10,20 +10,20 @@ class Settings(BaseSettings):
     default_exchange: str = "binance"
     default_market_type: str = "spot"
 
-    risk_per_trade_pct: float = Field(default=0.5, gt=0, le=100)
-    max_open_risk_pct: float = Field(default=2.0, gt=0, le=100)
-    max_daily_loss_pct: float = Field(default=3.0, gt=0, le=100)
-    max_position_notional_pct: float = Field(default=20.0, gt=0, le=100)
+    risk_per_trade_pct: float = Field(default=0.5, gt=0, le=100, allow_inf_nan=False)
+    max_open_risk_pct: float = Field(default=2.0, gt=0, le=100, allow_inf_nan=False)
+    max_daily_loss_pct: float = Field(default=3.0, gt=0, le=100, allow_inf_nan=False)
+    max_position_notional_pct: float = Field(default=20.0, gt=0, le=100, allow_inf_nan=False)
 
-    taker_fee_rate: float = Field(default=0.0006, ge=0, lt=1)
-    slippage_bps: float = Field(default=2.0, ge=0, lt=10000)
+    taker_fee_rate: float = Field(default=0.0006, ge=0, lt=1, allow_inf_nan=False)
+    slippage_bps: float = Field(default=2.0, ge=0, lt=10000, allow_inf_nan=False)
 
-    signal_min_adx: float = Field(default=20.0, ge=0, le=100)
-    signal_min_volume_ratio: float = Field(default=1.0, ge=0)
-    signal_min_atr_pct: float = Field(default=0.1, gt=0)
+    signal_min_adx: float = Field(default=20.0, ge=0, le=100, allow_inf_nan=False)
+    signal_min_volume_ratio: float = Field(default=1.0, ge=0, allow_inf_nan=False)
+    signal_min_atr_pct: float = Field(default=0.1, gt=0, allow_inf_nan=False)
 
-    paper_starting_balance: float = Field(default=10000.0, gt=0)
-    paper_entry_max_deviation_pct: float = Field(default=5.0, gt=0, le=100)
+    paper_starting_balance: float = Field(default=10000.0, gt=0, allow_inf_nan=False)
+    paper_entry_max_deviation_pct: float = Field(default=5.0, gt=0, le=100, allow_inf_nan=False)
     scan_symbols: str = "BTC/USDT,ETH/USDT,SOL/USDT"
     scan_timeframe: str = "1h"
 
