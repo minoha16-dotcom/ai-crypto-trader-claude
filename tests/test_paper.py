@@ -105,3 +105,17 @@ def test_maximum_three_open_positions(isolated_db):
     open_trade("binance", "SOL/USDT", "spot", "LONG", 100, 95)
     with pytest.raises(ValueError, match="Maximum open paper positions"):
         open_trade("binance", "BNB/USDT", "spot", "LONG", 100, 95)
+
+
+def test_futures_inverse_sizing_uses_quote_face_value(isolated_db):
+    opened = open_trade(
+        "okx", "BTC/USD:BTC", "futures", "SHORT", 100, 105,
+        instrument={
+            "contract_size": 100, "contract_type": "inverse",
+            "amount_precision": 1, "precision_mode": 2, "min_amount": 1,
+        },
+    )
+    assert opened["status"] == "OPEN"
+    assert opened["contracts"] == opened["quantity"]
+    assert opened["quantity"] == round(opened["quantity"], 1)
+    assert opened["notional"] == pytest.approx(opened["quantity"] * 100)
