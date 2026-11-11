@@ -29,10 +29,12 @@ def normalize_amount(amount, precision, precision_mode, min_amount=None, max_amo
         raise ValueError(f"Unsupported CCXT precision mode: {precision_mode}")
     rounded = (Decimal(str(amount)) / step).to_integral_value(rounding=ROUND_DOWN) * step
     result = float(rounded)
-    if not math.isfinite(result) or result <= 0:
-        raise ValueError("Calculated order amount is below exchange precision")
+    if not math.isfinite(result):
+        raise ValueError("Calculated order amount is not finite")
     if min_amount is not None and result < float(min_amount):
         raise ValueError(f"Amount {result} is below exchange minimum {min_amount}")
+    if result <= 0:
+        raise ValueError("Calculated order amount is below exchange precision")
     if max_amount is not None and result > float(max_amount):
         raise ValueError(f"Amount {result} exceeds exchange maximum {max_amount}")
     return result
