@@ -295,27 +295,14 @@ async def get_positions():
                 alert = "NEAR_STOP"
             elif target_proximity is not None and target_proximity >= 0.8:
                 alert = "NEAR_TARGET"
-            exit_result = None
-            if exit_reason:
-                try:
-                    exit_result = close_trade(row["id"], last)
-                except ValueError:
-                    # Another concurrent dashboard request may have closed this position.
-                    with connect() as db:
-                        already_closed = db.execute(
-                            "SELECT id, pnl, exit_price FROM trades WHERE id=? AND status='CLOSED'",
-                            (row["id"],)
-                        ).fetchone()
-                    if already_closed:
-                        exit_result = {"id": row["id"], "pnl": float(already_closed["pnl"] or 0),
-                                       "exit_price": float(already_closed["exit_price"]), "status": "CLOSED"}
-                    else:
-                        raise
+            # This endpoint is read-only: the independent server monitor is
+            # the sole automatic SL/TP closer. Keep alerts visible while it
+            # processes the same observed market price.
             return {
                 **row,
-                "status": "CLOSED" if exit_result else row["status"],
+                "status": row["status"],
                 "exit_reason": exit_reason,
-                "exit_result": exit_result,
+                "exit_result": None,
                 "live_price": last,
                 "unrealized_pnl": unrealized,
                 "unrealized_pnl_pct": (unrealized / notional * 100) if notional else 0,
