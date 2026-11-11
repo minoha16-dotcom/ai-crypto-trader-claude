@@ -36,6 +36,12 @@ class RiskManager:
         configuration = self._validate_configuration()
         if isinstance(configuration, str):
             return RiskDecision(False, 0, 0, 0, configuration)
+        # Refresh the manager's public settings from the same validated snapshot
+        # used by the backtest and P&L engine.
+        self.risk_pct = configuration["risk_pct"]
+        self.max_open_risk_pct = configuration["max_open_risk_pct"]
+        self.max_daily_loss_pct = configuration["max_daily_loss_pct"]
+        self.max_notional_pct = configuration["max_notional_pct"]
 
         values = (equity, entry, stop, open_risk, daily_pnl)
         if any(not isinstance(value, (int, float)) for value in values):

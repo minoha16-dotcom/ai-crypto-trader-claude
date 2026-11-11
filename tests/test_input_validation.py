@@ -156,3 +156,46 @@ def test_paper_open_endpoint_resolves_and_persists_canonical_futures_symbol(monk
 def test_backtest_endpoint_requires_53_candles_to_keep_52_closed(monkeypatch):
     with pytest.raises(HTTPException, match="between 53 and 5000"):
         asyncio.run(main.backtest(limit=52))
+
+
+
+def test_backtest_api_loads_real_spot_instrument_precision(monkeypatch):
+    observed = {}
+
+    async def fake_resolve_symbol(exchange, symbol, market_type):
+        return "BTC/USDT"
+
+    async def fake_market_spec(exchange, symbol, market_type):
+        observed["market_type"] = market_type
+        return {
+            "symbol": "BTC/USDT",
+            "market_type": market_type,
+            "contract_size": 1.0,
+            "contract_type": "spot",
+            "amount_precision": 3,
+            "precision_mode": 2,
+            "min_amount": 0.001,
+            "max_amount": 100,
+        }
+
+    async def fake_ohlcv(exchange, symbol, timeframe, limit, market_type):
+        return [[i, 100, 101, 99, 100, 1000] for i in range(limit)]
+
+    def fake_backtest(candles, instrument=None):
+        observed["instrument"] = instrument
+        observed["candle_count"] = len(candles)
+        return {"trade_count": 0}
+
+    monkeypatch.setattr(main.registry, "resolve_symbol", fake_resolve_symbol)
+    monkeypatch.setattr(main.registry, "market_spec", fake_market_spec)
+    monkeypatch.setattr(main.registry, "ohlcv", fake_ohlcv)
+    monkeypatch.setattr(main, "run_backtest", fake_backtest)
+
+    result = asyncio.run(main.backtest(
+        exchange="binance", symbol="BTC/USDT",
+        market_type="spot", timeframe="1h", limit=53,
+    ))
+    assert result["trade_count"] == 0
+    assert observed["market_type"] == "spot"
+    assert observed["instrument"]["amount_precision"] == 3
+    assert observed["candle_count"] == 52

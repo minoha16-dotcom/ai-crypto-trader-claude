@@ -198,9 +198,10 @@ async def backtest(exchange="binance", symbol="BTC/USDT", market_type="spot", ti
         raise HTTPException(400, "limit must be between 53 and 5000 so 52 closed candles remain after excluding the forming candle")
     try:
         resolved_symbol = await registry.resolve_symbol(exchange, symbol, market_type)
-        instrument = (
-            await registry.market_spec(exchange, resolved_symbol, "futures")
-            if market_type == "futures" else None
+        # Both Spot and Futures sizing must use the selected venue's real amount
+        # precision and amount/cost limits.
+        instrument = await registry.market_spec(
+            exchange, resolved_symbol, market_type
         )
         candles = await registry.ohlcv(exchange, resolved_symbol, timeframe, limit, market_type)
         # The final exchange candle may still be forming; never use it for signals.
