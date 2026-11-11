@@ -86,6 +86,7 @@ def init_db():
             market_type TEXT NOT NULL, side TEXT NOT NULL, quantity DOUBLE PRECISION NOT NULL,
             entry DOUBLE PRECISION NOT NULL, stop DOUBLE PRECISION NOT NULL, target DOUBLE PRECISION,
             exit_price DOUBLE PRECISION, pnl DOUBLE PRECISION DEFAULT 0,
+            contract_size DOUBLE PRECISION NOT NULL DEFAULT 1, contract_type TEXT NOT NULL DEFAULT 'spot',
             status TEXT DEFAULT 'OPEN', signal_id BIGINT, notes TEXT DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS daily_equity_snapshots(
@@ -116,3 +117,12 @@ def init_db():
         """
     with connect() as db:
         db.executescript(schema)
+        if _is_postgres():
+            db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS contract_size DOUBLE PRECISION NOT NULL DEFAULT 1")
+            db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS contract_type TEXT NOT NULL DEFAULT 'spot'")
+        else:
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(trades)").fetchall()}
+            if "contract_size" not in columns:
+                db.execute("ALTER TABLE trades ADD COLUMN contract_size REAL NOT NULL DEFAULT 1")
+            if "contract_type" not in columns:
+                db.execute("ALTER TABLE trades ADD COLUMN contract_type TEXT NOT NULL DEFAULT 'spot'")
