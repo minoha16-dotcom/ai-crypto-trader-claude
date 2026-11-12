@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 from fastapi import HTTPException
@@ -54,10 +55,9 @@ def test_paper_close_rejects_non_finite_exit_price(value):
 
 
 def make_client(monkeypatch):
-    monkeypatch.delenv("RENDER", raising=False)
-    monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
-    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
-    return TestClient(main.app)
+    monkeypatch.setenv("DASHBOARD_USERNAME", "test-trader")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "test-only-password")
+    return TestClient(main.app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"})
 
 
 def stub_open_dependencies(monkeypatch, ticker):
@@ -180,7 +180,11 @@ def test_backtest_api_loads_real_spot_instrument_precision(monkeypatch):
         }
 
     async def fake_ohlcv(exchange, symbol, timeframe, limit, market_type):
-        return [[i, 100, 101, 99, 100, 1000] for i in range(limit)]
+        return [[i, 100, 101, 99, 100, 1000] for i in range(limit)], {
+            "requested": limit, "received": limit, "shortfall": 0,
+            "request_count": 1, "request_limit": 53,
+            "gaps": [], "continuity": "continuous",
+        }
 
     def fake_backtest(candles, starting_balance=10000.0, instrument=None):
         observed["starting_balance"] = starting_balance
@@ -191,7 +195,7 @@ def test_backtest_api_loads_real_spot_instrument_precision(monkeypatch):
     monkeypatch.setattr(settings, "paper_starting_balance", 12345.0)
     monkeypatch.setattr(main.registry, "resolve_symbol", fake_resolve_symbol)
     monkeypatch.setattr(main.registry, "market_spec", fake_market_spec)
-    monkeypatch.setattr(main.registry, "ohlcv", fake_ohlcv)
+    monkeypatch.setattr(main.registry, "ohlcv_with_metadata", fake_ohlcv)
     monkeypatch.setattr(main, "run_backtest", fake_backtest)
 
     result = asyncio.run(main.backtest(
@@ -199,10 +203,40 @@ def test_backtest_api_loads_real_spot_instrument_precision(monkeypatch):
         market_type="spot", timeframe="1h", limit=53,
     ))
     assert result["trade_count"] == 0
+    assert result["requested_candles"] == 53
+    assert result["received_candles"] == 53
+    assert result["candle_shortfall"] == 0
+    assert result["candle_data"]["continuity"] == "continuous"
     assert observed["market_type"] == "spot"
     assert observed["starting_balance"] == pytest.approx(12345.0)
     assert observed["instrument"]["amount_precision"] == 3
     assert observed["candle_count"] == 52
+
+
+def test_backtest_reports_shortfall_when_exchange_returns_too_few_candles(monkeypatch):
+    async def fake_resolve_symbol(exchange, symbol, market_type):
+        return symbol
+
+    async def fake_market_spec(exchange, symbol, market_type):
+        return {"symbol": symbol, "market_type": market_type, "contract_type": "spot",
+                "contract_size": 1, "amount_precision": 3, "precision_mode": 2}
+
+    async def fake_ohlcv(exchange, symbol, timeframe, limit, market_type):
+        candles = [[i, 100, 101, 99, 100, 10] for i in range(20)]
+        return candles, {"requested": limit, "received": 20, "shortfall": limit - 20,
+                         "request_count": 1, "request_limit": 53, "gaps": [],
+                         "continuity": "continuous"}
+
+    monkeypatch.setattr(main.registry, "resolve_symbol", fake_resolve_symbol)
+    monkeypatch.setattr(main.registry, "market_spec", fake_market_spec)
+    monkeypatch.setattr(main.registry, "ohlcv_with_metadata", fake_ohlcv)
+    response = asyncio.run(main.backtest(limit=100))
+    assert response.status_code == 422
+    assert response.body
+    payload = json.loads(response.body)
+    assert payload["requested_candles"] == 100
+    assert payload["received_candles"] == 20
+    assert payload["candle_shortfall"] == 80
 
 
 

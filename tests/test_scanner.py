@@ -39,6 +39,7 @@ def test_futures_scan_persists_canonical_symbol(monkeypatch):
     monkeypatch.setattr(scanner.registry, "ohlcv", fake_ohlcv)
     monkeypatch.setattr(scanner, "analyze", lambda candles: metrics)
     monkeypatch.setattr(scanner, "connect", lambda: FakeConnection())
+    monkeypatch.setattr(scanner, "archive_expired_signals", lambda: 0)
 
     results = asyncio.run(scanner.scan(
         "binance",

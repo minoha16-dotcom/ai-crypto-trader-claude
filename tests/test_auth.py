@@ -1,4 +1,5 @@
 import base64
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -39,8 +40,7 @@ def test_readiness_check_fails_closed_when_database_is_unavailable(monkeypatch):
 def test_dashboard_requires_auth(monkeypatch):
     monkeypatch.setenv("DASHBOARD_USERNAME", "trader")
     monkeypatch.setenv("DASHBOARD_PASSWORD", "secret")
-    with TestClient(app) as client:
-        response = client.get("/")
+    response = TestClient(app).get("/")
     assert response.status_code == 401
     assert "WWW-Authenticate" in response.headers
 
@@ -66,10 +66,38 @@ def test_api_mutations_require_auth(monkeypatch):
     assert response.status_code == 401
 
 
-def test_missing_render_credentials_fail_closed(monkeypatch):
-    monkeypatch.setenv("RENDER", "true")
-    monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
-    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
-    with TestClient(app) as client:
-        response = client.get("/")
+@pytest.mark.parametrize("username,password", [
+    (None, "secret"),
+    ("trader", None),
+    ("trader", ""),
+])
+def test_startup_refuses_missing_or_incomplete_credentials(monkeypatch, username, password):
+    if username is None:
+        monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
+    else:
+        monkeypatch.setenv("DASHBOARD_USERNAME", username)
+    if password is None:
+        monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    else:
+        monkeypatch.setenv("DASHBOARD_PASSWORD", password)
+    with pytest.raises(RuntimeError, match="DASHBOARD_USERNAME and DASHBOARD_PASSWORD"):
+        with TestClient(app):
+            pass
+
+
+@pytest.mark.parametrize("username,password", [
+    (None, "secret"),
+    ("trader", None),
+    ("trader", ""),
+])
+def test_protected_requests_fail_closed_without_both_credentials(monkeypatch, username, password):
+    if username is None:
+        monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
+    else:
+        monkeypatch.setenv("DASHBOARD_USERNAME", username)
+    if password is None:
+        monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    else:
+        monkeypatch.setenv("DASHBOARD_PASSWORD", password)
+    response = TestClient(app).get("/")
     assert response.status_code == 503

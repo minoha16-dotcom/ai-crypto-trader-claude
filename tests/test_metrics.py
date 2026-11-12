@@ -39,7 +39,7 @@ def test_account_positions_and_risk_api_share_same_net_metrics(tmp_path, monkeyp
         return {"last": 102.0, "timestamp": 123456789}
 
     monkeypatch.setattr(registry, "ticker", fake_ticker)
-    with TestClient(app) as client:
+    with TestClient(app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"}) as client:
         positions = client.get("/api/positions").json()["positions"]
         account_data = client.get("/api/account").json()
         risk_data = client.get("/api/risk").json()
