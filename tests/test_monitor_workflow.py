@@ -17,7 +17,7 @@ def test_free_position_monitor_embedded_python_is_valid_and_reports_partial_fail
     script = textwrap.dedent(match.group("script"))
     compile(script, "free-position-monitor-inline.py", "exec")
     assert "monitor_open_positions_once(detailed=True)" in script
-    assert "if report['failed']" in script
+    assert 'if report["failed"]' in script
     assert "TRADER_DATABASE_URL" in script
 
 
