@@ -1,6 +1,9 @@
 name: Supabase read-only validation
 
 on:
+  push:
+    branches:
+      - feature/supabase-readonly-validation
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
@@ -14,7 +17,7 @@ permissions:
 jobs:
   readonly-validation:
     # Never expose the repository secret to pull requests from forks.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
