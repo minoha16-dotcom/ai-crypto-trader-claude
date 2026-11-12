@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import os
 import sqlite3
@@ -82,7 +83,8 @@ def init_db():
             id BIGSERIAL PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
             exchange TEXT NOT NULL, symbol TEXT NOT NULL, market_type TEXT NOT NULL,
             timeframe TEXT NOT NULL, signal TEXT NOT NULL, score INTEGER NOT NULL,
-            price DOUBLE PRECISION NOT NULL, rsi DOUBLE PRECISION, trend TEXT, payload TEXT NOT NULL
+            price DOUBLE PRECISION NOT NULL, rsi DOUBLE PRECISION, trend TEXT, payload TEXT NOT NULL,
+            archived_at TIMESTAMPTZ
         );
         CREATE TABLE IF NOT EXISTS trades(
             id BIGSERIAL PRIMARY KEY, opened_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
@@ -104,7 +106,8 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             exchange TEXT NOT NULL, symbol TEXT NOT NULL, market_type TEXT NOT NULL,
             timeframe TEXT NOT NULL, signal TEXT NOT NULL, score INTEGER NOT NULL,
-            price REAL NOT NULL, rsi REAL, trend TEXT, payload TEXT NOT NULL
+            price REAL NOT NULL, rsi REAL, trend TEXT, payload TEXT NOT NULL,
+            archived_at TEXT
         );
         CREATE TABLE IF NOT EXISTS trades(
             id INTEGER PRIMARY KEY AUTOINCREMENT, opened_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -122,10 +125,14 @@ def init_db():
     with connect() as db:
         db.executescript(schema)
         if _is_postgres():
+            db.execute("ALTER TABLE signals ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ")
             db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS contract_size DOUBLE PRECISION NOT NULL DEFAULT 1")
             db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS contract_type TEXT NOT NULL DEFAULT 'spot'")
             db.execute("UPDATE trades SET contract_type = 'legacy_base' WHERE market_type = 'futures' AND contract_type = 'spot'")
         else:
+            signal_columns = {row["name"] for row in db.execute("PRAGMA table_info(signals)").fetchall()}
+            if "archived_at" not in signal_columns:
+                db.execute("ALTER TABLE signals ADD COLUMN archived_at TEXT")
             columns = {row["name"] for row in db.execute("PRAGMA table_info(trades)").fetchall()}
             if "contract_size" not in columns:
                 db.execute("ALTER TABLE trades ADD COLUMN contract_size REAL NOT NULL DEFAULT 1")
@@ -137,3 +144,23 @@ def init_db():
         db.execute("CREATE INDEX IF NOT EXISTS idx_trades_status_closed_at ON trades(status, closed_at)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_trades_exchange_symbol_market ON trades(exchange, symbol, market_type, status)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_signals_market_symbol_timeframe_id ON signals(exchange, market_type, symbol, timeframe, id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_signals_archived_id ON signals(archived_at, id)")
+
+
+def archive_expired_signals(retention_days=None):
+    """Soft-archive old signals; rows remain recoverable and are never deleted."""
+    if retention_days is None:
+        raw_days = os.getenv("SIGNAL_RETENTION_DAYS", "365")
+        try:
+            retention_days = int(raw_days)
+        except (TypeError, ValueError):
+            retention_days = 365
+    retention_days = max(30, min(int(retention_days), 3650))
+    cutoff_at = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    cutoff = cutoff_at if _is_postgres() else cutoff_at.strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as db:
+        cursor = db.execute(
+            "UPDATE signals SET archived_at=CURRENT_TIMESTAMP "
+            "WHERE archived_at IS NULL AND created_at < ?", (cutoff,)
+        )
+        return max(0, cursor.rowcount)

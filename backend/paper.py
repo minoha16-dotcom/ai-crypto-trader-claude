@@ -149,10 +149,21 @@ def close_trade(trade_id, exit_price):
             "r_multiple": pnl / initial_risk if initial_risk else 0.0, "status": "CLOSED"}
 
 
-def journal():
+def journal(limit=100, offset=0):
+    limit = max(1, min(int(limit), 500))
+    offset = max(0, min(int(offset), 1_000_000))
     with connect() as db:
-        trades = [dict(row) for row in db.execute("SELECT * FROM trades ORDER BY id DESC").fetchall()]
-        signals = [dict(row) for row in db.execute("SELECT * FROM signals ORDER BY id DESC LIMIT 300").fetchall()]
+        trades = [dict(row) for row in db.execute(
+            "SELECT * FROM trades ORDER BY id DESC LIMIT ? OFFSET ?", (limit, offset)
+        ).fetchall()]
+        signals = [dict(row) for row in db.execute(
+            "SELECT * FROM signals WHERE archived_at IS NULL ORDER BY id DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()]
+        trades_total = db.execute("SELECT COUNT(*) AS total FROM trades").fetchone()["total"]
+        signals_total = db.execute(
+            "SELECT COUNT(*) AS total FROM signals WHERE archived_at IS NULL"
+        ).fetchone()["total"]
     for trade in trades:
         if trade.get("status") == "CLOSED":
             initial_risk = position_risk(
@@ -162,4 +173,9 @@ def journal():
             trade["r_multiple"] = float(trade["pnl"] or 0) / initial_risk if initial_risk else 0.0
         else:
             trade["r_multiple"] = None
-    return {"trades": trades, "signals": signals}
+    return {"trades": trades, "signals": signals, "pagination": {
+        "limit": limit, "offset": offset,
+        "trades_total": trades_total, "signals_total": signals_total,
+        "trades_has_more": offset + len(trades) < trades_total,
+        "signals_has_more": offset + len(signals) < signals_total,
+    }}

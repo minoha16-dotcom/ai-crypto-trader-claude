@@ -190,9 +190,8 @@ def test_exchange_registry_coalesces_concurrent_market_downloads(monkeypatch):
 
 
 def test_rate_limit_api_response_preserves_retry_after(monkeypatch):
-    monkeypatch.delenv("RENDER", raising=False)
-    monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
-    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    monkeypatch.setenv("DASHBOARD_USERNAME", "test-trader")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "test-only-password")
 
     async def fake_resolve_symbol(exchange, symbol, market_type):
         return symbol
@@ -203,7 +202,7 @@ def test_rate_limit_api_response_preserves_retry_after(monkeypatch):
     monkeypatch.setattr(main.registry, "resolve_symbol", fake_resolve_symbol)
     monkeypatch.setattr(main.registry, "ticker", fake_ticker)
 
-    with TestClient(main.app) as client:
+    with TestClient(main.app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"}) as client:
         response = client.get("/api/markets/bybit/BTC/USDT?market_type=spot")
 
     assert response.status_code == 429
@@ -249,9 +248,8 @@ def test_monitor_worker_refuses_non_shared_sqlite_database(monkeypatch):
 
 @pytest.mark.parametrize("upstream_status", [418, 429])
 def test_rate_limit_api_preserves_upstream_http_status(monkeypatch, upstream_status):
-    monkeypatch.delenv("RENDER", raising=False)
-    monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
-    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    monkeypatch.setenv("DASHBOARD_USERNAME", "test-trader")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "test-only-password")
 
     async def fake_resolve_symbol(exchange, symbol, market_type):
         return symbol
@@ -262,7 +260,7 @@ def test_rate_limit_api_preserves_upstream_http_status(monkeypatch, upstream_sta
     monkeypatch.setattr(main.registry, "resolve_symbol", fake_resolve_symbol)
     monkeypatch.setattr(main.registry, "ticker", fake_ticker)
 
-    with TestClient(main.app) as client:
+    with TestClient(main.app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"}) as client:
         response = client.get("/api/markets/bybit/BTC/USDT?market_type=spot")
 
     assert response.status_code == upstream_status
