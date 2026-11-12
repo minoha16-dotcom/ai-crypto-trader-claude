@@ -11,7 +11,7 @@ import pytest
 def test_supabase_connection_and_required_schema_read_only():
     url = os.environ.get("TRADER_DATABASE_URL", "").strip()
     if not url:
-        pytest.fail("Missing repository secret TRADER_DATABASE_URL.")
+        pytest.skip("Supabase credentials are only supplied to the dedicated read-only workflow.")
 
     assert url.startswith(("postgres://", "postgresql://")), (
         "TRADER_DATABASE_URL must be a PostgreSQL connection URI."
