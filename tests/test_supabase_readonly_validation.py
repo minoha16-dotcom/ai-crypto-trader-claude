@@ -1,7 +1,7 @@
 """Read-only smoke test for the shared Supabase PostgreSQL database.
 
 This test intentionally inspects schema metadata only. It never reads trade or
-signal records and forces PostgreSQL transactions into read-only mode.
+signal records and sets the current transaction to READ ONLY before any query.
 """
 import os
 
@@ -23,16 +23,18 @@ def test_supabase_connection_and_required_schema_read_only():
         url,
         connect_timeout=10,
         sslmode="require",
-        options="-c default_transaction_read_only=on",
     ) as connection:
         with connection.cursor() as cursor:
-            cursor.execute("SELECT 1")
-            assert cursor.fetchone()[0] == 1
-
+            # Supabase poolers may ignore startup options, so explicitly mark
+            # this transaction read-only before issuing any other statement.
+            cursor.execute("SET TRANSACTION READ ONLY")
             cursor.execute("SHOW transaction_read_only")
             assert cursor.fetchone()[0] == "on", (
-                "The PostgreSQL session is not read-only."
+                "The PostgreSQL transaction is not read-only."
             )
+
+            cursor.execute("SELECT 1")
+            assert cursor.fetchone()[0] == 1
 
             cursor.execute(
                 """
