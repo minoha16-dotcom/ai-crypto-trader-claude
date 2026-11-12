@@ -328,6 +328,20 @@ async def backtest(exchange="kucoin", symbol="BTC/USDT", market_type="spot", tim
             exchange, resolved_symbol, timeframe, limit, market_type
         )
         # The final exchange candle may still be forming; never use it for signals.
+        closed_candles = candles[:-1]
+        if len(closed_candles) < 52:
+            return JSONResponse(status_code=422, content={
+                "detail": "Exchange returned too few closed candles for a backtest.",
+                "exchange": exchange,
+                "symbol": resolved_symbol,
+                "market_type": market_type,
+                "timeframe": timeframe,
+                "candle_data": candle_meta,
+                "requested_candles": candle_meta["requested"],
+                "received_candles": candle_meta["received"],
+                "candle_shortfall": candle_meta["shortfall"],
+                "usable_closed_candles": len(closed_candles),
+            })
         return {
             "exchange": exchange,
             "symbol": resolved_symbol,
@@ -338,7 +352,7 @@ async def backtest(exchange="kucoin", symbol="BTC/USDT", market_type="spot", tim
             "received_candles": candle_meta["received"],
             "candle_shortfall": candle_meta["shortfall"],
             **await run_in_threadpool(
-                run_backtest, candles[:-1], settings.paper_starting_balance, instrument
+                run_backtest, closed_candles, settings.paper_starting_balance, instrument
             ),
         }
     except ExchangeRateLimitCooldown:

@@ -9,6 +9,9 @@ class FakeClient:
     def parse_timeframe(self, timeframe):
         return 60
 
+    async def fetch_ohlcv(self, *args, **kwargs):
+        raise AssertionError("_request fake should intercept fetch_ohlcv")
+
 
 def _candle(timestamp):
     return [timestamp, 100, 101, 99, 100, 10]
