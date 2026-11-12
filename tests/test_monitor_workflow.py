@@ -8,7 +8,7 @@ def test_free_position_monitor_embedded_python_is_valid_and_reports_partial_fail
         encoding="utf-8"
     )
     match = re.search(
-        r"python - <<'PY'\\n(?P<script>.*?)\\n\\s+PY",
+        r"python - <<'PY'\n(?P<script>.*?)\n\s+PY",
         workflow,
         flags=re.DOTALL,
     )
