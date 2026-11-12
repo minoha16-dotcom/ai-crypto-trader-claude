@@ -501,3 +501,60 @@ def test_kucoin_futures_uses_dedicated_ccxt_client(monkeypatch):
         await registry.close()
 
     asyncio.run(run())
+
+
+def test_bybit_reset_timestamp_sets_shared_cooldown(monkeypatch):
+    import time
+    from backend.exchanges import ExchangeRateLimitCooldown
+
+    class RateLimitExceeded(Exception):
+        pass
+
+    class FakeClient:
+        last_response_headers = {
+            "X-Bapi-Limit-Reset-Timestamp": str(int((time.time() + 45) * 1000))
+        }
+        last_http_response = '{"retCode":10006,"retMsg":"Too many visits!"}'
+
+        def __init__(self):
+            self.fetch_count = 0
+
+        async def fetch_ticker(self, symbol):
+            self.fetch_count += 1
+            raise RateLimitExceeded("Bybit retCode 10006: Too many visits!")
+
+    async def run():
+        registry = ExchangeRegistry()
+        fake = FakeClient()
+
+        async def fake_load_markets(exchange_id, market_type):
+            return fake
+
+        async def fake_resolve_symbol(exchange_id, symbol, market_type):
+            return "BTC/USDT" if market_type == "spot" else "BTC/USDT:USDT"
+
+        monkeypatch.setattr(registry, "_load_markets", fake_load_markets)
+        monkeypatch.setattr(registry, "resolve_symbol", fake_resolve_symbol)
+
+        with pytest.raises(ExchangeRateLimitCooldown) as first:
+            await registry.ticker("bybit", "BTC/USDT", "spot")
+        assert first.value.status_code == 429
+        assert first.value.retry_after >= 40
+
+        # Spot and Futures share the same venue cooldown: do not send a second
+        # request while Bybit's advertised reset time is still in the future.
+        with pytest.raises(ExchangeRateLimitCooldown) as second:
+            await registry.ticker("bybit", "BTC/USDT", "futures")
+        assert second.value.retry_after >= 39
+        assert fake.fetch_count == 1
+        await registry.close()
+
+
+def test_bybit_reset_timestamp_ignores_stale_value():
+    from backend.exchanges import ExchangeRegistry
+
+    delay = ExchangeRegistry._bybit_reset_delay_from_headers({
+        "x-bapi-limit-reset-timestamp": "1"
+    })
+    assert delay is None
+
