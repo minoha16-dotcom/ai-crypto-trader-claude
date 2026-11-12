@@ -57,7 +57,7 @@ def test_paper_close_rejects_non_finite_exit_price(value):
 def make_client(monkeypatch):
     monkeypatch.setenv("DASHBOARD_USERNAME", "test-trader")
     monkeypatch.setenv("DASHBOARD_PASSWORD", "test-only-password")
-    return TestClient(main.app, auth=("test-trader", "test-only-password"))
+    return TestClient(main.app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"})
 
 
 def stub_open_dependencies(monkeypatch, ticker):

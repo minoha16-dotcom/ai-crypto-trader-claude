@@ -202,7 +202,7 @@ def test_rate_limit_api_response_preserves_retry_after(monkeypatch):
     monkeypatch.setattr(main.registry, "resolve_symbol", fake_resolve_symbol)
     monkeypatch.setattr(main.registry, "ticker", fake_ticker)
 
-    with TestClient(main.app, auth=("test-trader", "test-only-password")) as client:
+    with TestClient(main.app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"}) as client:
         response = client.get("/api/markets/bybit/BTC/USDT?market_type=spot")
 
     assert response.status_code == 429
@@ -260,7 +260,7 @@ def test_rate_limit_api_preserves_upstream_http_status(monkeypatch, upstream_sta
     monkeypatch.setattr(main.registry, "resolve_symbol", fake_resolve_symbol)
     monkeypatch.setattr(main.registry, "ticker", fake_ticker)
 
-    with TestClient(main.app, auth=("test-trader", "test-only-password")) as client:
+    with TestClient(main.app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"}) as client:
         response = client.get("/api/markets/bybit/BTC/USDT?market_type=spot")
 
     assert response.status_code == upstream_status
