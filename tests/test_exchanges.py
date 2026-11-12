@@ -435,3 +435,34 @@ def test_guarded_shared_throttler_checks_cooldown_after_queue_wait(monkeypatch):
         await registry.close()
 
     asyncio.run(run())
+
+
+
+def test_ticker_cache_stays_bounded_under_many_distinct_symbols(monkeypatch):
+    from backend.exchanges import MAX_TICKER_CACHE_ENTRIES
+
+    class FakeClient:
+        async def fetch_ticker(self, symbol):
+            return {"symbol": symbol, "last": 100.0}
+
+    async def run():
+        registry = ExchangeRegistry(ticker_cache_ttl=60)
+        client = FakeClient()
+
+        async def fake_load_markets(exchange_id, market_type):
+            return client
+
+        async def fake_resolve_symbol(exchange_id, symbol, market_type):
+            return symbol
+
+        monkeypatch.setattr(registry, "_load_markets", fake_load_markets)
+        monkeypatch.setattr(registry, "resolve_symbol", fake_resolve_symbol)
+
+        for index in range(MAX_TICKER_CACHE_ENTRIES + 300):
+            await registry.ticker("kucoin", f"COIN{index}/USDT", "spot")
+
+        assert len(registry._ticker_cache) <= MAX_TICKER_CACHE_ENTRIES
+        assert registry._ticker_inflight == {}
+        await registry.close()
+
+    asyncio.run(run())

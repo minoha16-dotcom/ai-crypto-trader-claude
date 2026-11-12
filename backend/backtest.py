@@ -6,6 +6,7 @@ opens beyond the stop. If stop and target both trade inside one candle, stop
 is assumed first. This remains a bar-based simulation, not exchange execution.
 """
 import math
+from datetime import datetime, timezone
 
 from .config import settings
 from .contracts import (
@@ -31,6 +32,13 @@ def _costed_pnl(entry, mark, quantity, side, contract_size, contract_type, fee_r
 
 def _drawdown(peak, value):
     return (peak - value) / peak * 100.0 if peak > 0 else 0.0
+
+
+def _utc_day(timestamp):
+    """Return the UTC date for a CCXT millisecond timestamp."""
+    value = float(timestamp)
+    seconds = value / 1000.0 if abs(value) >= 100_000_000_000 else value
+    return datetime.fromtimestamp(seconds, tz=timezone.utc).date().isoformat()
 
 
 def _validate_candles(candles):
@@ -74,6 +82,13 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
     slippage = configuration["slippage"]
     risk_pct = configuration["risk_pct"]
     max_notional_pct = configuration["max_notional_pct"]
+    max_open_risk_pct = configuration["max_open_risk_pct"]
+    max_daily_loss_pct = configuration["max_daily_loss_pct"]
+
+    # A daily starting-equity snapshot and realized P&L ledger mirror the live
+    # risk engine's UTC-date accounting. One backtest position is open at once.
+    daily_start_equity = {}
+    daily_realized_pnl = {}
 
     trades = []
     skipped_signals = []
@@ -88,6 +103,20 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
         metrics = analyze(candles[: i + 1])
         side = metrics["signal"]
         if side not in ("LONG", "SHORT"):
+            i += 1
+            continue
+
+        entry_day = _utc_day(candles[i + 1][0])
+        daily_start_equity.setdefault(entry_day, equity)
+        daily_realized_pnl.setdefault(entry_day, 0.0)
+        daily_loss_limit = daily_start_equity[entry_day] * max_daily_loss_pct / 100.0
+        if daily_realized_pnl[entry_day] <= -daily_loss_limit:
+            skipped_signals.append({
+                "index": i,
+                "reason": "DAILY_LOSS_LIMIT",
+                "daily_realized_pnl": daily_realized_pnl[entry_day],
+                "daily_loss_limit": daily_loss_limit,
+            })
             i += 1
             continue
 
@@ -129,9 +158,13 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
             continue
 
         risk_budget = equity * risk_pct / 100.0
+        max_open_risk_budget = equity * max_open_risk_pct / 100.0
         notional_cap = equity * max_notional_pct / 100.0
+        # One-at-a-time backtests have no pre-existing open risk. Applying the
+        # aggregate cap explicitly keeps sizing aligned with RiskManager.
         quantity = min(
             risk_budget / per_contract_risk,
+            max_open_risk_budget / per_contract_risk,
             notional_cap / per_contract_notional,
         )
         # Cap to the venue's maximum amount before precision rounding, matching
@@ -202,6 +235,11 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
 
         while j < len(candles):
             timestamp, candle_open, high, low, close = map(float, candles[j][:5])
+            bar_day = _utc_day(timestamp)
+            # If a position crosses UTC midnight, seed that day's baseline
+            # before its eventual realized exit is attributed to that day.
+            daily_start_equity.setdefault(bar_day, equity)
+            daily_realized_pnl.setdefault(bar_day, 0.0)
 
             # First honor gaps at the candle open. Stop-market exits fill at the
             # worse opening price; favorable target gaps fill at the opening price.
@@ -303,6 +341,9 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
             + contract_notional(stop_fill, quantity, contract_size, contract_type)
         ) * fee_rate
         r_multiple = pnl / initial_risk if initial_risk > 0 else 0.0
+        exit_day = _utc_day(candles[exit_index][0])
+        daily_start_equity.setdefault(exit_day, equity)
+        daily_realized_pnl[exit_day] = daily_realized_pnl.get(exit_day, 0.0) + pnl
         equity += pnl
         peak_equity = max(peak_equity, equity)
         max_drawdown = max(max_drawdown, _drawdown(peak_equity, equity))
@@ -361,6 +402,12 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
             "contract_type": contract_type,
             "contract_size": contract_size,
         },
+        "risk_limits": {
+            "risk_per_trade_pct": risk_pct,
+            "max_open_risk_pct": max_open_risk_pct,
+            "max_daily_loss_pct": max_daily_loss_pct,
+            "max_position_notional_pct": max_notional_pct,
+        },
         "assumptions": {
             "entry": "next candle open",
             "stop_gap_fill": "adverse candle open plus exit slippage",
@@ -372,7 +419,11 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
             "slippage_bps_per_side": float(settings.slippage_bps),
             "funding": "not modeled",
             "margin_and_liquidation": "not modeled",
-            "position_mode": "one position at a time",
+            "position_mode": "one position at a time (stricter than the live three-position limit)",
+            "risk_per_trade_pct": risk_pct,
+            "max_open_risk_pct": max_open_risk_pct,
+            "max_daily_loss_pct": max_daily_loss_pct,
+            "daily_loss_model": "blocks new entries after UTC-day realized net P&L reaches the configured loss cap",
             "position_notional_cap_pct": max_notional_pct,
             "futures_quantity": (
                 "exchange contract precision and limits applied"
