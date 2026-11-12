@@ -67,7 +67,7 @@ def is_region_restriction(error):
 
 async def main():
     registry = ExchangeRegistry()
-    pause_seconds = max(0.0, float(os.getenv("SMOKE_REQUEST_PAUSE_SECONDS", "1.5")))
+    pause_seconds = max(0.0, float(os.getenv("SMOKE_REQUEST_PAUSE_SECONDS", "5.0")))
     failed = 0
     passed = 0
     skipped = 0
@@ -104,7 +104,7 @@ async def main():
                     inconclusive += 1
                     print(
                         f"COOLDOWN {exchange_id} {market_type}: HTTP {error.status_code}; "
-                        f"provider asked this runner to wait {error.retry_after}s."
+                        f"local cooldown applied for {error.retry_after}s."
                     )
                     # Do not immediately re-hit the same venue through its other
                     # market client. Bybit applies shared request/IP protections;
