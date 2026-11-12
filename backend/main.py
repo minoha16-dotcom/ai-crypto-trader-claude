@@ -227,7 +227,7 @@ async def backtest(exchange="kucoin", symbol="BTC/USDT", market_type="spot", tim
             "symbol": resolved_symbol,
             "market_type": market_type,
             "timeframe": timeframe,
-            **run_backtest(candles[:-1], instrument=instrument),
+            **run_backtest(candles[:-1], starting_balance=settings.paper_starting_balance, instrument=instrument),
         }
     except ExchangeRateLimitCooldown:
         raise

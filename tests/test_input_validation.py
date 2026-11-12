@@ -181,7 +181,8 @@ def test_backtest_api_loads_real_spot_instrument_precision(monkeypatch):
     async def fake_ohlcv(exchange, symbol, timeframe, limit, market_type):
         return [[i, 100, 101, 99, 100, 1000] for i in range(limit)]
 
-    def fake_backtest(candles, instrument=None):
+    def fake_backtest(candles, starting_balance=10000.0, instrument=None):
+        observed["starting_balance"] = starting_balance
         observed["instrument"] = instrument
         observed["candle_count"] = len(candles)
         return {"trade_count": 0}
@@ -197,6 +198,7 @@ def test_backtest_api_loads_real_spot_instrument_precision(monkeypatch):
     ))
     assert result["trade_count"] == 0
     assert observed["market_type"] == "spot"
+    assert observed["starting_balance"] == settings.paper_starting_balance
     assert observed["instrument"]["amount_precision"] == 3
     assert observed["candle_count"] == 52
 
