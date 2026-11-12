@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from backend import main
+from backend.config import settings
 from backend.main import PaperClose, PaperOpen
 
 
