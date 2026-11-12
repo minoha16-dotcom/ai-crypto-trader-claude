@@ -20,6 +20,7 @@ from .risk import risk_manager
 from .backtest import run_backtest
 from .position_monitor import run_position_monitor
 from .metrics import position_pnl, position_risk
+from .advisor import analyze_closed_trade_history
 
 
 @asynccontextmanager
@@ -380,6 +381,19 @@ async def run_scan(exchange="kucoin", market_type="spot", symbols=None, timefram
         raise HTTPException(400, str(exc))
 
 
+@app.post("/api/ai/recommendations")
+async def ai_recommendations(exchange="kucoin", market_type="spot", symbols=None, timeframe="1h"):
+    """Scan public markets and rank candidates from local closed paper-trade outcomes."""
+    scan_result = await run_scan(exchange, market_type, symbols, timeframe)
+    try:
+        return await run_in_threadpool(
+            analyze_closed_trade_history,
+            scan_result["results"], market_type, timeframe,
+        )
+    except Exception as exc:
+        raise HTTPException(500, f"Local advisor could not rank opportunities: {exc}")
+
+
 @app.get("/api/signals")
 def signals(limit: int = 100, offset: int = 0):
     limit = max(1, min(limit, 500))
@@ -639,3 +653,4 @@ def get_journal(limit: int = 100, offset: int = 0):
 @app.get("/", response_class=HTMLResponse)
 def dashboard():
     return (Path(__file__).parent / "dashboard.html").read_text(encoding="utf-8")
+

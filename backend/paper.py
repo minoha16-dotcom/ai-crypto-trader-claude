@@ -54,6 +54,20 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None,
 
     with connect() as db:
         db.execute("BEGIN IMMEDIATE")
+        if signal_id is not None:
+            source_signal = db.execute(
+                "SELECT exchange, symbol, market_type, signal FROM signals WHERE id=?",
+                (signal_id,),
+            ).fetchone()
+            if not source_signal:
+                raise ValueError("The selected scanner setup no longer exists")
+            if (
+                str(source_signal["exchange"]).lower() != str(exchange).lower()
+                or str(source_signal["symbol"]).upper() != str(symbol).upper()
+                or source_signal["market_type"] != market_type
+                or source_signal["signal"] != side
+            ):
+                raise ValueError("Selected scanner setup does not match this paper trade")
         opened = db.execute(
             "SELECT exchange, symbol, market_type, quantity, entry, stop, contract_size, contract_type "
             "FROM trades WHERE status='OPEN'"
@@ -179,3 +193,4 @@ def journal(limit=100, offset=0):
         "trades_has_more": offset + len(trades) < trades_total,
         "signals_has_more": offset + len(signals) < signals_total,
     }}
+

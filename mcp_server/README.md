@@ -9,6 +9,7 @@ intended for one user's private development setup.
 - No live order placement, cancellation, transfers or withdrawals.
 - `open_paper_trade` writes a simulated position to the backend's configured database (SQLite locally, PostgreSQL on the Render deployment).
 - `close_paper_trade` closes a simulated position at the exit price supplied by the user.
+- `get_ai_recommendations` ranks scanner setups against local closed paper-trade outcomes. It returns suggestions only and never opens a trade.
 - Spot SHORT is rejected by the backend.
 - Futures simulation remains simplified; it does not fully model contract sizing,
   margin, funding, slippage or liquidation.
@@ -114,3 +115,4 @@ This MCP bridge is an integration layer, not a new trading engine. It calls
 the V2.1 FastAPI endpoints for market data, instrument metadata, scanning,
 backtesting, opportunities, open positions, risk and the paper journal. It uses
 the same configured backend database and does not place exchange orders.
+
