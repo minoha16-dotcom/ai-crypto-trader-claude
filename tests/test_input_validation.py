@@ -199,3 +199,14 @@ def test_backtest_api_loads_real_spot_instrument_precision(monkeypatch):
     assert observed["market_type"] == "spot"
     assert observed["instrument"]["amount_precision"] == 3
     assert observed["candle_count"] == 52
+
+
+
+def test_paper_open_defaults_to_kucoin():
+    trade = PaperOpen(
+        symbol="BTC/USDT",
+        side="LONG",
+        entry=60000,
+        stop=59000,
+    )
+    assert trade.exchange == "kucoin"

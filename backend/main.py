@@ -108,7 +108,7 @@ async def dashboard_auth_and_security_headers(request: Request, call_next):
 
 
 class PaperOpen(BaseModel):
-    exchange: str = "binance"
+    exchange: str = "kucoin"
     symbol: str = Field(min_length=3, max_length=30)
     market_type: str = "spot"
     side: str
