@@ -104,6 +104,24 @@ async def scan_opportunities(
 
 
 @mcp.tool()
+async def get_ai_recommendations(
+    exchange: Literal["kucoin", "bybit", "okx"] = "kucoin",
+    market_type: Literal["spot", "futures"] = "spot",
+    symbols: str = "BTC/USDT,ETH/USDT",
+    timeframe: Literal["5m", "15m", "30m", "1h", "2h", "4h", "1d"] = "1h",
+) -> dict:
+    """Rank paper-trade setups using local closed-trade history; never opens trades."""
+    items = [item.strip().upper() for item in symbols.split(",") if item.strip()]
+    if not items or len(items) > 20 or any("/" not in item or len(item) > 30 for item in items):
+        raise ValueError("Provide 1–20 CCXT symbols, e.g. BTC/USDT,ETH/USDT.")
+    return await _api(
+        "POST", "/api/ai/recommendations",
+        params={"exchange": exchange, "market_type": market_type,
+                "symbols": ",".join(items), "timeframe": timeframe},
+    )
+
+
+@mcp.tool()
 async def get_instrument_spec(
     exchange: Literal["kucoin", "bybit", "okx"],
     symbol: str,
@@ -227,3 +245,4 @@ async def close_paper_trade(trade_id: int, exit_price: float) -> dict:
 if __name__ == "__main__":
     # ChatGPT connects over Streamable HTTP at http://127.0.0.1:8001/mcp.
     mcp.run(transport="streamable-http")
+
