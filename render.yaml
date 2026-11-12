@@ -6,7 +6,8 @@ services:
     region: frankfurt
     branch: deploy/render-supabase-postgres
     buildCommand: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
-    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --limit-concurrency 64 --backlog 64 --timeout-keep-alive 5
+    # Keep the 512 MiB Free instance bounded under concurrent dashboard/API bursts.
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --limit-concurrency 16 --backlog 64 --timeout-keep-alive 5
     healthCheckPath: /api/ready
     autoDeployTrigger: off
     envVars:
