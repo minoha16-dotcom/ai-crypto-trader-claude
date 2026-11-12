@@ -267,6 +267,11 @@ class ExchangeRegistry:
         else:
             delay = float(RATE_LIMIT_FALLBACK_SECONDS[status_code])
             source = "local fallback"
+        if exchange_id == "bybit" and status_code == 403:
+            # Official Bybit guidance requires waiting at least 10 minutes
+            # after the explicit IP-level "access too frequent" 403.
+            delay = max(delay, 600.0)
+            source = "Bybit 10-minute IP-ban minimum"
         # Keep an existing longer cooldown; a later shorter response must not
         # release this exchange/IP early.
         now = time.monotonic()
