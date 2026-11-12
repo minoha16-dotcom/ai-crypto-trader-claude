@@ -205,6 +205,75 @@ async def market(exchange, symbol, market_type="spot"):
         raise HTTPException(502, str(exc))
 
 
+@app.get("/api/candles/{exchange}/{symbol:path}")
+async def market_candles(
+    exchange,
+    symbol,
+    market_type="spot",
+    timeframe="1h",
+    limit: int = 80,
+):
+    """Return a bounded set of public OHLCV candles for the dashboard chart."""
+    supported_timeframes = {
+        "1m", "3m", "5m", "15m", "30m", "1h", "2h",
+        "4h", "6h", "12h", "1d", "1w",
+    }
+    if exchange not in EXCHANGE_IDS:
+        raise HTTPException(400, "Unsupported exchange")
+    if market_type not in ("spot", "futures"):
+        raise HTTPException(400, "market_type must be spot or futures")
+    if timeframe not in supported_timeframes:
+        raise HTTPException(400, "Unsupported candle timeframe")
+    if limit < 20 or limit > 200:
+        raise HTTPException(400, "Candle limit must be between 20 and 200")
+    try:
+        resolved_symbol = await registry.resolve_symbol(
+            exchange, symbol, market_type
+        )
+        raw_candles = await registry.ohlcv(
+            exchange, resolved_symbol, timeframe, limit, market_type
+        )
+        candles = []
+        for candle in raw_candles:
+            if not isinstance(candle, (list, tuple)) or len(candle) < 6:
+                continue
+            try:
+                timestamp = int(candle[0])
+                open_price, high, low, close, volume = (
+                    float(value) for value in candle[1:6]
+                )
+            except (TypeError, ValueError, OverflowError):
+                continue
+            values = (open_price, high, low, close, volume)
+            if not all(math.isfinite(value) for value in values):
+                continue
+            if min(open_price, high, low, close) <= 0 or volume < 0:
+                continue
+            if low > min(open_price, close) or high < max(open_price, close):
+                continue
+            if high < low:
+                continue
+            candles.append({
+                "timestamp": timestamp,
+                "open": open_price,
+                "high": high,
+                "low": low,
+                "close": close,
+                "volume": volume,
+            })
+        return {
+            "exchange": exchange,
+            "symbol": resolved_symbol,
+            "market_type": market_type,
+            "timeframe": timeframe,
+            "candles": candles,
+        }
+    except ExchangeRateLimitCooldown:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, str(exc))
+
+
 @app.get("/api/backtest")
 async def backtest(exchange="kucoin", symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000):
     if exchange not in EXCHANGE_IDS:
