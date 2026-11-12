@@ -38,7 +38,7 @@ def test_mcp_positions_opportunities_and_instrument_tools(monkeypatch):
     monkeypatch.setattr(server, "_api", fake_api)
     asyncio.run(server.get_open_positions())
     asyncio.run(server.get_opportunities(5))
-    asyncio.run(server.get_instrument_spec("binance", "btc/usdt", "spot"))
+    asyncio.run(server.get_instrument_spec("kucoin", "btc/usdt", "spot"))
     assert calls == [
         ("GET", "/api/positions", None),
         ("GET", "/api/opportunities", {"limit": 5}),
@@ -49,9 +49,9 @@ def test_mcp_positions_opportunities_and_instrument_tools(monkeypatch):
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"exchange": "binance", "symbol": "BTCUSDT", "limit": 100},
-        {"exchange": "binance", "symbol": "BTC/USDT", "limit": 52},
-        {"exchange": "binance", "symbol": "BTC/USDT", "limit": 5001},
+        {"exchange": "kucoin", "symbol": "BTCUSDT", "limit": 100},
+        {"exchange": "kucoin", "symbol": "BTC/USDT", "limit": 52},
+        {"exchange": "kucoin", "symbol": "BTC/USDT", "limit": 5001},
     ],
 )
 def test_mcp_backtest_tool_validates_symbol_and_limit(kwargs):

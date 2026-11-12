@@ -87,7 +87,7 @@ async def get_market_data(
 
 @mcp.tool()
 async def scan_opportunities(
-    exchange: Literal["binance", "bybit", "okx"] = "kucoin",
+    exchange: Literal["kucoin", "bybit", "okx"] = "kucoin",
     market_type: Literal["spot", "futures"] = "spot",
     symbols: str = "BTC/USDT,ETH/USDT",
     timeframe: Literal["5m", "15m", "30m", "1h", "2h", "4h", "1d"] = "1h",
@@ -105,7 +105,7 @@ async def scan_opportunities(
 
 @mcp.tool()
 async def get_instrument_spec(
-    exchange: Literal["binance", "bybit", "okx"],
+    exchange: Literal["kucoin", "bybit", "okx"],
     symbol: str,
     market_type: Literal["spot", "futures"] = "spot",
 ) -> dict:
@@ -135,7 +135,7 @@ async def get_opportunities(limit: int = 12) -> dict:
 
 @mcp.tool()
 async def run_backtest(
-    exchange: Literal["binance", "bybit", "okx"],
+    exchange: Literal["kucoin", "bybit", "okx"],
     symbol: str,
     market_type: Literal["spot", "futures"] = "spot",
     timeframe: Literal["5m", "15m", "30m", "1h", "2h", "4h", "1d"] = "1h",
@@ -187,7 +187,7 @@ async def get_trade_journal() -> dict:
 
 @mcp.tool()
 async def open_paper_trade(
-    exchange: Literal["binance", "bybit", "okx"],
+    exchange: Literal["kucoin", "bybit", "okx"],
     symbol: str,
     market_type: Literal["spot", "futures"],
     side: Literal["LONG", "SHORT"],

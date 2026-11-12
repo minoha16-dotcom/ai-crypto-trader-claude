@@ -15,7 +15,7 @@ def test_all_mcp_tools_route_to_paper_backend_endpoints(monkeypatch):
     async def exercise():
         await server.get_status()
         await server.list_exchanges()
-        await server.get_market_data("binance", "btc/usdt", "spot")
+        await server.get_market_data("kucoin", "btc/usdt", "spot")
         await server.scan_opportunities(
             "bybit", "futures", "btc/usdt,eth/usdt", "1h"
         )
@@ -28,7 +28,7 @@ def test_all_mcp_tools_route_to_paper_backend_endpoints(monkeypatch):
         await server.get_risk_limits()
         await server.get_trade_journal()
         await server.open_paper_trade(
-            "binance", "btc/usdt", "spot", "LONG", 100.0, 95.0, 110.0
+            "kucoin", "btc/usdt", "spot", "LONG", 100.0, 95.0, 110.0
         )
         await server.close_paper_trade(7, 105.0)
 
@@ -54,7 +54,7 @@ def test_all_mcp_tools_route_to_paper_backend_endpoints(monkeypatch):
         ("GET", "/api/risk", None, None),
         ("GET", "/api/journal", None, None),
         ("POST", "/api/paper/open", None, {
-            "exchange": "binance", "symbol": "BTC/USDT",
+            "exchange": "kucoin", "symbol": "BTC/USDT",
             "market_type": "spot", "side": "LONG",
             "entry": 100.0, "stop": 95.0, "target": 110.0,
         }),
