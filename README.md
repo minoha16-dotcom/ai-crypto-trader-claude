@@ -173,6 +173,7 @@ curl -X POST "http://127.0.0.1:8000/api/scan?exchange=kucoin&market_type=spot&sy
 - **FastAPI** serves the backend and REST API.
 - **Python standard library** calculations and CCXT candle data support the indicators and portfolio simulation.
 - **EMA 20/50, RSI 14, ATR 14** provide basic trend, momentum, and volatility context.
+- **Local AI Trade Advisor:** ranks LONG/SHORT scan setups. It uses only local scanner features and closed paper-trade outcomes; after 10 linked outcomes for a market type/timeframe, it ranks using nearby historical setups. Before that, it labels the ranking as a technical cold start or a general closed-trade baseline. It does not send trade data to an external AI service and never opens a trade automatically. Trades opened from a scanner setup are linked to that signal; manually entered trades still inform the overall historical win-rate baseline.
 
 ### Risk and persistence
 
@@ -186,6 +187,7 @@ curl -X POST "http://127.0.0.1:8000/api/scan?exchange=kucoin&market_type=spot&sy
 - `GET /api/exchanges`
 - `GET /api/markets/{exchange}/{symbol}?market_type=spot|futures`
 - `POST /api/scan`
+- `POST /api/ai/recommendations` (scan and locally rank tradeable setups)
 - `GET /api/signals`
 - `GET /api/account`
 - `GET /api/risk`
@@ -285,3 +287,4 @@ For a Render web service that uses Supabase for persistent paper-trading data:
 The backend creates and incrementally migrates its PostgreSQL tables on startup. Existing SQLite files are not automatically migrated; export and import separately if historical local records must be retained. Use the Supabase Session Pooler URI and keep SSL enabled. `render.yaml` sets `autoDeployTrigger: off` for Blueprint-managed deployments; verify the live Render service's auto-deploy setting separately because syncing a Blueprint is an explicit configuration change. The current service is connected directly to the production branch; this repository file does not silently change the live Render service. The live service was last inspected with Auto-Deploy set to On Commit. Turn Auto-Deploy Off manually in the Render Dashboard before merging this PR; this YAML change does not modify the already-existing service setting. Paper trading remains simulated only; no exchange private keys or live-order endpoints are added.
 
 **Free-tier note:** Render's free web service may sleep when idle. Supabase Free projects can pause after a period of inactivity. This setup is suitable for testing, not guaranteed always-on operation. Review current provider limits before relying on it.
+
