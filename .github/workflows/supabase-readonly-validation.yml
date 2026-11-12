@@ -1,0 +1,37 @@
+name: Supabase read-only validation
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - ".github/workflows/supabase-readonly-validation.yml"
+      - "tests/test_supabase_readonly_validation.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  readonly-validation:
+    # Never expose the repository secret to pull requests from forks.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TRADER_DATABASE_URL: ${{ secrets.TRADER_DATABASE_URL }}
+    steps:
+      - name: Check out the validation branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install read-only probe dependencies
+        run: python -m pip install --disable-pip-version-check "psycopg[binary]>=3.2,<4" pytest
+      - name: Verify Supabase connection and schema without writes
+        run: |
+          if [ -z "$TRADER_DATABASE_URL" ]; then
+            echo "::error::Missing repository secret TRADER_DATABASE_URL."
+            exit 1
+          fi
+          python -m pytest -q tests/test_supabase_readonly_validation.py
