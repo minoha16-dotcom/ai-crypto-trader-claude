@@ -17,6 +17,7 @@ def test_futures_scan_persists_canonical_symbol(monkeypatch):
         def execute(self, sql, params):
             observed["sql"] = sql
             observed["params"] = params
+            return type("Cursor", (), {"fetchone": lambda self: {"id": 42}})()
 
     async def fake_resolve_symbol(exchange, symbol, market_type):
         assert (exchange, symbol, market_type) == ("binance", "BTC/USDT", "futures")
@@ -49,7 +50,9 @@ def test_futures_scan_persists_canonical_symbol(monkeypatch):
     ))
 
     assert results[0]["symbol"] == "BTC/USDT:USDT"
+    assert results[0]["signal_id"] == 42
     assert observed["ohlcv_symbol"] == "BTC/USDT:USDT"
     assert observed["params"][1] == "BTC/USDT:USDT"
     saved_payload = json.loads(observed["params"][-1])
     assert saved_payload["symbol"] == "BTC/USDT:USDT"
+
