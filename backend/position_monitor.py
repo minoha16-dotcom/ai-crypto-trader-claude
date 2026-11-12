@@ -8,6 +8,7 @@ import logging
 import math
 import os
 from contextlib import contextmanager
+from starlette.concurrency import run_in_threadpool
 
 from .config import settings
 from .database import connect
@@ -61,13 +62,15 @@ async def monitor_open_positions_once(*, detailed=False):
     in-process monitor. Scheduled callers can request a report so upstream
     failures, including HTTP 429 cooldowns, are not mistaken for a full check.
     """
-    with connect() as db:
-        rows = [
-            dict(row)
-            for row in db.execute(
-                "SELECT * FROM trades WHERE status='OPEN' ORDER BY id ASC"
-            ).fetchall()
-        ]
+    def load_open_positions():
+        with connect() as db:
+            return [
+                dict(row)
+                for row in db.execute(
+                    "SELECT * FROM trades WHERE status='OPEN' ORDER BY id ASC"
+                ).fetchall()
+            ]
+    rows = await run_in_threadpool(load_open_positions)
 
     closed = 0
     failed = 0
@@ -99,7 +102,7 @@ async def monitor_open_positions_once(*, detailed=False):
 
             reason = "STOP" if stop_hit else "TARGET"
             try:
-                result = close_trade(row["id"], last)
+                result = await run_in_threadpool(close_trade, row["id"], last)
             except ValueError:
                 # A dashboard/manual close may have won the race.
                 logger.info(

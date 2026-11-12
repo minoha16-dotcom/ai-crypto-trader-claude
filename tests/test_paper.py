@@ -50,7 +50,7 @@ def test_futures_short_is_allowed_in_paper_mode(isolated_db):
 
 
 def test_api_rejects_spot_short(isolated_db):
-    with TestClient(app) as client:
+    with TestClient(app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"}) as client:
         response = client.post("/api/paper/open", json={
             "exchange": "binance", "symbol": "BTC/USDT", "market_type": "spot",
             "side": "SHORT", "entry": 100, "stop": 105
@@ -144,7 +144,7 @@ def test_api_assigns_and_persists_default_two_r_target(isolated_db, monkeypatch)
     monkeypatch.setattr(registry, "ticker", fake_ticker)
     monkeypatch.setattr("backend.main.get_positions", fake_positions)
 
-    with TestClient(app) as client:
+    with TestClient(app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"}) as client:
         response = client.post("/api/paper/open", json={
             "exchange": "kucoin",
             "symbol": "BTC/USDT",

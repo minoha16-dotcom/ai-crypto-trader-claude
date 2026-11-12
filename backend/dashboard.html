@@ -123,7 +123,7 @@ canvas#chart{width:100%;height:150px}
 <div class="main-shell">
 <header class="topbar"><div><span class="eyebrow">Multi-exchange research terminal</span><h1>Trading Overview</h1><p>Spot &amp; Futures · KuCoin · Bybit · OKX</p></div><div class="topbar-actions"><span class="topbar-connection">PUBLIC DATA CONNECTION</span><span class="status">● PAPER MODE ONLY</span></div></header>
 <main class="page-content">
- <div class="warning"><strong>RISK NOTICE</strong><span>Paper-only monitoring is periodic, not real-time. Free hosting can sleep, and scheduled checks may miss price moves between runs. This is not a guaranteed stop-loss service.</span></div>
+ <div class="warning"><strong>RISK NOTICE</strong><span>Stop/target monitoring is periodic best-effort only, not real-time or guaranteed. It uses public last-traded prices and may miss moves between checks or while hosting sleeps. No exchange stop orders are placed; gaps can make simulated exits differ from the configured level.</span></div>
  <div class="overview-head anchor-section" id="overview"><span class="section-kicker">Account snapshot</span><p id="refresh-status">Loading dashboard data…</p></div>
  <section class="overview-grid">
   <div class="metric"><small>Paper equity</small><b id="equity">$10,000</b></div>
@@ -180,6 +180,7 @@ canvas#chart{width:100%;height:150px}
     <section class="panel anchor-section" id="journal-panel">
      <div class="panel-head"><div><h2>Trade &amp; Signal Journal</h2><p class="panel-subtitle">Activity history and simulated exits</p></div></div>
      <div class="scroll"><table><thead><tr><th>ID</th><th>Pair</th><th>Market</th><th>Side / Signal</th><th>Quantity / Price</th><th>Status</th><th>P&amp;L</th><th>Action</th></tr></thead><tbody id="journal"><tr><td colspan="8">Loading journal…</td></tr></tbody></table></div>
+      <div id="journal-pagination" class="ticket-actions"></div>
     </section>
    </div>
   </div>
@@ -226,7 +227,7 @@ canvas#chart{width:100%;height:150px}
 </div>
 <script>
 const $=id=>document.getElementById(id),escapeHtml=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])),money=n=>Number(n||0).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2}),formatQuantity=value=>{const n=Number(value);return Number.isFinite(n)?n.toLocaleString(undefined,{useGrouping:false,maximumSignificantDigits:15}):'—'};
-let targetAutoMode=true;
+ let targetAutoMode=true,journalOffset=0;
 async function api(path,opts={}){let r=await fetch(path,{headers:{'Content-Type':'application/json'},...opts}),d=await r.json();if(!r.ok)throw Error(d.detail||'Request failed');return d}
 let watchRefreshBusy=false;
 function marketNumber(value){
@@ -370,8 +371,8 @@ $('chart-symbol').addEventListener('change',loadMarketChart);
 
 async function refresh(){
  const names=['account','journal','signals','positions','opportunities','risk'];
- const results=await Promise.allSettled([
-  api('/api/account'),api('/api/journal'),api('/api/signals'),
+  const results=await Promise.allSettled([
+   api('/api/account'),api('/api/journal?limit=100&offset='+journalOffset),api('/api/signals?limit=100'),
   api('/api/positions'),api('/api/opportunities'),api('/api/risk')
  ]);
  const values=results.map(r=>r.status==='fulfilled'?r.value:null);
@@ -392,7 +393,7 @@ async function refresh(){
   $('open').textContent=a.open_trades.length;
   $('equity-note').textContent=a.unrealized_pnl_note+(a.equity_is_partial?' '+a.unpriced_open_positions+' position(s) excluded because live prices were unavailable.':'');
  }
- if(s){$('signals').textContent=s.signals.length;}
+ if(s){$('signals').textContent=s.pagination?.total??s.signals.length;}
  if(j){render(j);renderStats(j.trades);draw(j.trades.filter(t=>t.status==='CLOSED'));}
  if(p){renderPositions(p.positions||[]);}
  else {$('positions').innerHTML='<tr><td colspan="13">Positions could not be refreshed. Existing values may be stale.</td></tr>';$('positions-updated').textContent='Refresh failed';}
@@ -453,7 +454,8 @@ async function closeTrade(id,suggestedPrice){
   await refresh();
  }catch(error){alert(error.message);}
 }
-function render(j){let rows=[...j.trades.map(t=>({id:t.id,pair:t.symbol,market:t.market_type,side:t.side,detail:formatQuantity(t.quantity)+(t.market_type==='futures'?(t.contract_type==='legacy_base'?' base units':' contracts · ×'+Number(t.contract_size||1).toLocaleString()):'')+' @ '+t.entry,status:t.status,pnl:t.pnl,rMultiple:t.r_multiple,trade:true})),...j.signals.map(s=>({id:'S'+s.id,pair:s.symbol,market:s.market_type,side:s.signal,detail:s.price,status:s.timeframe,pnl:'—',trade:false}))];$('journal').innerHTML=rows.map(r=>'<tr><td>'+escapeHtml(r.id)+'</td><td>'+escapeHtml(r.pair)+'</td><td>'+escapeHtml(r.market)+'</td><td class="'+escapeHtml(r.side)+'">'+escapeHtml(r.side)+'</td><td>'+escapeHtml(r.detail)+'</td><td>'+escapeHtml(r.status)+'</td><td>'+(r.trade?(money(r.pnl)+(r.rMultiple==null?'':' · '+Number(r.rMultiple).toFixed(2)+'R')):r.pnl)+'</td><td>'+(r.trade&&r.status==='OPEN'?'<button class="danger" onclick="closeTrade('+r.id+')">Close</button>':'—')+'</td></tr>').join('')||'<tr><td colspan="8">No records yet.</td></tr>'}
+function render(j){let rows=[...j.trades.map(t=>({id:t.id,pair:t.symbol,market:t.market_type,side:t.side,detail:formatQuantity(t.quantity)+(t.market_type==='futures'?(t.contract_type==='legacy_base'?' base units':' contracts · ×'+Number(t.contract_size||1).toLocaleString()):'')+' @ '+t.entry,status:t.status,pnl:t.pnl,rMultiple:t.r_multiple,trade:true})),...j.signals.map(s=>({id:'S'+s.id,pair:s.symbol,market:s.market_type,side:s.signal,detail:s.price,status:s.timeframe,pnl:'—',trade:false}))];$('journal').innerHTML=rows.map(r=>'<tr><td>'+escapeHtml(r.id)+'</td><td>'+escapeHtml(r.pair)+'</td><td>'+escapeHtml(r.market)+'</td><td class="'+escapeHtml(r.side)+'">'+escapeHtml(r.side)+'</td><td>'+escapeHtml(r.detail)+'</td><td>'+escapeHtml(r.status)+'</td><td>'+(r.trade?(money(r.pnl)+(r.rMultiple==null?'':' · '+Number(r.rMultiple).toFixed(2)+'R')):r.pnl)+'</td><td>'+(r.trade&&r.status==='OPEN'?'<button class="danger" onclick="closeTrade('+r.id+')">Close</button>':'—')+'</td></tr>').join('')||'<tr><td colspan="8">No records yet.</td></tr>';const p=j.pagination||{};$('journal-pagination').innerHTML='<span class="helper-note">Showing '+(rows.length?Number(p.offset||0)+1:0)+'–'+(Number(p.offset||0)+rows.length)+' · '+(p.trades_total||0)+' trades · '+(p.signals_total||0)+' signals</span><button class="secondary" data-journal-page="prev" '+(Number(p.offset||0)<=0?'disabled':'')+'>Newer</button><button class="secondary" data-journal-page="next" '+(!(p.trades_has_more||p.signals_has_more)?'disabled':'')+'>Older</button>'}
+ $('journal-pagination').addEventListener('click',event=>{const button=event.target.closest('button[data-journal-page]');if(!button)return;journalOffset=Math.max(0,journalOffset+(button.dataset.journalPage==='next'?100:-100));refresh()});
 function draw(trades){let c=$('chart'),ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);ctx.strokeStyle='#344866';ctx.beginPath();ctx.moveTo(30,10);ctx.lineTo(30,160);ctx.lineTo(880,160);ctx.stroke();if(!trades.length){ctx.fillStyle='#9aabc2';ctx.fillText('Close paper trades to build performance history',45,80);return}let sum=0,vals=trades.slice().reverse().map(t=>sum+=Number(t.pnl||0)),min=Math.min(0,...vals),max=Math.max(0,...vals),span=max-min||1;ctx.strokeStyle='#73a7ff';ctx.lineWidth=3;ctx.beginPath();vals.forEach((v,i)=>{let x=35+i*835/Math.max(1,vals.length-1),y=150-(v-min)/span*125;i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();ctx.fillStyle='#9aabc2';ctx.fillText('Cumulative realized P&L: '+money(sum),40,18)}
 refresh();refreshWatchlist();loadMarketChart();setInterval(()=>{refresh();refreshWatchlist()},15000);setInterval(loadMarketChart,60000);
 </script>
