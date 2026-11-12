@@ -252,7 +252,7 @@ async function refreshWatchlist(){
  watchRefreshBusy=true;
  const status=$('watch-status'),body=$('watchlist-rows'),exchange=$('watch-exchange').value,market=$('watch-market').value;
  const symbols=watchSymbols();
- status.className='live-market-status';
+ status.className='panel-status';
  status.textContent='Fetching public tickers…';
  if(!symbols.length){
   body.innerHTML='<tr><td colspan="5">Enter one or more pairs in BASE/QUOTE format, for example BTC/USDT.</td></tr>';
