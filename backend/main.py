@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, model_validator
 
 from .config import settings
@@ -23,6 +24,7 @@ from .metrics import position_pnl, position_risk
 
 @asynccontextmanager
 async def lifespan(app):
+    _require_dashboard_credentials()
     init_db()
     stop_monitor = asyncio.Event()
     monitor_task = asyncio.create_task(
@@ -51,6 +53,40 @@ app = FastAPI(
 )
 
 
+def _require_dashboard_credentials():
+    if not os.getenv("DASHBOARD_USERNAME") or not os.getenv("DASHBOARD_PASSWORD"):
+        raise RuntimeError("DASHBOARD_USERNAME and DASHBOARD_PASSWORD must both be configured.")
+
+
+def _load_open_positions():
+    with connect() as db:
+        return [dict(row) for row in db.execute(
+            "SELECT * FROM trades WHERE status='OPEN' ORDER BY id DESC"
+        ).fetchall()]
+
+
+def _load_opportunity_signals():
+    with connect() as db:
+        return [dict(row) for row in db.execute(
+            "SELECT * FROM signals WHERE archived_at IS NULL ORDER BY id DESC LIMIT 100"
+        ).fetchall()]
+
+
+def _load_risk_snapshot():
+    with connect() as db:
+        today_realized = float(db.execute(
+            "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades "
+            "WHERE status='CLOSED' AND date(closed_at)=date('now')"
+        ).fetchone()["total"] or 0)
+        snapshot = db.execute(
+            "SELECT starting_equity FROM daily_equity_snapshots WHERE trading_date=date('now')"
+        ).fetchone()
+        realized_all = float(db.execute(
+            "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE status='CLOSED'"
+        ).fetchone()["total"] or 0)
+    return today_realized, dict(snapshot) if snapshot else None, realized_all
+
+
 @app.exception_handler(ExchangeRateLimitCooldown)
 async def exchange_rate_limit_handler(request: Request, exc: ExchangeRateLimitCooldown):
     retry_after = str(max(1, int(exc.retry_after)))
@@ -76,11 +112,10 @@ async def dashboard_auth_and_security_headers(request: Request, call_next):
         username = os.getenv("DASHBOARD_USERNAME", "")
         password = os.getenv("DASHBOARD_PASSWORD", "")
         if not username or not password:
-            if os.getenv("RENDER"):
-                return JSONResponse(
-                    {"detail": "Dashboard credentials are not configured."},
-                    status_code=503,
-                )
+            return JSONResponse(
+                {"detail": "Dashboard credentials are not configured."},
+                status_code=503,
+            )
         else:
             header = request.headers.get("authorization", "")
             supplied_user = supplied_password = ""
@@ -289,14 +324,22 @@ async def backtest(exchange="kucoin", symbol="BTC/USDT", market_type="spot", tim
         instrument = await registry.market_spec(
             exchange, resolved_symbol, market_type
         )
-        candles = await registry.ohlcv(exchange, resolved_symbol, timeframe, limit, market_type)
+        candles, candle_meta = await registry.ohlcv_with_metadata(
+            exchange, resolved_symbol, timeframe, limit, market_type
+        )
         # The final exchange candle may still be forming; never use it for signals.
         return {
             "exchange": exchange,
             "symbol": resolved_symbol,
             "market_type": market_type,
             "timeframe": timeframe,
-            **run_backtest(candles[:-1], starting_balance=settings.paper_starting_balance, instrument=instrument),
+            "candle_data": candle_meta,
+            "requested_candles": candle_meta["requested"],
+            "received_candles": candle_meta["received"],
+            "candle_shortfall": candle_meta["shortfall"],
+            **await run_in_threadpool(
+                run_backtest, candles[:-1], settings.paper_starting_balance, instrument
+            ),
         }
     except ExchangeRateLimitCooldown:
         raise
@@ -324,17 +367,26 @@ async def run_scan(exchange="kucoin", market_type="spot", symbols=None, timefram
 
 
 @app.get("/api/signals")
-def signals(limit: int = 100):
+def signals(limit: int = 100, offset: int = 0):
+    limit = max(1, min(limit, 500))
+    offset = max(0, min(offset, 1_000_000))
     with connect() as db:
         rows = db.execute(
-            "SELECT * FROM signals ORDER BY id DESC LIMIT ?", (max(1, min(limit, 500)),)
+            "SELECT * FROM signals WHERE archived_at IS NULL ORDER BY id DESC LIMIT ? OFFSET ?",
+            (limit, offset),
         ).fetchall()
-    return {"signals": [dict(row) for row in rows]}
+        total = db.execute(
+            "SELECT COUNT(*) AS total FROM signals WHERE archived_at IS NULL"
+        ).fetchone()["total"]
+    return {"signals": [dict(row) for row in rows], "pagination": {
+        "limit": limit, "offset": offset, "total": total,
+        "has_more": offset + len(rows) < total,
+    }}
 
 
 @app.get("/api/account")
 async def get_account():
-    data = account()
+    data = await run_in_threadpool(account)
     positions_data = await get_positions()
     priced = [p for p in positions_data["positions"] if p.get("unrealized_pnl") is not None]
     missing = len(priced) != len(positions_data["positions"])
@@ -352,10 +404,7 @@ async def get_account():
 @app.get("/api/opportunities")
 async def opportunities(limit: int = 12):
     """Latest distinct scanner setups, refreshed with current public ticker prices."""
-    with connect() as db:
-        rows = [dict(row) for row in db.execute(
-            "SELECT * FROM signals ORDER BY id DESC LIMIT 100"
-        ).fetchall()]
+    rows = await run_in_threadpool(_load_opportunity_signals)
     latest = []
     seen = set()
     for row in rows:
@@ -401,13 +450,14 @@ async def opportunities(limit: int = 12):
 
 @app.get("/api/positions")
 async def get_positions():
-    """Return open paper positions marked to the latest public exchange ticker."""
-    with connect() as db:
-        rows = [
-            dict(row) for row in db.execute(
-                "SELECT * FROM trades WHERE status='OPEN' ORDER BY id DESC"
-            ).fetchall()
-        ]
+    """Return positions marked to the latest public last-traded price.
+
+    Stop/target checks are periodic best-effort paper monitoring, not exchange
+    orders, a guaranteed execution service, or real-time protection. Paper exit
+    price is the last-traded price observed by the monitor; a gap can produce a
+    materially different result from the configured stop/target level.
+    """
+    rows = await run_in_threadpool(_load_open_positions)
 
     async def mark_position(row):
         try:
@@ -471,9 +521,16 @@ async def get_positions():
                 "retry_after_seconds": exc.retry_after if isinstance(exc, ExchangeRateLimitCooldown) else None,
             }
 
-    return {"positions": await __import__("asyncio").gather(
-        *(mark_position(row) for row in rows)
-    )}
+    return {
+        "positions": await __import__("asyncio").gather(
+            *(mark_position(row) for row in rows)
+        ),
+        "monitoring_note": (
+            "Periodic best-effort checks of public last-traded prices; not real-time, "
+            "not guaranteed, and no exchange stop/target orders are placed."
+        ),
+        "exit_price_model": "observed last-traded price at the monitor poll; gaps can cross the configured level",
+    }
 
 
 @app.get("/api/risk")
@@ -482,17 +539,7 @@ async def risk():
     positions = marked["positions"]
     prices_complete = all(p.get("unrealized_pnl") is not None for p in positions)
     floating = sum(float(p["unrealized_pnl"]) for p in positions if p.get("unrealized_pnl") is not None)
-    with connect() as db:
-        today_realized = float(db.execute(
-            "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades "
-            "WHERE status='CLOSED' AND date(closed_at)=date('now')"
-        ).fetchone()["total"] or 0)
-        snapshot = db.execute(
-            "SELECT starting_equity FROM daily_equity_snapshots WHERE trading_date=date('now')"
-        ).fetchone()
-        realized_all = float(db.execute(
-            "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades WHERE status='CLOSED'"
-        ).fetchone()["total"] or 0)
+    today_realized, snapshot, realized_all = await run_in_threadpool(_load_risk_snapshot)
     daily_start = float(snapshot["starting_equity"]) if snapshot else settings.paper_starting_balance + realized_all - today_realized
     daily_pnl = today_realized + floating
     open_risk = sum(position_risk(p["entry"], p["stop"], p["quantity"], p.get("contract_size", 1.0), p.get("contract_type", "spot")) for p in positions)
@@ -546,7 +593,8 @@ async def paper_open(body: PaperOpen):
         floating_pnl = sum(float(p["unrealized_pnl"]) for p in positions if p.get("unrealized_pnl") is not None)
         trade_data = body.model_dump()
         trade_data["symbol"] = resolved_symbol
-        return open_trade(
+        return await run_in_threadpool(
+            open_trade,
             **trade_data,
             unrealized_pnl=floating_pnl,
             prices_complete=prices_complete,
@@ -559,9 +607,9 @@ async def paper_open(body: PaperOpen):
 
 
 @app.post("/api/paper/{trade_id}/close")
-def paper_close(trade_id: int, body: PaperClose):
+async def paper_close(trade_id: int, body: PaperClose):
     try:
-        return close_trade(trade_id, body.exit_price)
+        return await run_in_threadpool(close_trade, trade_id, body.exit_price)
     except ExchangeRateLimitCooldown:
         raise
     except Exception as exc:
@@ -569,8 +617,9 @@ def paper_close(trade_id: int, body: PaperClose):
 
 
 @app.get("/api/journal")
-def get_journal():
-    return journal()
+def get_journal(limit: int = 100, offset: int = 0):
+    """Paginated paper trade and signal history; old signals are soft archived."""
+    return journal(limit=max(1, min(limit, 500)), offset=max(0, min(offset, 1_000_000)))
 
 
 @app.get("/", response_class=HTMLResponse)

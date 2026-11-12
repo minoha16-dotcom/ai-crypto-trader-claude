@@ -20,6 +20,13 @@ REGISTRY_EXCHANGE_IDS = EXCHANGE_IDS + LEGACY_EXCHANGE_IDS
 MARKET_TYPES = ("spot", "futures")
 DEFAULT_TICKER_CACHE_TTL_SECONDS = 2.0
 MAX_TICKER_CACHE_ENTRIES = 512
+OHLCV_REQUEST_MAX = {
+    ("kucoin", "spot"): 500, ("kucoin", "futures"): 500,
+    ("bybit", "spot"): 1000, ("bybit", "futures"): 1000,
+    ("okx", "spot"): 300, ("okx", "futures"): 300,
+    ("binance", "spot"): 1000, ("binance", "futures"): 1000,
+}
+OHLCV_MAX_REQUESTS = 100
 RATE_LIMIT_FALLBACK_SECONDS = {418: 300, 429: 60, 403: 600}
 logger = logging.getLogger(__name__)
 
@@ -501,16 +508,73 @@ class ExchangeRegistry:
         return copy.deepcopy(await asyncio.shield(task))
 
     async def ohlcv(self, exchange_id, symbol, timeframe="1h", limit=150, market_type="spot"):
+        candles, _ = await self.ohlcv_with_metadata(
+            exchange_id, symbol, timeframe, limit, market_type
+        )
+        return candles
+
+    async def ohlcv_with_metadata(self, exchange_id, symbol, timeframe="1h", limit=150, market_type="spot"):
+        if not isinstance(limit, int) or limit < 1 or limit > 5000:
+            raise ValueError("OHLCV limit must be between 1 and 5000")
         client = await self._load_markets(exchange_id, market_type)
         resolved_symbol = await self.resolve_symbol(exchange_id, symbol, market_type)
-        return await self._request(
-            exchange_id,
-            client,
-            client.fetch_ohlcv,
-            resolved_symbol,
-            timeframe=timeframe,
-            limit=limit,
-        )
+        interval_ms = int(client.parse_timeframe(timeframe) * 1000)
+        if interval_ms <= 0:
+            raise ValueError("Unsupported OHLCV timeframe")
+        page_limit = min(OHLCV_REQUEST_MAX.get((exchange_id, market_type), 300), limit)
+        # Providers may silently enforce a lower cap than requested. Allow
+        # multiple short pages while keeping a hard request ceiling.
+        max_requests = OHLCV_MAX_REQUESTS
+        now_ms = int(time.time() * 1000)
+        start_ms = now_ms - limit * interval_ms
+        cursor = start_ms
+        by_timestamp = {}
+        requests = 0
+        while len(by_timestamp) < limit and requests < max_requests:
+            page = await self._request(
+                exchange_id, client, client.fetch_ohlcv, resolved_symbol,
+                timeframe=timeframe, since=cursor, limit=page_limit,
+            )
+            requests += 1
+            if not page:
+                break
+            valid = []
+            for candle in page:
+                if not isinstance(candle, (list, tuple)) or len(candle) < 6:
+                    continue
+                try:
+                    stamp = int(candle[0])
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if stamp >= start_ms:
+                    by_timestamp[stamp] = list(candle[:6])
+                    valid.append(stamp)
+            if not valid:
+                break
+            newest = max(valid)
+            if newest < cursor:
+                break
+            next_cursor = newest + interval_ms
+            if next_cursor <= cursor:
+                break
+            cursor = next_cursor
+        ordered = [by_timestamp[key] for key in sorted(by_timestamp)][-limit:]
+        timestamps = sorted(by_timestamp)[-limit:]
+        gaps = [
+            {"after": left, "before": right,
+             "missing": max(0, (right - left) // interval_ms - 1)}
+            for left, right in zip(timestamps, timestamps[1:])
+            if right - left > interval_ms
+        ]
+        return ordered, {
+            "requested": limit,
+            "received": len(ordered),
+            "shortfall": max(0, limit - len(ordered)),
+            "request_count": requests,
+            "request_limit": page_limit,
+            "gaps": gaps,
+            "continuity": "gaps_detected" if gaps else "continuous",
+        }
 
     async def close(self):
         pending = list(self._ticker_inflight.values()) + list(self._markets_inflight.values())
