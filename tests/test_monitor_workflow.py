@@ -34,4 +34,5 @@ def test_free_position_monitor_requires_two_independent_activation_gates():
     )
     assert "vars.ENABLE_PAPER_POSITION_MONITOR == 'true'" in workflow
     assert "vars.PAPER_POSITION_MONITOR_PRODUCTION_APPROVED == 'true'" in workflow
+    assert "vars.PAPER_POSITION_MONITOR_BACKUP_RESTORE_VERIFIED == 'true'" in workflow
     assert "ref: main" in workflow
