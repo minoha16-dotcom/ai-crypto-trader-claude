@@ -22,5 +22,5 @@ jobs:
           cache: pip
       - name: Install CCXT
         run: python -m pip install --upgrade pip "ccxt>=4.4,<5"
-      - name: Check public Spot and Futures endpoints for Binance, Bybit and OKX
+      - name: Check public Spot and Futures endpoints for KuCoin, Bybit and OKX
         run: python scripts/check_exchanges.py

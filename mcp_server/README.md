@@ -60,17 +60,34 @@ python -m mcp_server.server
 
 Supply the credentials through your local environment or a secret manager; do not commit them. Set both variables or neither. Keep the MCP listener bound to loopback and use the private tunnel for ChatGPT.
 
+## ChatGPT availability and deployment status
+
+This repository currently contains a local/private MCP bridge, not a hosted
+public MCP endpoint. Do not publish the unauthenticated local listener or place
+it behind an unauthenticated public URL.
+
+OpenAI's current custom MCP documentation lists full custom MCP support,
+including write tools, for ChatGPT Business and Enterprise/Edu workspaces.
+Pro is limited to read/fetch permissions; Go is not listed as eligible for
+custom MCP connections in that documentation. Confirm plan/workspace
+eligibility before attempting to connect.
+
+A hosted connection also requires an HTTPS endpoint and a supported,
+production-grade authentication flow (normally OAuth with refresh tokens).
+This bridge does not implement an OAuth authorization server, so it is not
+ready to expose publicly. This is intentionally not described as a completed
+hosted integration.
+
 ## Connect ChatGPT privately
 
-ChatGPT does not connect directly to a localhost URL. Use OpenAI's Secure MCP
-Tunnel where available; it forwards requests to the local MCP server without
-opening an inbound public port. Follow the current Secure MCP Tunnel guide and
-use the tunnel option when adding a custom MCP server in ChatGPT.
+ChatGPT does not connect directly to a localhost URL. A Secure MCP Tunnel may
+provide private transport where available, but it does not bypass plan
+eligibility or the need to authenticate and protect the server.
 
-If a secure tunnel is not available to your account, do not expose this
-unauthenticated development server publicly. A production deployment needs
-HTTPS, authentication (prefer OAuth), access controls, rate limits and a
-hardened backend.
+If a secure tunnel or a plan-eligible custom MCP connection is unavailable,
+do not expose this development server publicly. Production hosting requires
+HTTPS, OAuth, access controls, rate limits and a hardened backend. These
+components are not claimed as complete in this release.
 
 In ChatGPT web, add a custom MCP server/plugin using the tunnel connection,
 scan the tools, and enable only the tools you intend to use. Keep the app
@@ -83,7 +100,7 @@ private; do not publish it to a public directory.
 - "Scan BTC/USDT and ETH/USDT on OKX Spot using 1h candles."
 - "Show my paper account, risk limits, and open positions."
 - "Show the latest trading opportunities."
-- "Get Binance BTC/USDT Spot instrument precision and order limits."
+- "Get KuCoin BTC/USDT Spot instrument precision and order limits."
 - "Backtest BTC/USDT Futures on OKX using 4h candles."
 - "Open a paper LONG on BTC/USDT with entry 60000 and stop 59000."
 - "Close paper trade 1 at exit price 61000."

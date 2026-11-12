@@ -159,7 +159,7 @@ Interactive OpenAPI documentation is disabled by default in this paper-trading d
 Example scan request:
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/api/scan?exchange=binance&market_type=spot&symbols=BTC/USDT,ETH/USDT&timeframe=1h"
+curl -X POST "http://127.0.0.1:8000/api/scan?exchange=kucoin&market_type=spot&symbols=BTC/USDT,ETH/USDT&timeframe=1h"
 ```
 
 ## The tools
@@ -201,7 +201,7 @@ Run the public connectivity check from a network that can reach the exchange API
 python scripts/check_exchanges.py
 ```
 
-It checks BTC/USDT Spot and a supported BTC/USDT Futures contract on Binance, Bybit, and OKX, including the public ticker, contract type, contract size, and amount precision. It never uses API keys or submits orders. Explicit provider geo-block responses are reported as `SKIP`, not `PASS`; other connection or metadata failures fail the check. A region-restricted GitHub runner therefore cannot certify the blocked exchange—rerun the script from an allowed network to complete that exchange's verification. The GitHub workflow runs on pull requests targeting the production branch and can also be started manually.
+It checks BTC/USDT Spot and a supported BTC/USDT Futures contract on KuCoin, Bybit, and OKX, including public ticker, contract type, contract size, and amount precision. It never uses API keys or submits orders. Geographic blocks and HTTP 429 cooldowns are reported as `INCONCLUSIVE`, never `PASS`; other connection or metadata errors fail the check. The GitHub workflow runs on pull requests targeting the production branch and can also be started manually.
 
 ## Futures backtesting
 
@@ -212,12 +212,12 @@ The backtest resolves the exchange's canonical Futures symbol and loads its cont
 - **Paper trading only:** the project does not place real orders or connect to private account endpoints.
 - **No credentials required:** market adapters use public data. Do not add exchange secrets to the repository.
 - **Futures limitations:** Futures mode selects swap markets through CCXT; symbols, contract availability, and venue behavior vary.
-- **Simulation limitations:** the server-side monitor checks public ticker prices on a polling interval and closes simulated positions when a stop or target is crossed. Dashboard closes are manual. Backtests support Spot and exchange-aware linear/inverse contract quantities, but do not model funding, margin, liquidation, order-book depth, or real fills.
+- **Simulation limitations:** the server-side monitor checks public ticker prices on a polling interval and closes simulated positions when a stop or target is crossed. Dashboard closes are manual. Backtests apply per-trade risk, aggregate open-risk, UTC daily realized-loss, and notional caps. They still model one position at a time and do not model funding, margin, liquidation, order-book depth, or real fills.
 - **Signals are heuristic:** indicator-based scans are not validated predictive models and can be wrong.
 - **Risk controls are not a guarantee:** configured limits do not eliminate market, software, or execution risk.
 - **Storage:** local development uses SQLite; Render uses PostgreSQL. Back up the PostgreSQL database and test restore procedures before relying on the journal.
-- **Database readiness:** `GET /api/health` checks process liveness; `GET /api/ready` checks database connectivity and required tables. The latter is the Render health-check path in the Blueprint.
-- **Supabase probe:** manually run the `Supabase read-only connectivity probe` GitHub Actions workflow after adding repository secret `TRADER_DATABASE_URL`. It verifies connectivity and schema using a read-only PostgreSQL transaction and does not modify account data.
+- **Database readiness:** `GET /api/health` checks process liveness; `GET /api/ready` checks database connectivity and required tables. The latter is the Render Blueprint health-check path.
+- **Supabase probe:** manually run `Supabase read-only connectivity probe` after adding repository secret `TRADER_DATABASE_URL` with the same Supabase PostgreSQL URI used by Render. It checks connectivity/schema in a read-only transaction; it does not migrate, truncate, or edit trades. Never put the secret in chat, issues, or source control.
 - **Testing:** run `pytest -q` in the repository. GitHub Actions is configured to run the test suite on pushes and pull requests; check the Actions tab for the actual result.
 - **Not financial advice:** make independent decisions and comply with applicable laws and exchange terms.
 
@@ -254,10 +254,10 @@ MIT. See [LICENSE](LICENSE).
 
 - The web service uses the Render Free plan in Frankfurt and connects to Supabase PostgreSQL. Free web services spin down after 15 minutes without inbound HTTP/WebSocket traffic; they are not suitable as the only host for continuous stop/target monitoring.
 - The Blueprint does not create a paid Background Worker. The web service uses `/api/ready` to verify database connectivity and required tables.
-- The paid Background Worker is intentionally not included. The Free web process may sleep, so it cannot provide continuous stop/target monitoring.
+- The paid Background Worker has been removed from the Blueprint. The Free web process may sleep, so it cannot provide continuous stop/target monitoring.
 - Set a unique `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` in Render. Both values are required; the dashboard and API are protected by HTTP Basic Authentication.
-- HTTP Basic Authentication protects the dashboard and every API route except `/api/health`, which is public for health checks. API docs are disabled.
-- Scanning is manual: use the dashboard Scan button. The web process can monitor while awake. The optional GitHub Actions monitor in PR #14 can perform scheduled checks every five minutes after its secret is configured and the workflow is enabled. Both methods are periodic; price levels can be crossed and reversed between checks. Stop/target monitoring is not guaranteed or real-time.
+- HTTP Basic Authentication protects the dashboard and every API route except `/api/health` and `/api/ready`, which are public liveness/readiness checks. API docs are disabled.
+- Scanning is manual: use the dashboard Scan button. The web process can monitor while awake. The optional GitHub Actions monitor in PR #14 can perform scheduled checks every five minutes after repository secret `TRADER_DATABASE_URL` is configured and PR #14 is merged into the default branch. Both methods are periodic; a price can cross and reverse between checks. Stop/target monitoring is not guaranteed or real-time.
 - The app remains paper-only and uses public market data; it does not need exchange API keys or submit live orders.
 
 After deployment, check `/api/health` and sign in with the username and password you configured in Render. Store those credentials in a password manager; never place them in source control.
@@ -276,8 +276,8 @@ For a Render web service that uses Supabase for persistent paper-trading data:
    - `DASHBOARD_USERNAME`: a private dashboard username.
    - `DASHBOARD_PASSWORD`: a long, unique password.
 6. Do not add Supabase `service_role`, `anon`, or exchange keys to the repository. The backend connects to PostgreSQL using the database connection string.
-7. Deploy, then verify `/api/health` and test opening and closing a paper trade. Restart the Render service and confirm the journal remains present.
+7. Before merging to the linked production branch, turn Auto-Deploy Off in the existing Render service Settings. After a separately approved manual deployment, verify `/api/health` and `/api/ready`, test paper open/close behavior, and confirm the journal remains present.
 
-The backend creates and incrementally migrates its PostgreSQL tables on startup. Existing SQLite files are not automatically migrated; export and import separately if historical local records must be retained. Use the Supabase Session Pooler URI and keep SSL enabled. `render.yaml` sets `autoDeployTrigger: checksPass` for Blueprint-managed deployments; verify the live Render service's auto-deploy setting separately because syncing a Blueprint is an explicit configuration change. The current service is connected directly to the production branch; this repository file does not silently change the live Render service. Paper trading remains simulated only; no exchange private keys or live-order endpoints are added.
+The backend creates and incrementally migrates its PostgreSQL tables on startup. Existing SQLite files are not automatically migrated; export and import separately if historical local records must be retained. Use the Supabase Session Pooler URI and keep SSL enabled. `render.yaml` sets `autoDeployTrigger: checksPass` for Blueprint-managed deployments; verify the live Render service's auto-deploy setting separately because syncing a Blueprint is an explicit configuration change. The current service is connected directly to the production branch; this repository file does not silently change the live Render service. The live service was last inspected with Auto-Deploy set to On Commit. Turn Auto-Deploy Off manually in the Render Dashboard before merging this PR; this YAML change does not modify the already-existing service setting. Paper trading remains simulated only; no exchange private keys or live-order endpoints are added.
 
 **Free-tier note:** Render's free web service may sleep when idle. Supabase Free projects can pause after a period of inactivity. This setup is suitable for testing, not guaranteed always-on operation. Review current provider limits before relying on it.
