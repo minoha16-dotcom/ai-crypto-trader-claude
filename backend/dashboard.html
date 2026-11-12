@@ -395,7 +395,7 @@ async function refresh(){
  if(s){$('signals').textContent=s.signals.length;}
  if(j){render(j);renderStats(j.trades);draw(j.trades.filter(t=>t.status==='CLOSED'));}
  if(p){renderPositions(p.positions||[]);}
- else {$('positions').innerHTML='<tr><td colspan="12">Positions could not be refreshed. Existing values may be stale.</td></tr>';$('positions-updated').textContent='Refresh failed';}
+ else {$('positions').innerHTML='<tr><td colspan="13">Positions could not be refreshed. Existing values may be stale.</td></tr>';$('positions-updated').textContent='Refresh failed';}
  if(o){renderOpportunities(o.opportunities||[]);}
  else {$('opportunities').innerHTML='<tr><td colspan="8">Opportunities could not be refreshed. Existing values may be stale.</td></tr>';$('opportunities-updated').textContent='Refresh failed';}
  if(!j){$('journal').innerHTML='<tr><td colspan="8">Journal could not be refreshed. Existing values may be stale.</td></tr>';}
