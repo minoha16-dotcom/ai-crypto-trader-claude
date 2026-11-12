@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.config import settings
-from backend.database import init_db
+from backend.database import connect, init_db
 from backend.main import app
 from backend.paper import open_trade, close_trade, account
 from backend.risk import risk_manager
@@ -119,3 +119,48 @@ def test_futures_inverse_sizing_uses_quote_face_value(isolated_db):
     assert opened["contracts"] == opened["quantity"]
     assert opened["quantity"] == round(opened["quantity"], 1)
     assert opened["notional"] == pytest.approx(opened["quantity"] * 100)
+
+
+def test_api_assigns_and_persists_default_two_r_target(isolated_db, monkeypatch):
+    from backend.exchanges import registry
+
+    async def fake_market_spec(exchange, symbol, market_type):
+        return {
+            "symbol": symbol,
+            "contract_size": 1.0,
+            "contract_type": "spot",
+            "amount_precision": 8,
+            "precision_mode": 2,
+            "min_amount": 0.00000001,
+        }
+
+    async def fake_ticker(exchange, symbol, market_type):
+        return {"last": 100.0}
+
+    async def fake_positions():
+        return {"positions": []}
+
+    monkeypatch.setattr(registry, "market_spec", fake_market_spec)
+    monkeypatch.setattr(registry, "ticker", fake_ticker)
+    monkeypatch.setattr("backend.main.get_positions", fake_positions)
+
+    with TestClient(app) as client:
+        response = client.post("/api/paper/open", json={
+            "exchange": "kucoin",
+            "symbol": "BTC/USDT",
+            "market_type": "spot",
+            "side": "LONG",
+            "entry": 100,
+            "stop": 95,
+        })
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["target"] == pytest.approx(110)
+    assert payload["reward_risk_ratio"] == pytest.approx(2.0)
+
+    with connect() as db:
+        row = db.execute(
+            "SELECT target FROM trades WHERE id=?", (payload["id"],)
+        ).fetchone()
+    assert row["target"] == pytest.approx(110)
