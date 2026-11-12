@@ -1,81 +1,228 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Crypto Trader V2</title>
-<style>
-:root{color-scheme:dark;--bg:#080e19;--surface:#0d1726;--panel:#111e30;--panel-2:#15243a;--line:#24364e;--muted:#8fa2bb;--text:#e9f0fb;--green:#2bd49a;--red:#fb7185;--blue:#69a7ff;--amber:#f6bd60}
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080e18"><title>AI Crypto Trader V2 · Trading Terminal</title><style>
+:root{color-scheme:dark;--bg:#080e18;--sidebar:#0b1421;--panel:#101c2d;--panel2:#132238;--panel3:#172944;--line:#243750;--line2:#304964;--text:#edf4ff;--muted:#8da2bc;--blue:#65a8ff;--blue2:#3277d2;--green:#2bd49a;--red:#fb7185;--amber:#f4bd60}
 *{box-sizing:border-box}
-html{scroll-behavior:smooth;scroll-padding-top:125px}
-body{margin:0;background:radial-gradient(ellipse at 18% -16%,rgba(37,91,153,.3),transparent 38%),radial-gradient(ellipse at 100% 0,rgba(31,63,111,.16),transparent 30%),var(--bg);color:var(--text);font:14px Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:.01em}
-header{position:sticky;top:0;z-index:30;display:flex;justify-content:space-between;align-items:center;gap:18px;padding:17px max(3vw,20px);background:rgba(7,14,25,.92);backdrop-filter:blur(18px);border-bottom:1px solid rgba(123,156,198,.17);box-shadow:0 8px 30px rgba(0,0,0,.18)}
-h1{font-size:clamp(20px,2vw,27px);letter-spacing:-.045em;margin:0;color:#f4f8ff}
-.brand-mark{display:inline-grid;place-items:center;width:34px;height:34px;margin-right:10px;border:1px solid rgba(105,167,255,.38);border-radius:10px;background:linear-gradient(145deg,rgba(105,167,255,.2),rgba(105,167,255,.04));color:var(--blue);vertical-align:-5px;font-size:19px}
-header small,.muted,small{color:var(--muted)}
-.header-meta{display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:flex-end}
-.connection{font-size:11px;color:#9ab0cb;letter-spacing:.04em}
-.connection:before{content:"";display:inline-block;width:7px;height:7px;margin-right:7px;border-radius:50%;background:var(--green);box-shadow:0 0 12px rgba(43,212,154,.65)}
-.status{display:inline-flex;align-items:center;gap:7px;padding:8px 12px;border-radius:999px;border:1px solid rgba(43,212,154,.27);background:rgba(43,212,154,.08);color:#67e5b7;font-size:10px;font-weight:850;letter-spacing:.12em}
-.dashboard-nav{position:sticky;top:69px;z-index:25;display:flex;gap:6px;overflow-x:auto;padding:9px max(3vw,20px);background:rgba(10,18,31,.94);backdrop-filter:blur(16px);border-bottom:1px solid rgba(123,156,198,.13)}
-.dashboard-nav a{white-space:nowrap;text-decoration:none;color:#91a5c0;font-size:11px;font-weight:750;padding:9px 13px;border-radius:8px;transition:all .16s}
-.dashboard-nav a:hover,.dashboard-nav a:focus{background:rgba(105,167,255,.12);color:#cfe2ff;outline:none}
-main{max-width:1660px;margin:auto;padding:25px max(3vw,20px) 50px}
-#refresh-status{margin:0 0 16px;font-size:11px;color:#8195af}
-.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px}
-.metric,.panel{background:linear-gradient(150deg,rgba(18,31,50,.98),rgba(13,24,40,.98));border:1px solid rgba(129,162,205,.16);border-radius:14px;box-shadow:0 12px 35px rgba(0,0,0,.15)}
-.metric{position:relative;overflow:hidden;padding:18px}
-.metric:after{content:"";position:absolute;right:-32px;top:-38px;width:96px;height:96px;border-radius:50%;background:rgba(105,167,255,.07);filter:blur(2px)}
-.metric small{display:block;color:#91a5c0;font-size:10px;font-weight:750;letter-spacing:.1em;text-transform:uppercase}
-.metric b{display:block;margin-top:9px;color:#f1f6ff;font-size:clamp(22px,2.1vw,29px);letter-spacing:-.045em;font-variant-numeric:tabular-nums}
-.panel{padding:20px;margin:0 0 16px}
-.panel h2{margin:0;color:#edf4ff;font-size:16px;font-weight:760;letter-spacing:-.025em}
-.panel h2 small{font-size:10px;font-weight:550;letter-spacing:0;text-transform:none;margin-left:8px}
-.panel p{line-height:1.55}
-.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
-label{display:grid;gap:6px;color:#91a5c0;font-size:10px;font-weight:750;letter-spacing:.07em;text-transform:uppercase}
-input,select{min-height:39px;min-width:110px;background:#0a1422;color:#e9f0fb;border:1px solid #2b405e;border-radius:8px;padding:9px 11px;font:inherit;font-size:12px;outline:none}
-input:focus,select:focus{border-color:#69a7ff;box-shadow:0 0 0 3px rgba(105,167,255,.12)}
-button{min-height:39px;border:1px solid transparent;border-radius:8px;padding:9px 14px;background:linear-gradient(135deg,#347bd8,#2456a5);color:#fff;font:inherit;font-size:11px;font-weight:800;cursor:pointer;transition:filter .15s,transform .15s}
+html{scroll-behavior:smooth;scroll-padding-top:24px}
+body{margin:0;background:radial-gradient(ellipse at 72% -18%,rgba(49,101,172,.18),transparent 35%),var(--bg);color:var(--text);font:13px Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+a{color:inherit}
+.app-shell{min-height:100vh;display:grid;grid-template-columns:238px minmax(0,1fr)}
+.sidebar{position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:21px 14px 16px;background:linear-gradient(180deg,#0c1726,#09121f);border-right:1px solid rgba(120,155,198,.17);z-index:40}
+.sidebar-brand{display:flex;align-items:center;gap:11px;padding:2px 9px 25px}
+.brand-mark{display:grid;place-items:center;flex:0 0 38px;width:38px;height:38px;border-radius:12px;border:1px solid rgba(101,168,255,.42);background:linear-gradient(145deg,rgba(101,168,255,.23),rgba(101,168,255,.04));color:var(--blue);font-size:21px}
+.brand-name{font-size:14px;font-weight:850;letter-spacing:-.035em;line-height:1.25}
+.brand-sub{display:block;margin-top:3px;color:#7e94b0;font-size:9px;font-weight:700;letter-spacing:.13em;text-transform:uppercase}
+.nav-caption{padding:9px 12px 8px;color:#687f9d;font-size:9px;font-weight:850;letter-spacing:.17em;text-transform:uppercase}
+.side-nav{display:grid;gap:4px}
+.side-nav a{display:flex;align-items:center;gap:11px;padding:11px 12px;border-radius:9px;text-decoration:none;color:#96a9c2;font-size:11px;font-weight:700;transition:background .16s,color .16s}
+.side-nav a .nav-icon{width:17px;text-align:center;color:#7893b4;font-size:14px}
+.side-nav a:hover,.side-nav a.active{background:linear-gradient(90deg,rgba(64,123,195,.22),rgba(64,123,195,.07));color:#e7f1ff}
+.side-nav a.active{box-shadow:inset 2px 0 0 var(--blue)}
+.side-nav a.active .nav-icon{color:var(--blue)}
+.sidebar-bottom{margin-top:auto;padding:13px 9px 0;border-top:1px solid rgba(120,155,198,.13)}
+.feed-status{display:flex;align-items:center;gap:8px;color:#8da2bc;font-size:10px;font-weight:700}
+.feed-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 12px rgba(43,212,154,.55)}
+.paper-chip{margin-top:11px;padding:9px 10px;border:1px solid rgba(43,212,154,.25);border-radius:9px;background:rgba(43,212,154,.065);color:#6ee3b8;font-size:9px;font-weight:900;letter-spacing:.13em;text-align:center}
+.main-shell{min-width:0}
+.topbar{position:sticky;top:0;z-index:30;min-height:82px;display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px clamp(18px,2.4vw,36px);background:rgba(8,15,26,.91);backdrop-filter:blur(18px);border-bottom:1px solid rgba(120,155,198,.14)}
+.eyebrow{display:block;color:#6caaf3;font-size:9px;font-weight:900;letter-spacing:.17em;text-transform:uppercase}
+.topbar h1{margin:4px 0 0;font-size:21px;letter-spacing:-.04em;font-weight:850}
+.topbar p{margin:4px 0 0;color:#859ab4;font-size:10px}
+.topbar-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap;justify-content:flex-end}
+.topbar-connection{font-size:10px;color:#8fa7c5;font-weight:700;letter-spacing:.05em}
+.topbar-connection:before{content:"";display:inline-block;width:7px;height:7px;margin-right:7px;border-radius:50%;background:var(--green);box-shadow:0 0 10px rgba(43,212,154,.55)}
+.status{display:inline-flex;align-items:center;gap:7px;padding:8px 12px;border:1px solid rgba(43,212,154,.28);border-radius:999px;background:rgba(43,212,154,.075);color:#72e5bc;font-size:9px;font-weight:900;letter-spacing:.13em;white-space:nowrap}
+.page-content{max-width:1800px;margin:auto;padding:22px clamp(16px,2.4vw,36px) 50px}
+.warning{display:flex;align-items:flex-start;gap:10px;margin:0 0 17px;padding:11px 14px;border:1px solid rgba(211,157,73,.34);border-radius:10px;background:rgba(211,157,73,.065);color:#d7b47b;font-size:10px;line-height:1.55}
+.warning strong{color:#f0cb8b}
+.overview-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 10px}
+.section-kicker{color:#94a9c4;font-size:10px;font-weight:850;letter-spacing:.12em;text-transform:uppercase}
+#refresh-status{margin:0;color:#8398b4;font-size:10px}
+.overview-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:11px;margin-bottom:15px}
+.metric{position:relative;overflow:hidden;min-width:0;padding:15px 16px;border-radius:12px;border:1px solid rgba(129,162,205,.15);background:linear-gradient(145deg,rgba(20,36,58,.98),rgba(13,24,40,.98));box-shadow:0 10px 26px rgba(0,0,0,.12)}
+.metric:after{content:"";position:absolute;right:-33px;top:-43px;width:90px;height:90px;border-radius:50%;background:rgba(101,168,255,.07)}
+.metric small{display:block;color:#8da5c5;font-size:9px;font-weight:850;letter-spacing:.12em;text-transform:uppercase}
+.metric b{display:block;margin-top:8px;color:#f0f5ff;font-size:clamp(20px,1.8vw,27px);font-weight:850;letter-spacing:-.045em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.workspace-grid{display:grid;grid-template-columns:minmax(0,1fr) 355px;gap:15px;align-items:start}
+.primary-column,.right-rail{display:grid;gap:14px;min-width:0}
+.panel{min-width:0;padding:17px;border-radius:13px;border:1px solid rgba(125,158,199,.16);background:linear-gradient(150deg,rgba(17,30,49,.98),rgba(12,22,37,.98));box-shadow:0 12px 32px rgba(0,0,0,.13)}
+.panel-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
+.panel h2{margin:0;color:#edf4ff;font-size:14px;font-weight:800;letter-spacing:-.025em}
+.panel-subtitle{margin:5px 0 0;color:#8096b2;font-size:10px;line-height:1.45}
+.panel-status{padding:6px 9px;border:1px solid rgba(124,153,190,.17);border-radius:999px;color:#94aac5;font-size:9px;font-weight:750;white-space:nowrap;background:rgba(255,255,255,.02)}
+.panel-status.live{color:#68dfb4;border-color:rgba(43,212,154,.24);background:rgba(43,212,154,.06)}
+.panel-status.warn{color:var(--amber);border-color:rgba(244,189,96,.24)}
+.chart-controls{display:grid;grid-template-columns:minmax(110px,1fr) 110px 110px 90px auto;gap:8px;align-items:end;margin-bottom:12px}
+.chart-controls label,.live-controls label,.row label{display:grid;gap:5px;color:#91a5c0;font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+input,select{min-height:36px;min-width:0;width:100%;padding:8px 10px;border:1px solid #2c415e;border-radius:8px;outline:none;background:#0a1524;color:#eaf2ff;font:inherit;font-size:11px}
+input:focus,select:focus{border-color:#69a7ff;box-shadow:0 0 0 3px rgba(105,167,255,.1)}
+button{min-height:36px;padding:8px 12px;border:1px solid transparent;border-radius:8px;background:linear-gradient(135deg,#347bd8,#2456a5);color:white;font:inherit;font-size:10px;font-weight:850;cursor:pointer;transition:filter .15s,transform .15s}
 button:hover{filter:brightness(1.12);transform:translateY(-1px)}
-button:disabled{cursor:not-allowed;opacity:.45;transform:none}
-button.secondary{background:#1b2d47;border-color:#304765;color:#c4d6ed;box-shadow:none}
-button.danger{background:#7e3041;color:#ffe8ec;box-shadow:none}
-table{width:100%;min-width:700px;border-collapse:separate;border-spacing:0;font-size:12px}
-th{text-align:left;padding:11px 12px;background:#0e1a2b;color:#8196b2;font-size:9px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;border-bottom:1px solid #263953}
+button:disabled{opacity:.45;cursor:not-allowed;transform:none}
+button.secondary{background:#1a2d46;border-color:#304864;color:#c6d9f0;box-shadow:none}
+button.danger{background:#813447;color:#ffe7ec;box-shadow:none}
+.chart-summary{display:flex;align-items:baseline;gap:10px;margin:4px 0 9px}
+.chart-summary strong{font-size:24px;letter-spacing:-.04em;color:#f2f7ff;font-variant-numeric:tabular-nums}
+.change-up{color:var(--green);font-size:11px;font-weight:800}.change-down{color:var(--red);font-size:11px;font-weight:800}
+#price-chart{display:block;width:100%;height:300px;border:1px solid rgba(124,153,190,.12);border-radius:9px;background:#0b1523}
+#chart-status{margin:9px 0 0;color:#8298b5;font-size:9px}
+.live-controls{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-bottom:12px}
+.live-controls .watchlist-field{grid-column:1/-1}
+.live-controls button{grid-column:1/-1}
+.scroll{overflow:auto;border:1px solid rgba(124,153,190,.14);border-radius:9px}
+table{width:100%;min-width:630px;border-collapse:separate;border-spacing:0;font-size:10px}
+th{padding:10px 9px;text-align:left;background:#0d192a;color:#8198b7;font-size:8px;font-weight:900;letter-spacing:.1em;text-transform:uppercase;border-bottom:1px solid #263b56}
 th:first-child{border-radius:8px 0 0 0}th:last-child{border-radius:0 8px 0 0}
-td{text-align:left;padding:12px;border-bottom:1px solid rgba(124,153,190,.12);color:#c7d4e6;font-variant-numeric:tabular-nums}
-tbody tr:hover{background:rgba(105,167,255,.045)}
-.scroll{overflow:auto;border:1px solid rgba(124,153,190,.13);border-radius:9px}
-.LONG,.bullish{color:var(--green);font-weight:750}.SHORT,.bearish{color:var(--red);font-weight:750}.WAIT,.sideways{color:var(--amber);font-weight:750}
-.live-market-panel{border-color:rgba(105,167,255,.27);background:linear-gradient(150deg,rgba(17,31,51,.99),rgba(11,22,38,.99))}
-.live-market-head{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;margin-bottom:16px}
-.live-market-kicker{display:block;color:#6fa9f5;font-size:9px;font-weight:850;letter-spacing:.16em;text-transform:uppercase;margin-bottom:5px}
-.live-market-controls{display:grid;grid-template-columns:150px 140px minmax(240px,1fr) auto;gap:10px;align-items:end;margin-bottom:14px}
-.live-market-controls label input{width:100%;min-width:0}
-.live-market-status{display:inline-flex;align-items:center;gap:7px;font-size:10px;font-weight:750;color:#9bb0ca;padding:7px 10px;border:1px solid rgba(124,153,190,.18);border-radius:999px;background:rgba(255,255,255,.025);white-space:nowrap}
-.live-market-status:before{content:"";width:7px;height:7px;border-radius:50%;background:#71839b}
-.live-market-status.live:before{background:var(--green);box-shadow:0 0 10px rgba(43,212,154,.6)}
-.live-market-status.warn:before{background:var(--amber)}
-.pair-cell{font-weight:800;color:#edf4ff;letter-spacing:.015em}
-.price-value{color:#f5f8ff;font-weight:800;font-size:13px}
-.table-action{min-height:30px;padding:6px 10px;font-size:10px;background:#172c47;border:1px solid #2e527a;color:#b9d8ff;box-shadow:none}
-.table-action:hover{background:#1e3b60}
-#watch-updated{margin:11px 0 0;font-size:10px;color:#7e93ae}
-#position-alerts p{color:#d7e4f5}
-#scanmsg{font-size:11px}
-canvas{width:100%;height:190px}
-@media(max-width:980px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.live-market-controls{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:650px){header{align-items:flex-start;padding:13px 14px}.header-meta{gap:8px}.connection{display:none}.dashboard-nav{top:62px;padding:7px 10px}main{padding:16px 11px 35px}.panel{padding:15px;border-radius:11px}.metric{padding:15px}.grid{gap:9px}.metric b{font-size:22px}.live-market-head{align-items:flex-start;flex-direction:column}.live-market-controls{grid-template-columns:1fr 1fr}.live-market-controls label:nth-child(3){grid-column:1/-1}.live-market-controls button{grid-column:1/-1;width:100%}.row>*{flex:1 1 125px}.row button{flex:1 1 100%}}
-@media(max-width:420px){.grid{grid-template-columns:1fr 1fr}.metric{padding:12px}.metric b{font-size:19px}h1{font-size:19px}.status{font-size:9px;padding:7px 9px}}
-</style></head><body><header><div><h1><span class="brand-mark">◈</span>AI Crypto Trader <span style="color:var(--blue)">V2</span></h1><small>Multi-exchange terminal · Spot &amp; Futures · Public market data</small></div><div class="header-meta"><span class="connection">PUBLIC DATA CONNECTION</span><span class="status">● PAPER MODE ONLY</span></div></header><nav class="dashboard-nav" aria-label="Dashboard navigation"><a href="#overview">Overview</a><a href="#market-watch">Live prices</a><a href="#scanner">AI scanner</a><a href="#opportunities-panel">Opportunities</a><a href="#trade-ticket">Paper ticket</a><a href="#positions-panel">Positions</a><a href="#performance">Performance</a><a href="#journal-panel">Journal</a></nav><main><p class="muted" style="padding:10px 14px;border:1px solid rgba(206,151,67,.38);border-radius:9px;background:rgba(206,151,67,.08)">Paper-only monitoring is periodic, not real-time. Free hosting can sleep, and GitHub Actions checks run on a schedule; a stop or target can be crossed between checks. This is not a guaranteed stop-loss service.</p><p class="muted" id="refresh-status">Loading dashboard data…</p>
-<section class="grid" id="overview"><div class="metric"><small>Paper equity</small><b id="equity">$10,000</b></div><div class="metric"><small>Realized P&L</small><b id="pnl">$0</b></div><div class="metric"><small>Open positions</small><b id="open">0</b></div><div class="metric"><small>Tracked signals</small><b id="signals">0</b></div></section>
-<section class="panel live-market-panel" id="market-watch">
-<div class="live-market-head"><div><span class="live-market-kicker">Market data · public exchange tickers</span><h2>Live Market Prices</h2><p class="muted" style="margin:6px 0 0;font-size:11px">Watchlist prices from the selected exchange. Updated every 15 seconds while this dashboard is open.</p></div><span class="live-market-status" id="watch-status">Connecting to market data</span></div>
-<div class="live-market-controls"><label>Exchange<select id="watch-exchange"><option value="kucoin">KuCoin</option><option value="bybit">Bybit</option><option value="okx">OKX</option></select></label><label>Market type<select id="watch-market"><option value="spot">Spot</option><option value="futures">Futures</option></select></label><label>Watchlist pairs<input id="watch-symbols" value="BTC/USDT, ETH/USDT, SOL/USDT, BNB/USDT" maxlength="180" autocomplete="off" spellcheck="false"></label><button type="button" onclick="refreshWatchlist()">↻ Refresh prices</button></div>
-<div class="scroll"><table><thead><tr><th>Trading pair</th><th>Last price</th><th>Bid</th><th>Ask</th><th>24h base volume</th><th>Exchange timestamp</th><th>Action</th></tr></thead><tbody id="watchlist-rows"><tr><td colspan="7">Loading public market prices…</td></tr></tbody></table></div>
-<p id="watch-updated">Price feed uses public REST endpoints. No private exchange credentials or order permissions are used.</p>
-</section>
-<section class="panel" id="scanner"><h2>Opportunity scanner</h2><div class="row"><label>Exchange<select id="exchange"><option>kucoin</option><option>bybit</option><option>okx</option></select></label><label>Market<select id="market"><option value="spot">Spot</option><option value="futures">Futures</option></select></label><label>Timeframe<select id="timeframe"><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select></label><label>Symbols<input id="symbols" value="BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT"></label><button onclick="scan()">Scan markets</button></div><p class="muted" id="scanmsg">Fetches public market candles. Scan may take several seconds.</p><div class="scroll"><table><thead><tr><th>Pair</th><th>Signal</th><th>Trend</th><th>Price</th><th>RSI</th><th>ATR</th><th>Score</th><th>Action</th></tr></thead><tbody id="scanrows"><tr><td colspan="8">No scan yet.</td></tr></tbody></table></div></section>
-<section class="panel" id="opportunities-panel"><h2>Top live opportunities <small id="opportunities-updated">Prices refresh every 15 seconds</small></h2><div class="scroll"><table><thead><tr><th>Pair</th><th>Exchange</th><th>Market</th><th>Signal</th><th>Trend</th><th>Live price</th><th>Score</th><th>Timeframe</th></tr></thead><tbody id="opportunities"><tr><td colspan="8">Run a market scan to populate live opportunities.</td></tr></tbody></table></div><p class="muted">Ranked from your latest scan results. Live prices are refreshed from public exchange tickers; these are research signals, not trade recommendations.</p></section>
-<section class="panel" id="risk-panel"><h2>Risk controls</h2><div class="grid"><div class="metric"><small>Daily P&amp;L (realized + floating)</small><b id="daily-pnl">—</b></div><div class="metric"><small>Open risk</small><b id="open-risk">—</b></div><div class="metric"><small>Open positions / maximum</small><b id="risk-open-count">0 / 3</b></div><div class="metric"><small>Risk per trade</small><b id="risk-per-trade">0.5%</b></div><div class="metric"><small>Daily loss remaining</small><b id="daily-remaining">—</b></div><div class="metric"><small>Available open risk</small><b id="risk-available">—</b></div></div><p class="muted" id="risk-status">Daily loss cap 3% · Aggregate open risk cap 2% · Position notional cap 20% · Target default 2:1</p></section><section class="panel" id="trade-ticket"><h2>Paper trade ticket</h2><div class="row"><label>Pair<input id="pair" value="BTC/USDT"></label><label>Side<select id="side"><option>LONG</option><option>SHORT</option></select></label><label>Entry<input id="entry" type="number" step="any"></label><label>Stop<input id="stop" type="number" step="any"></label><label>Target · automatic 2R<input id="target" type="number" step="any"><small class="muted" id="target-mode">Auto-calculated from Entry and Stop</small></label><button type="button" class="secondary" onclick="enableAutoTarget()">Auto 2R</button><button onclick="openTrade()">Open paper trade</button></div><p class="muted">Central risk sizing. Entry must be within 5% of the live public price. Empty target is automatically set to 2R. No exchange order is sent.</p></section>
-<section class="panel" id="positions-panel"><h2>Open Positions <small id="positions-updated">Live prices refresh every 15 seconds</small></h2><div id="position-alerts" aria-live="polite"></div><div class="scroll"><table><thead><tr><th>Pair</th><th>Market</th><th>Side</th><th>Entry</th><th>Live price</th><th>Stop</th><th>To stop</th><th>Target</th><th>To target</th><th>Qty / contracts</th><th>Unrealized P&amp;L</th><th>Return</th></tr></thead><tbody id="positions"><tr><td colspan="10">Loading open positions…</td></tr></tbody></table></div><p class="muted">Live prices use public exchange ticker data. Unrealized P&amp;L is a net estimate after configured fees and slippage; it is not an exchange account balance.</p></section><section class="panel" id="performance"><h2>Performance</h2><div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr))"><div class="metric"><small>Winning trades</small><b id="wins">0</b></div><div class="metric"><small>Losing trades</small><b id="losses">0</b></div><div class="metric"><small>Win rate</small><b id="winrate">—</b></div><div class="metric"><small>Closed trades</small><b id="closed-count">0</b></div></div><p class="muted" id="equity-note">Equity includes realized and unrealized P&amp;L where live prices are available.</p><canvas id="chart" width="900" height="180"></canvas></section><section class="panel" id="journal-panel"><h2>Trade & signal journal</h2><div class="scroll"><table><thead><tr><th>ID</th><th>Pair</th><th>Market</th><th>Side / Signal</th><th>Quantity / Price</th><th>Status</th><th>P&L</th><th>Action</th></tr></thead><tbody id="journal"></tbody></table></div></section></main>
+td{padding:10px 9px;color:#c6d4e6;border-bottom:1px solid rgba(124,153,190,.12);font-variant-numeric:tabular-nums;vertical-align:middle}
+tbody tr:hover{background:rgba(101,168,255,.045)}
+.watch-table{min-width:0;font-size:9px}.watch-table th{padding:9px 6px;font-size:7px}.watch-table td{padding:9px 6px}
+.pair-cell{color:#eef5ff;font-weight:850;letter-spacing:.01em}.price-value{color:#f4f8ff;font-size:11px;font-weight:850;white-space:nowrap}
+.quote-line{display:block;color:#9db0c9;font-size:8px;white-space:nowrap}.timestamp-line{display:block;margin-top:3px;color:#748ba8;font-size:8px}
+.table-action{min-height:27px;padding:5px 8px;background:#172e4a;border:1px solid #33577f;color:#c2dfff;font-size:8px;box-shadow:none}
+.live-market-note{margin:9px 0 0;color:#8096b1;font-size:9px;line-height:1.5}
+.LONG,.bullish{color:var(--green);font-weight:800}.SHORT,.bearish{color:var(--red);font-weight:800}.WAIT,.sideways{color:var(--amber);font-weight:800}
+.risk-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.risk-metric{padding:11px;border:1px solid rgba(124,153,190,.13);border-radius:9px;background:rgba(255,255,255,.018)}
+.risk-metric small{display:block;color:#8399b6;font-size:8px;font-weight:850;letter-spacing:.08em;text-transform:uppercase}
+.risk-metric b{display:block;margin-top:6px;color:#eef5ff;font-size:16px;font-weight:850;font-variant-numeric:tabular-nums}
+.ticket-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.ticket-grid .wide{grid-column:1/-1}
+.ticket-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}.ticket-actions button{flex:1}
+.helper-note{margin:9px 0 0;color:#8096b1;font-size:9px;line-height:1.5}
+#position-alerts p{color:#d7e4f5;font-size:10px}
+.performance-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.performance-grid .metric{padding:12px}
+.performance-grid .metric b{font-size:18px}
+canvas#chart{width:100%;height:150px}
+#scanmsg{margin:9px 0;color:#8197b3;font-size:10px}
+.lower-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.anchor-section{scroll-margin-top:100px}
+.muted{color:var(--muted)}
+@media(max-width:1280px){.workspace-grid{grid-template-columns:minmax(0,1fr) 325px}.chart-controls{grid-template-columns:1fr 100px 100px auto}.chart-controls label:first-child{grid-column:1/2}}
+@media(max-width:1050px){.app-shell{grid-template-columns:72px minmax(0,1fr)}.sidebar{padding:16px 8px}.sidebar-brand{justify-content:center;padding:2px 0 24px}.brand-copy,.nav-caption,.side-nav a .nav-label,.sidebar-bottom{display:none}.side-nav a{justify-content:center;padding:12px 5px}.side-nav a .nav-icon{font-size:16px}.workspace-grid{grid-template-columns:minmax(0,1fr) 310px}.overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:820px){.workspace-grid{grid-template-columns:1fr}.right-rail{grid-template-columns:1fr 1fr;align-items:start}.right-rail .live-market-panel{grid-column:1/-1}.chart-controls{grid-template-columns:repeat(3,minmax(0,1fr))}.chart-controls button{grid-column:1/-1}}
+@media(max-width:650px){.app-shell{display:block}.sidebar{position:relative;width:100%;height:auto;padding:10px 12px;border-right:0;border-bottom:1px solid rgba(120,155,198,.16)}.sidebar-brand{justify-content:flex-start;padding:0 2px 10px}.brand-mark{width:32px;height:32px;flex-basis:32px;font-size:17px}.brand-name{font-size:12px}.brand-sub{font-size:8px}.side-nav{display:flex;overflow-x:auto;gap:5px}.side-nav a{flex:0 0 auto;justify-content:center;gap:6px;padding:8px 10px;font-size:9px}.side-nav a .nav-icon{font-size:12px}.side-nav a .nav-label{display:inline}.topbar{position:relative;min-height:68px;padding:12px 14px}.topbar h1{font-size:17px}.topbar-connection{display:none}.topbar-actions{gap:6px}.status{padding:7px 8px;font-size:8px}.page-content{padding:13px 10px 30px}.overview-grid{gap:7px;margin-bottom:10px}.metric{padding:11px}.metric b{font-size:18px}.metric small{font-size:7px}.workspace-grid{gap:10px}.primary-column,.right-rail{gap:10px}.right-rail{grid-template-columns:1fr}.right-rail .live-market-panel{grid-column:auto}.panel{padding:13px}.panel-head{gap:8px}.panel h2{font-size:12px}.panel-subtitle{font-size:9px}.chart-controls{grid-template-columns:1fr 1fr;gap:7px}.chart-controls label:first-child{grid-column:1/-1}.chart-controls button{grid-column:1/-1}.chart-summary strong{font-size:20px}#price-chart{height:225px}.lower-grid{grid-template-columns:1fr}.performance-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.warning{font-size:9px;padding:9px 10px}.overview-head{align-items:flex-start;flex-direction:column}}
+</style></head>
+<body>
+<div class="app-shell">
+<aside class="sidebar">
+ <div class="sidebar-brand"><span class="brand-mark">◈</span><div class="brand-copy"><div class="brand-name">AI Crypto Trader V2</div><span class="brand-sub">Trading workspace</span></div></div>
+ <div class="nav-caption">Workspace</div>
+ <nav class="side-nav" aria-label="Main navigation">
+  <a class="active" href="#overview"><span class="nav-icon">▦</span><span class="nav-label">Overview</span></a>
+  <a href="#market-chart-panel"><span class="nav-icon">⌁</span><span class="nav-label">Markets &amp; chart</span></a>
+  <a href="#scanner"><span class="nav-icon">⌕</span><span class="nav-label">AI scanner</span></a>
+  <a href="#opportunities-panel"><span class="nav-icon">◈</span><span class="nav-label">Opportunities</span></a>
+  <a href="#trade-ticket"><span class="nav-icon">＋</span><span class="nav-label">Paper ticket</span></a>
+  <a href="#positions-panel"><span class="nav-icon">▤</span><span class="nav-label">Positions</span></a>
+  <a href="#performance"><span class="nav-icon">⌁</span><span class="nav-label">Performance</span></a>
+  <a href="#journal-panel"><span class="nav-icon">☷</span><span class="nav-label">Journal</span></a>
+ </nav>
+ <div class="sidebar-bottom"><div class="feed-status"><span class="feed-dot"></span>Public market data</div><div class="paper-chip">PAPER MODE ONLY</div></div>
+</aside>
+<div class="main-shell">
+<header class="topbar"><div><span class="eyebrow">Multi-exchange research terminal</span><h1>Trading Overview</h1><p>Spot &amp; Futures · KuCoin · Bybit · OKX</p></div><div class="topbar-actions"><span class="topbar-connection">PUBLIC DATA CONNECTION</span><span class="status">● PAPER MODE ONLY</span></div></header>
+<main class="page-content">
+ <div class="warning"><strong>RISK NOTICE</strong><span>Paper-only monitoring is periodic, not real-time. Free hosting can sleep, and scheduled checks may miss price moves between runs. This is not a guaranteed stop-loss service.</span></div>
+ <div class="overview-head anchor-section" id="overview"><span class="section-kicker">Account snapshot</span><p id="refresh-status">Loading dashboard data…</p></div>
+ <section class="overview-grid">
+  <div class="metric"><small>Paper equity</small><b id="equity">$10,000</b></div>
+  <div class="metric"><small>Realized P&amp;L</small><b id="pnl">$0</b></div>
+  <div class="metric"><small>Open positions</small><b id="open">0</b></div>
+  <div class="metric"><small>Tracked signals</small><b id="signals">0</b></div>
+ </section>
+ <div class="workspace-grid">
+  <div class="primary-column">
+   <section class="panel chart-panel anchor-section" id="market-chart-panel">
+    <div class="panel-head"><div><span class="eyebrow">Market structure</span><h2 style="margin-top:5px">Price Chart</h2><p class="panel-subtitle">Public OHLCV candles · data from the selected exchange</p></div><span class="panel-status" id="chart-range">80 candles · 1h</span></div>
+    <div class="chart-controls">
+     <label>Trading pair<input id="chart-symbol" value="BTC/USDT" spellcheck="false"></label>
+     <label>Exchange<select id="chart-exchange"><option value="kucoin">KuCoin</option><option value="bybit">Bybit</option><option value="okx">OKX</option></select></label>
+     <label>Market<select id="chart-market"><option value="spot">Spot</option><option value="futures">Futures</option></select></label>
+     <label>Timeframe<select id="chart-timeframe"><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select></label>
+     <button id="chart-refresh" type="button">↻ Refresh chart</button>
+    </div>
+    <div class="chart-summary"><strong id="chart-last">—</strong><span id="chart-change" class="change-up">—</span></div>
+    <canvas id="price-chart" width="1000" height="380" aria-label="Public cryptocurrency OHLCV candlestick chart"></canvas>
+    <p id="chart-status">Connecting to public candle data…</p>
+   </section>
+   <section class="panel anchor-section" id="scanner">
+    <div class="panel-head"><div><h2>AI Opportunity Scanner</h2><p class="panel-subtitle">Technical signals calculated from closed public candles</p></div><span class="panel-status">ANALYSIS</span></div>
+    <div class="row">
+     <label>Exchange<select id="exchange"><option>kucoin</option><option>bybit</option><option>okx</option></select></label>
+     <label>Market<select id="market"><option value="spot">Spot</option><option value="futures">Futures</option></select></label>
+     <label>Timeframe<select id="timeframe"><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select></label>
+     <label style="min-width:190px;flex:1">Symbols<input id="symbols" value="BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT"></label>
+     <button onclick="scan()">Run scan</button>
+    </div>
+    <p id="scanmsg">A scan may take several seconds. Signals are research prompts, not recommendations.</p>
+    <div class="scroll"><table><thead><tr><th>Pair</th><th>Signal</th><th>Trend</th><th>Price</th><th>RSI</th><th>ATR</th><th>Score</th><th>Action</th></tr></thead><tbody id="scanrows"><tr><td colspan="8">No scan yet.</td></tr></tbody></table></div>
+   </section>
+   <section class="panel anchor-section" id="opportunities-panel">
+    <div class="panel-head"><div><h2>Top Opportunities</h2><p class="panel-subtitle">Ranked from the latest scanner results</p></div><span class="panel-status" id="opportunities-updated">Waiting for scan</span></div>
+    <div class="scroll"><table><thead><tr><th>Pair</th><th>Exchange</th><th>Market</th><th>Signal</th><th>Trend</th><th>Live price</th><th>Score</th><th>Timeframe</th></tr></thead><tbody id="opportunities"><tr><td colspan="8">Run AI Opportunity Scanner to populate this section.</td></tr></tbody></table></div>
+   </section>
+   <section class="panel anchor-section" id="positions-panel">
+    <div class="panel-head"><div><h2>Open Paper Positions</h2><p class="panel-subtitle">Live mark prices and simulated net P&amp;L</p></div><span class="panel-status" id="positions-updated">Refreshing every 15s</span></div>
+    <div id="position-alerts" aria-live="polite"></div>
+    <div class="scroll"><table><thead><tr><th>Pair</th><th>Market</th><th>Side</th><th>Entry</th><th>Live price</th><th>Stop</th><th>To stop</th><th>Target</th><th>To target</th><th>Qty / contracts</th><th>Unrealized P&amp;L</th><th>Return</th></tr></thead><tbody id="positions"><tr><td colspan="12">Loading open positions…</td></tr></tbody></table></div>
+    <p class="helper-note">P&amp;L is a simulated net estimate after configured fees and slippage, not an exchange account balance.</p>
+   </section>
+   <div class="lower-grid">
+    <section class="panel anchor-section" id="performance">
+     <div class="panel-head"><div><h2>Performance</h2><p class="panel-subtitle">Closed paper-trade results</p></div></div>
+     <div class="performance-grid">
+      <div class="metric"><small>Wins</small><b id="wins">0</b></div><div class="metric"><small>Losses</small><b id="losses">0</b></div><div class="metric"><small>Win rate</small><b id="winrate">—</b></div><div class="metric"><small>Closed</small><b id="closed-count">0</b></div>
+     </div>
+     <p id="equity-note" class="helper-note">Equity includes unrealized P&amp;L where prices are available.</p>
+     <canvas id="chart" width="900" height="180"></canvas>
+    </section>
+    <section class="panel anchor-section" id="journal-panel">
+     <div class="panel-head"><div><h2>Trade &amp; Signal Journal</h2><p class="panel-subtitle">Activity history and simulated exits</p></div></div>
+     <div class="scroll"><table><thead><tr><th>ID</th><th>Pair</th><th>Market</th><th>Side / Signal</th><th>Quantity / Price</th><th>Status</th><th>P&amp;L</th><th>Action</th></tr></thead><tbody id="journal"><tr><td colspan="8">Loading journal…</td></tr></tbody></table></div>
+    </section>
+   </div>
+  </div>
+  <aside class="right-rail">
+   <section class="panel live-market-panel anchor-section" id="market-watch">
+    <div class="panel-head"><div><span class="eyebrow">Public exchange tickers</span><h2 style="margin-top:5px">Live Market Prices</h2><p class="panel-subtitle">Watchlist · refreshes every 15 seconds</p></div><span class="panel-status" id="watch-status">Connecting</span></div>
+    <div class="live-controls">
+     <label>Exchange<select id="watch-exchange"><option value="kucoin">KuCoin</option><option value="bybit">Bybit</option><option value="okx">OKX</option></select></label>
+     <label>Market type<select id="watch-market"><option value="spot">Spot</option><option value="futures">Futures</option></select></label>
+     <label class="watchlist-field">Pairs<input id="watch-symbols" value="BTC/USDT, ETH/USDT, SOL/USDT, BNB/USDT" maxlength="180" spellcheck="false"></label>
+     <button type="button" onclick="refreshWatchlist()">↻ Refresh prices</button>
+    </div>
+    <div class="scroll"><table class="watch-table"><thead><tr><th>Pair</th><th>Last</th><th>Bid / Ask</th><th>24h vol.</th><th></th></tr></thead><tbody id="watchlist-rows"><tr><td colspan="5">Loading public tickers…</td></tr></tbody></table></div>
+    <p id="watch-updated" class="live-market-note">Public REST market data only. No private exchange access.</p>
+   </section>
+   <section class="panel anchor-section" id="trade-ticket">
+    <div class="panel-head"><div><span class="eyebrow">Simulated execution</span><h2 style="margin-top:5px">Paper Trade Ticket</h2><p class="panel-subtitle">No live orders are sent</p></div><span class="panel-status">PAPER</span></div>
+    <div class="ticket-grid">
+     <label class="wide">Pair<input id="pair" value="BTC/USDT"></label>
+     <label>Side<select id="side"><option>LONG</option><option>SHORT</option></select></label>
+     <label>Entry<input id="entry" type="number" step="any"></label>
+     <label>Stop loss<input id="stop" type="number" step="any"></label>
+     <label>Take profit<input id="target" type="number" step="any"><small id="target-mode" class="helper-note">Auto-calculated from Entry and Stop</small></label>
+    </div>
+    <div class="ticket-actions"><button type="button" class="secondary" onclick="enableAutoTarget()">Auto 2R</button><button onclick="openTrade()">Open paper trade</button></div>
+    <p class="helper-note">Entry must be within 5% of the selected market price. Automatic target uses 2R. Central risk sizing applies.</p>
+   </section>
+   <section class="panel anchor-section" id="risk-panel">
+    <div class="panel-head"><div><span class="eyebrow">Capital protection</span><h2 style="margin-top:5px">Risk Controls</h2></div><span class="panel-status" id="risk-open-count">0 / 3 open</span></div>
+    <div class="risk-grid">
+     <div class="risk-metric"><small>Daily P&amp;L</small><b id="daily-pnl">—</b></div>
+     <div class="risk-metric"><small>Open risk</small><b id="open-risk">—</b></div>
+     <div class="risk-metric"><small>Risk per trade</small><b id="risk-per-trade">0.5%</b></div>
+     <div class="risk-metric"><small>Daily loss left</small><b id="daily-remaining">—</b></div>
+     <div class="risk-metric"><small>Available risk</small><b id="risk-available">—</b></div>
+     <div class="risk-metric"><small>Position cap</small><b>20%</b></div>
+    </div>
+    <p id="risk-status" class="helper-note">Daily loss cap 3% · Aggregate open risk cap 2% · Position notional cap 20%.</p>
+   </section>
+  </aside>
+ </div>
+</main>
+</div>
+</div>
 <script>
 const $=id=>document.getElementById(id),escapeHtml=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])),money=n=>Number(n||0).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2}),formatQuantity=value=>{const n=Number(value);return Number.isFinite(n)?n.toLocaleString(undefined,{useGrouping:false,maximumSignificantDigits:15}):'—'};
 let targetAutoMode=true;
@@ -108,12 +255,12 @@ async function refreshWatchlist(){
  status.className='live-market-status';
  status.textContent='Fetching public tickers…';
  if(!symbols.length){
-  body.innerHTML='<tr><td colspan="7">Enter one or more pairs in BASE/QUOTE format, for example BTC/USDT.</td></tr>';
+  body.innerHTML='<tr><td colspan="5">Enter one or more pairs in BASE/QUOTE format, for example BTC/USDT.</td></tr>';
   status.classList.add('warn');status.textContent='Watchlist needs valid pairs';
   $('watch-updated').textContent='Use commas or spaces between pairs. Up to 8 symbols.';
   watchRefreshBusy=false;return;
  }
- body.innerHTML='<tr><td colspan="7">Refreshing '+symbols.length+' market(s)…</td></tr>';
+ body.innerHTML='<tr><td colspan="5">Refreshing '+symbols.length+' market(s)…</td></tr>';
  try{
   const results=await Promise.all(symbols.map(async symbol=>{
    try{
@@ -128,7 +275,7 @@ async function refreshWatchlist(){
     return '<tr><td class="pair-cell">'+escapeHtml(item.symbol)+'</td><td colspan="5"><span class="muted">Unavailable · '+escapeHtml(item.error||'No valid ticker')+'</span></td><td>—</td></tr>';
    }
    const data=item.data;
-   return '<tr><td class="pair-cell">'+escapeHtml(item.symbol)+'</td><td class="price-value">'+marketNumber(data.last)+'</td><td>'+marketNumber(data.bid)+'</td><td>'+marketNumber(data.ask)+'</td><td>'+marketVolume(data.base_volume)+'</td><td>'+marketTimestamp(data.timestamp)+'</td><td><button type="button" class="table-action" data-watch-pair="'+escapeHtml(item.symbol)+'" data-watch-price="'+Number(data.last)+'">Use price</button></td></tr>';
+   return '<tr><td class="pair-cell">'+escapeHtml(item.symbol)+'</td><td class="price-value">'+marketNumber(data.last)+'</td><td><span class="quote-line">B '+marketNumber(data.bid)+'</span><span class="quote-line">A '+marketNumber(data.ask)+'</span></td><td>'+marketVolume(data.base_volume)+'<small class="timestamp-line">'+marketTimestamp(data.timestamp)+'</small></td><td><button type="button" class="table-action" data-watch-pair="'+escapeHtml(item.symbol)+'" data-watch-price="'+Number(data.last)+'">Use</button></td></tr>';
   }).join('');
   status.classList.toggle('live',available>0);
   status.classList.toggle('warn',available!==results.length);
@@ -155,6 +302,71 @@ $('watchlist-rows').addEventListener('click',event=>{
  updateAutoTarget();
  $('trade-ticket').scrollIntoView({behavior:'smooth',block:'center'});
 });
+
+let marketChartBusy=false;
+function chartSymbol(){return $('chart-symbol').value.trim().toUpperCase()||'BTC/USDT';}
+function drawMarketChart(candles){
+ const canvas=$('price-chart');
+ const ctx=canvas.getContext('2d');
+ const w=canvas.width,h=canvas.height;
+ ctx.clearRect(0,0,w,h);
+ ctx.fillStyle='#0b1523';ctx.fillRect(0,0,w,h);
+ const pad={left:65,right:18,top:20,bottom:43};
+ const chartW=w-pad.left-pad.right,chartH=h-pad.top-pad.bottom;
+ if(!candles||candles.length<2){
+  ctx.fillStyle='#8da2bc';ctx.font='14px sans-serif';ctx.fillText('Waiting for public candle data…',pad.left+20,h/2);return;
+ }
+ const low=Math.min(...candles.map(c=>c.low)),high=Math.max(...candles.map(c=>c.high));
+ const span=Math.max(high-low,Math.abs(high)*0.0001,1e-9),min=low-span*.06,max=high+span*.06;
+ const y=v=>pad.top+(max-v)/(max-min)*chartH;
+ const step=chartW/candles.length,bodyW=Math.max(3,Math.min(11,step*.58));
+ ctx.strokeStyle='rgba(129,155,190,.14)';ctx.lineWidth=1;ctx.fillStyle='#8298b5';ctx.font='11px sans-serif';
+ for(let i=0;i<=4;i++){
+  const value=max-(max-min)*i/4,yy=pad.top+chartH*i/4;
+  ctx.beginPath();ctx.moveTo(pad.left,yy);ctx.lineTo(w-pad.right,yy);ctx.stroke();
+  ctx.fillText(value.toLocaleString(undefined,{maximumFractionDigits:6}),7,yy+4);
+ }
+ const maxVol=Math.max(1,...candles.map(c=>c.volume||0));
+ candles.forEach((c,i)=>{
+  const x=pad.left+i*step+step/2,up=c.close>=c.open,color=up?'#2bd49a':'#fb7185';
+  ctx.strokeStyle=color;ctx.lineWidth=1.4;ctx.beginPath();ctx.moveTo(x,y(c.high));ctx.lineTo(x,y(c.low));ctx.stroke();
+  const top=y(Math.max(c.open,c.close)),bottom=y(Math.min(c.open,c.close));
+  ctx.fillStyle=color;ctx.fillRect(x-bodyW/2,top,bodyW,Math.max(1.5,bottom-top));
+  const volH=(c.volume||0)/maxVol*34;
+  ctx.globalAlpha=.3;ctx.fillRect(x-bodyW/2,h-pad.bottom+5-volH,bodyW,volH);ctx.globalAlpha=1;
+ });
+ const last=candles[candles.length-1],lastY=y(last.close);
+ ctx.setLineDash([5,4]);ctx.strokeStyle='#69a7ff';ctx.beginPath();ctx.moveTo(pad.left,lastY);ctx.lineTo(w-pad.right,lastY);ctx.stroke();ctx.setLineDash([]);
+ ctx.fillStyle='#69a7ff';ctx.fillRect(w-pad.right-92,lastY-11,91,22);
+ ctx.fillStyle='#07111e';ctx.font='bold 11px sans-serif';ctx.fillText(last.close.toLocaleString(undefined,{maximumFractionDigits:8}),w-pad.right-86,lastY+4);
+ const first=candles[0],change=(last.close-first.open)/first.open*100;
+ $('chart-last').textContent=marketNumber(last.close);
+ $('chart-change').textContent=(change>=0?'+':'')+change.toFixed(2)+'%';
+ $('chart-change').className=change>=0?'change-up':'change-down';
+ $('chart-range').textContent=candles.length+' candles · '+$('chart-timeframe').value;
+}
+async function loadMarketChart(){
+ if(marketChartBusy)return;
+ marketChartBusy=true;
+ const status=$('chart-status');
+ status.textContent='Loading candles…';
+ try{
+  const exchange=$('chart-exchange').value,market=$('chart-market').value,symbol=chartSymbol(),timeframe=$('chart-timeframe').value;
+  const url='/api/candles/'+encodeURIComponent(exchange)+'/'+encodeURIComponent(symbol)+'?market_type='+encodeURIComponent(market)+'&timeframe='+encodeURIComponent(timeframe)+'&limit=80';
+  const data=await api(url);
+  drawMarketChart(data.candles||[]);
+  status.textContent='PUBLIC OHLCV · '+exchange.toUpperCase()+' · '+new Date().toLocaleTimeString();
+ }catch(error){
+  status.textContent='Chart unavailable · '+(error.message||'Exchange request failed');
+  drawMarketChart([]);
+ }finally{marketChartBusy=false;}
+}
+$('chart-refresh').addEventListener('click',loadMarketChart);
+$('chart-timeframe').addEventListener('change',loadMarketChart);
+$('chart-exchange').addEventListener('change',loadMarketChart);
+$('chart-market').addEventListener('change',loadMarketChart);
+$('chart-symbol').addEventListener('change',loadMarketChart);
+
 async function refresh(){
  const names=['account','journal','signals','positions','opportunities','risk'];
  const results=await Promise.allSettled([
@@ -195,7 +407,7 @@ async function refresh(){
 function renderPositions(rows){const body=$('positions'),alerts=$('position-alerts');if(!rows.length){body.innerHTML='<tr><td colspan="12">No open paper positions.</td></tr>';alerts.innerHTML='';$('positions-updated').textContent='No open positions';return}const messages=rows.filter(p=>p.alert).map(p=>({p,text:p.alert==='STOP_REACHED'?'Stop loss level reached':p.alert==='TARGET_REACHED'?'Target level reached':p.alert==='NEAR_STOP'?'Approaching stop loss':'Approaching target'}));alerts.innerHTML=messages.length?messages.map(x=>'<p style="padding:11px 14px;border-radius:9px;background:'+(x.p.alert.includes('STOP')?'rgba(255,113,136,.13)':'rgba(53,214,160,.12)')+';border:1px solid '+(x.p.alert.includes('STOP')?'rgba(255,113,136,.35)':'rgba(53,214,160,.3)')+'">'+escapeHtml(x.p.symbol)+' '+escapeHtml(x.p.side)+': <strong>'+escapeHtml(x.text)+'</strong> · Live '+Number(x.p.live_price).toLocaleString()+'</p>').join(''):'';body.innerHTML=rows.map(p=>{const live=p.live_price==null?'Unavailable':Number(p.live_price).toLocaleString(undefined,{maximumFractionDigits:8});const pnl=p.unrealized_pnl==null?escapeHtml(p.price_error||'Price unavailable'):money(p.unrealized_pnl);const pct=p.unrealized_pnl_pct==null?'—':Number(p.unrealized_pnl_pct).toFixed(3)+'%';const stopGap=p.stop_distance==null?'—':Number(p.stop_distance).toPrecision(5)+' ('+Number(p.stop_distance_pct).toFixed(2)+'%)';const targetGap=p.target_distance==null?'—':Number(p.target_distance).toPrecision(5)+' ('+Number(p.target_distance_pct).toFixed(2)+'%)';return '<tr><td>'+escapeHtml(p.symbol)+'</td><td>'+escapeHtml(p.market_type)+'</td><td class="'+escapeHtml(p.side)+'">'+escapeHtml(p.side)+'</td><td>'+Number(p.entry).toLocaleString()+'</td><td>'+(p.live_price==null?'<span class="muted">'+live+'</span>':'<strong>'+live+'</strong>')+'</td><td>'+Number(p.stop).toLocaleString()+'</td><td>'+stopGap+'</td><td>'+(p.target==null?'—':Number(p.target).toLocaleString())+'</td><td>'+targetGap+'</td><td>'+formatQuantity(p.quantity)+(p.market_type==='futures'?(p.contract_type==='legacy_base'?' base units':' contracts · ×'+Number(p.contract_size||1).toLocaleString()):'')+'</td><td class="'+(Number(p.unrealized_pnl)>=0?'LONG':'SHORT')+'">'+pnl+'</td><td>'+pct+'</td></tr>'}).join('');$('positions-updated').textContent='Updated '+new Date().toLocaleTimeString()+' · refreshes every 15s'}
 function renderOpportunities(rows){const body=$('opportunities');if(!rows.length){body.innerHTML='<tr><td colspan="8">No scan results yet. Run Scan markets first.</td></tr>';$('opportunities-updated').textContent='Waiting for scan';return}body.innerHTML=rows.map(p=>'<tr><td>'+escapeHtml(p.symbol)+'</td><td>'+escapeHtml(p.exchange)+'</td><td>'+escapeHtml(p.market_type)+'</td><td class="'+escapeHtml(p.signal)+'">'+escapeHtml(p.signal)+'</td><td class="'+escapeHtml(p.trend)+'">'+escapeHtml(p.trend)+'</td><td>'+(p.live_price==null?'<span class="muted">Unavailable</span>':'<strong>'+Number(p.live_price).toLocaleString(undefined,{maximumFractionDigits:8})+'</strong>')+'</td><td>'+Number(p.score).toLocaleString(undefined,{maximumFractionDigits:0})+'</td><td>'+escapeHtml(p.timeframe)+'</td></tr>').join('');$('opportunities-updated').textContent='Live prices updated '+new Date().toLocaleTimeString()}
 function renderStats(trades){const closed=trades.filter(t=>t.status==='CLOSED'),wins=closed.filter(t=>Number(t.pnl)>0).length,losses=closed.filter(t=>Number(t.pnl)<0).length;$('wins').textContent=wins;$('losses').textContent=losses;$('closed-count').textContent=closed.length;$('winrate').textContent=closed.length?(wins/closed.length*100).toFixed(1)+'%':'—'}
-async function scan(){let msg=$('scanmsg');msg.textContent='Scanning public exchange candles…';try{let q=new URLSearchParams({exchange:$('exchange').value,market_type:$('market').value,timeframe:$('timeframe').value,symbols:$('symbols').value}),d=await api('/api/scan?'+q,{method:'POST'});$('scanrows').innerHTML=d.results.map(x=>x.error?'<tr><td>'+escapeHtml(x.symbol)+'</td><td colspan="7">'+escapeHtml(x.error)+'</td></tr>':'<tr><td>'+escapeHtml(x.symbol)+'</td><td class="'+escapeHtml(x.signal)+'">'+escapeHtml(x.signal)+'</td><td class="'+escapeHtml(x.trend)+'">'+escapeHtml(x.trend)+'</td><td>'+Number(x.price).toPrecision(7)+'</td><td>'+x.rsi14.toFixed(1)+'</td><td>'+x.atr14.toPrecision(5)+'</td><td>'+Number(x.score).toLocaleString(undefined,{maximumFractionDigits:0})+'</td><td><button class="secondary" data-ticket-symbol="'+escapeHtml(x.symbol)+'" data-ticket-price="'+Number(x.price)+'" data-ticket-distance="'+Number(x.stop_distance)+'" data-ticket-signal="'+escapeHtml(x.signal)+'">Use setup</button></td></tr>').join('');msg.textContent='Scan complete. Signals are research prompts, not recommendations.';refresh()}catch(e){msg.textContent=e.message}}
+async function scan(){let msg=$('scanmsg');msg.textContent='Scanning public exchange candles…';try{let q=new URLSearchParams({exchange:$('exchange').value,market_type:$('market').value,timeframe:$('timeframe').value,symbols:$('symbols').value}),d=await api('/api/scan?'+q,{method:'POST'});$('scanrows').innerHTML=d.results.map(x=>x.error?'<tr><td>'+escapeHtml(x.symbol)+'</td><td colspan="5">'+escapeHtml(x.error)+'</td></tr>':'<tr><td>'+escapeHtml(x.symbol)+'</td><td class="'+escapeHtml(x.signal)+'">'+escapeHtml(x.signal)+'</td><td class="'+escapeHtml(x.trend)+'">'+escapeHtml(x.trend)+'</td><td>'+Number(x.price).toPrecision(7)+'</td><td>'+x.rsi14.toFixed(1)+'</td><td>'+x.atr14.toPrecision(5)+'</td><td>'+Number(x.score).toLocaleString(undefined,{maximumFractionDigits:0})+'</td><td><button class="secondary" data-ticket-symbol="'+escapeHtml(x.symbol)+'" data-ticket-price="'+Number(x.price)+'" data-ticket-distance="'+Number(x.stop_distance)+'" data-ticket-signal="'+escapeHtml(x.signal)+'">Use setup</button></td></tr>').join('');msg.textContent='Scan complete. Signals are research prompts, not recommendations.';refresh()}catch(e){msg.textContent=e.message}}
 $('scanrows').addEventListener('click',event=>{const button=event.target.closest('button[data-ticket-symbol]');if(button)ticket(button.dataset.ticketSymbol,Number(button.dataset.ticketPrice),Number(button.dataset.ticketDistance),button.dataset.ticketSignal)});
 $('entry').addEventListener('input',updateAutoTarget);
 $('stop').addEventListener('input',updateAutoTarget);
@@ -224,5 +436,6 @@ async function openTrade(){try{let body={exchange:$('exchange').value,symbol:$('
 async function closeTrade(id){let px=prompt('Enter simulated exit price:');if(!px)return;try{let r=await api('/api/paper/'+id+'/close',{method:'POST',body:JSON.stringify({exit_price:Number(px)})});alert('Closed. P&L '+money(r.pnl));refresh()}catch(e){alert(e.message)}}
 function render(j){let rows=[...j.trades.map(t=>({id:t.id,pair:t.symbol,market:t.market_type,side:t.side,detail:formatQuantity(t.quantity)+(t.market_type==='futures'?(t.contract_type==='legacy_base'?' base units':' contracts · ×'+Number(t.contract_size||1).toLocaleString()):'')+' @ '+t.entry,status:t.status,pnl:t.pnl,rMultiple:t.r_multiple,trade:true})),...j.signals.map(s=>({id:'S'+s.id,pair:s.symbol,market:s.market_type,side:s.signal,detail:s.price,status:s.timeframe,pnl:'—',trade:false}))];$('journal').innerHTML=rows.map(r=>'<tr><td>'+escapeHtml(r.id)+'</td><td>'+escapeHtml(r.pair)+'</td><td>'+escapeHtml(r.market)+'</td><td class="'+escapeHtml(r.side)+'">'+escapeHtml(r.side)+'</td><td>'+escapeHtml(r.detail)+'</td><td>'+escapeHtml(r.status)+'</td><td>'+(r.trade?(money(r.pnl)+(r.rMultiple==null?'':' · '+Number(r.rMultiple).toFixed(2)+'R')):r.pnl)+'</td><td>'+(r.trade&&r.status==='OPEN'?'<button class="danger" onclick="closeTrade('+r.id+')">Close</button>':'—')+'</td></tr>').join('')||'<tr><td colspan="8">No records yet.</td></tr>'}
 function draw(trades){let c=$('chart'),ctx=c.getContext('2d');ctx.clearRect(0,0,c.width,c.height);ctx.strokeStyle='#344866';ctx.beginPath();ctx.moveTo(30,10);ctx.lineTo(30,160);ctx.lineTo(880,160);ctx.stroke();if(!trades.length){ctx.fillStyle='#9aabc2';ctx.fillText('Close paper trades to build performance history',45,80);return}let sum=0,vals=trades.slice().reverse().map(t=>sum+=Number(t.pnl||0)),min=Math.min(0,...vals),max=Math.max(0,...vals),span=max-min||1;ctx.strokeStyle='#73a7ff';ctx.lineWidth=3;ctx.beginPath();vals.forEach((v,i)=>{let x=35+i*835/Math.max(1,vals.length-1),y=150-(v-min)/span*125;i?ctx.lineTo(x,y):ctx.moveTo(x,y)});ctx.stroke();ctx.fillStyle='#9aabc2';ctx.fillText('Cumulative realized P&L: '+money(sum),40,18)}
-refresh();refreshWatchlist();setInterval(()=>{refresh();refreshWatchlist()},15000);
-</script></body></html>
+refresh();refreshWatchlist();loadMarketChart();setInterval(()=>{refresh();refreshWatchlist()},15000);setInterval(loadMarketChart,60000);
+</script>
+</body></html>
