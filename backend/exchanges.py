@@ -12,7 +12,11 @@ import ccxt.async_support as ccxt
 
 from .contracts import validate_instrument
 
-EXCHANGE_IDS = ("binance", "bybit", "okx")
+# New trades use KuCoin, Bybit and OKX. Retain Binance solely for existing
+# persisted positions so their public marks and paper exits remain available.
+EXCHANGE_IDS = ("kucoin", "bybit", "okx")
+LEGACY_EXCHANGE_IDS = ("binance",)
+REGISTRY_EXCHANGE_IDS = EXCHANGE_IDS + LEGACY_EXCHANGE_IDS
 MARKET_TYPES = ("spot", "futures")
 DEFAULT_TICKER_CACHE_TTL_SECONDS = 2.0
 MAX_TICKER_CACHE_ENTRIES = 512
@@ -55,13 +59,14 @@ class ExchangeRegistry:
         self._rate_limit_status = {}
 
     async def get(self, exchange_id, market_type="spot"):
-        if exchange_id not in EXCHANGE_IDS:
+        if exchange_id not in REGISTRY_EXCHANGE_IDS:
             raise ValueError("Unsupported exchange: " + str(exchange_id))
         if market_type not in MARKET_TYPES:
             raise ValueError("market_type must be spot or futures")
         key = (exchange_id, market_type)
         if key not in self._clients:
-            klass = getattr(ccxt, exchange_id)
+            client_name = "kucoinfutures" if exchange_id == "kucoin" and market_type == "futures" else exchange_id
+            klass = getattr(ccxt, client_name)
             options = {"defaultType": "swap" if market_type == "futures" else "spot"}
             client = klass({"enableRateLimit": True, "timeout": 15000, "options": options})
             shared_throttler = self._shared_throttlers.get(exchange_id)

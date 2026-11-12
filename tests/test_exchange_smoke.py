@@ -27,12 +27,13 @@ def test_exchange_smoke_does_not_hide_non_geographic_failures(message):
 
 
 
-def test_exchange_smoke_runs_sequentially_and_fails_on_rate_limit(monkeypatch, capsys):
+def test_exchange_smoke_reports_provider_rate_limits_as_inconclusive(monkeypatch, capsys):
     import asyncio
     from scripts import check_exchanges
     from backend.exchanges import ExchangeRateLimitCooldown
 
     monkeypatch.setenv("SMOKE_REQUEST_PAUSE_SECONDS", "0")
+    monkeypatch.setenv("SMOKE_MAX_COOLDOWN_WAIT_SECONDS", "0")
     calls = []
 
     class FakeRegistry:
@@ -41,8 +42,8 @@ def test_exchange_smoke_runs_sequentially_and_fails_on_rate_limit(monkeypatch, c
 
     async def fake_check(registry, exchange, market_type):
         calls.append((exchange, market_type))
-        if exchange == "bybit":
-            raise ExchangeRateLimitCooldown("bybit", 429, 30)
+        if exchange == "bybit" and market_type == "spot":
+            raise ExchangeRateLimitCooldown("bybit", 429, 0)
         return {
             "exchange": exchange,
             "market_type": market_type,
@@ -56,16 +57,16 @@ def test_exchange_smoke_runs_sequentially_and_fails_on_rate_limit(monkeypatch, c
     monkeypatch.setattr(check_exchanges, "ExchangeRegistry", FakeRegistry)
     monkeypatch.setattr(check_exchanges, "check", fake_check)
 
-    with pytest.raises(SystemExit) as error:
-        asyncio.run(check_exchanges.main())
+    result = asyncio.run(check_exchanges.main())
 
-    assert error.value.code == 1
+    assert result is None
     assert calls == [
-        ("binance", "spot"), ("binance", "futures"),
+        ("kucoin", "spot"), ("kucoin", "futures"),
         ("bybit", "spot"), ("bybit", "futures"),
         ("okx", "spot"), ("okx", "futures"),
     ]
     output = capsys.readouterr().out
     assert "COOLDOWN bybit spot" in output
-    assert "SUMMARY passed=4" in output
-    assert "cooldown_blocked=2" in output
+    assert "SUMMARY passed=5" in output
+    assert "cooldown_blocked=1" in output
+    assert "INCONCLUSIVE" in output

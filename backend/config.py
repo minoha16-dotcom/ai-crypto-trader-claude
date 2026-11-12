@@ -7,7 +7,7 @@ class Settings(BaseSettings):
 
     app_name: str = "AI Crypto Trader V2"
     database_url: str = "sqlite:///./data/trader.db"
-    default_exchange: str = "binance"
+    default_exchange: str = "kucoin"
     default_market_type: str = "spot"
 
     risk_per_trade_pct: float = Field(default=0.5, gt=0, le=100, allow_inf_nan=False)

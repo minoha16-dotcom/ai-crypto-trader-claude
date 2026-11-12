@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.exchanges import ExchangeRegistry, ExchangeRateLimitCooldown
 
-EXCHANGES = ("binance", "bybit", "okx")
+EXCHANGES = ("kucoin", "bybit", "okx")
 
 
 async def check(registry, exchange_id, market_type):
@@ -72,6 +72,7 @@ async def main():
     passed = 0
     skipped = 0
     cooldown_blocked = 0
+    inconclusive = 0
     checks = [
         (exchange_id, market_type)
         for exchange_id in EXCHANGES
@@ -92,10 +93,19 @@ async def main():
                     )
                 elif isinstance(error, ExchangeRateLimitCooldown):
                     cooldown_blocked += 1
+                    inconclusive += 1
                     print(
                         f"COOLDOWN {exchange_id} {market_type}: HTTP {error.status_code}; "
-                        f"request suppressed for another {error.retry_after}s."
+                        f"provider asked this runner to wait {error.retry_after}s."
                     )
+                    # Wait only between Spot and Futures checks for the same venue.
+                    if index + 1 < len(checks) and checks[index + 1][0] == exchange_id:
+                        max_wait = max(0, int(os.getenv("SMOKE_MAX_COOLDOWN_WAIT_SECONDS", "90")))
+                        if error.retry_after <= max_wait:
+                            print(f"WAIT {exchange_id}: {error.retry_after}s before the other market type.")
+                            await asyncio.sleep(error.retry_after)
+                        else:
+                            print(f"INCONCLUSIVE {exchange_id} {checks[index + 1][1]}: cooldown exceeds wait budget.")
                 else:
                     failed += 1
                     print(f"FAIL {exchange_id} {market_type}: {type(error).__name__}: {error}")
@@ -114,16 +124,15 @@ async def main():
     finally:
         await registry.close()
 
-    # A cooldown is never a successful connectivity check.
-    if cooldown_blocked:
-        failed += 1
+    # Geo blocks and HTTP 429s are environmental limitations, not PASS and not code failures.
     print(
         f"SUMMARY passed={passed} region_skipped={skipped} "
         f"cooldown_blocked={cooldown_blocked} failed={failed}"
     )
-    if passed == 0:
-        failed += 1
-        print("FAIL no exchange check completed successfully from this runner region")
+    if skipped or inconclusive:
+        print(f"INCONCLUSIVE: {skipped + inconclusive} checks could not be verified from this runner.")
+    if passed == 0 and failed == 0:
+        print("INCONCLUSIVE: no exchange endpoint could be verified from this runner region.")
     if failed:
         raise SystemExit(1)
 

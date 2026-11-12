@@ -189,7 +189,7 @@ async def market(exchange, symbol, market_type="spot"):
 
 
 @app.get("/api/backtest")
-async def backtest(exchange="binance", symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000):
+async def backtest(exchange="kucoin", symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000):
     if exchange not in EXCHANGE_IDS:
         raise HTTPException(400, "Unsupported exchange")
     if market_type not in ("spot", "futures"):
@@ -219,7 +219,7 @@ async def backtest(exchange="binance", symbol="BTC/USDT", market_type="spot", ti
 
 
 @app.post("/api/scan")
-async def run_scan(exchange="binance", market_type="spot", symbols=None, timeframe="1h"):
+async def run_scan(exchange="kucoin", market_type="spot", symbols=None, timeframe="1h"):
     if exchange not in EXCHANGE_IDS:
         raise HTTPException(400, "Unsupported exchange")
     if market_type not in ("spot", "futures"):

@@ -11,7 +11,7 @@ from backend.main import PaperClose, PaperOpen
 
 def valid_trade(**overrides):
     payload = {
-        "exchange": "binance",
+        "exchange": "kucoin",
         "symbol": "BTC/USDT",
         "market_type": "spot",
         "side": "LONG",
@@ -192,7 +192,7 @@ def test_backtest_api_loads_real_spot_instrument_precision(monkeypatch):
     monkeypatch.setattr(main, "run_backtest", fake_backtest)
 
     result = asyncio.run(main.backtest(
-        exchange="binance", symbol="BTC/USDT",
+        exchange="kucoin", symbol="BTC/USDT",
         market_type="spot", timeframe="1h", limit=53,
     ))
     assert result["trade_count"] == 0
