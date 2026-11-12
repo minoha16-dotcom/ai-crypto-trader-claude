@@ -26,3 +26,10 @@ def test_supabase_probe_is_explicitly_read_only():
     assert "default_transaction_read_only=on" in probe
     assert "TRADER_DATABASE_URL" in probe
     assert "to_regclass('public.trades')" in probe
+
+
+def test_free_position_monitor_is_disabled_until_explicitly_enabled():
+    workflow = Path(".github/workflows/free-position-monitor.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "vars.ENABLE_PAPER_POSITION_MONITOR == 'true'" in workflow
