@@ -188,6 +188,7 @@ def test_backtest_api_loads_real_spot_instrument_precision(monkeypatch):
         observed["candle_count"] = len(candles)
         return {"trade_count": 0}
 
+    monkeypatch.setattr(settings, "paper_starting_balance", 12345.0)
     monkeypatch.setattr(main.registry, "resolve_symbol", fake_resolve_symbol)
     monkeypatch.setattr(main.registry, "market_spec", fake_market_spec)
     monkeypatch.setattr(main.registry, "ohlcv", fake_ohlcv)
@@ -199,7 +200,7 @@ def test_backtest_api_loads_real_spot_instrument_precision(monkeypatch):
     ))
     assert result["trade_count"] == 0
     assert observed["market_type"] == "spot"
-    assert observed["starting_balance"] == settings.paper_starting_balance
+    assert observed["starting_balance"] == pytest.approx(12345.0)
     assert observed["instrument"]["amount_precision"] == 3
     assert observed["candle_count"] == 52
 
