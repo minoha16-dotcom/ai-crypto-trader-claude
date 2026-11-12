@@ -54,8 +54,13 @@ def _monitor_leader_lock():
         connection.close()
 
 
-async def monitor_open_positions_once():
-    """Check every open paper position once and close crossed SL/TP positions."""
+async def monitor_open_positions_once(*, detailed=False):
+    """Check open positions; optionally report errors to scheduled callers.
+
+    The default return stays the closed-position count for the continuous
+    in-process monitor. Scheduled callers can request a report so upstream
+    failures, including HTTP 429 cooldowns, are not mistaken for a full check.
+    """
     with connect() as db:
         rows = [
             dict(row)
@@ -65,6 +70,7 @@ async def monitor_open_positions_once():
         ]
 
     closed = 0
+    failed = 0
     for row in rows:
         try:
             ticker = await registry.ticker(
@@ -108,10 +114,19 @@ async def monitor_open_positions_once():
                 row["id"], reason, last, result["pnl"],
             )
         except Exception:
+            failed += 1
             logger.exception(
                 "Position monitor could not evaluate open position %s",
                 row.get("id"),
             )
+
+    if detailed:
+        return {
+            "checked": len(rows),
+            "closed": closed,
+            "failed": failed,
+            "remaining_open": max(0, len(rows) - closed),
+        }
     return closed
 
 
