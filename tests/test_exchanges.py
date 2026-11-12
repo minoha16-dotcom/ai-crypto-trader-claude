@@ -561,6 +561,7 @@ def test_bybit_reset_timestamp_ignores_stale_value():
 
 
 def test_bybit_ip_rate_limit_403_closes_sessions_and_enforces_ten_minutes():
+    import time
     from backend.exchanges import ExchangeRateLimitCooldown
 
     class AccessTooFrequent(Exception):
