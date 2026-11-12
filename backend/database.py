@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from pathlib import Path
+import os
 import sqlite3
 
 from .config import settings
@@ -41,7 +42,10 @@ def connect():
         import psycopg
         from psycopg.rows import dict_row
 
-        connection = psycopg.connect(url, row_factory=dict_row, connect_timeout=10, sslmode="require")
+        connection = psycopg.connect(
+            url, row_factory=dict_row, connect_timeout=10,
+            sslmode=os.getenv("DATABASE_SSLMODE", "require"),
+        )
         db = _PostgresConnection(connection)
         try:
             yield db
@@ -128,3 +132,8 @@ def init_db():
             if "contract_type" not in columns:
                 db.execute("ALTER TABLE trades ADD COLUMN contract_type TEXT NOT NULL DEFAULT 'spot'")
             db.execute("UPDATE trades SET contract_type = 'legacy_base' WHERE market_type = 'futures' AND contract_type = 'spot'")
+        # Support the monitor, account, journal and latest-signal read paths.
+        db.execute("CREATE INDEX IF NOT EXISTS idx_trades_status_id ON trades(status, id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_trades_status_closed_at ON trades(status, closed_at)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_trades_exchange_symbol_market ON trades(exchange, symbol, market_type, status)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_signals_market_symbol_timeframe_id ON signals(exchange, market_type, symbol, timeframe, id)")

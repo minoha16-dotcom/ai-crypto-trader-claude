@@ -62,3 +62,10 @@ def test_futures_market_extracts_linear_and_inverse_type():
     assert linear["contract_size"] == pytest.approx(0.001)
     assert inverse["contract_type"] == "inverse"
     assert inverse["contract_size"] == pytest.approx(100)
+
+
+
+def test_zero_market_amount_limits_are_treated_as_unset():
+    assert normalize_amount(
+        1.234, 2, 2, min_amount=0, max_amount=0
+    ) == pytest.approx(1.23)

@@ -85,3 +85,28 @@ def test_positions_endpoint_alerts_but_does_not_close_trade(isolated_db, monkeyp
             "SELECT status FROM trades WHERE id=?", (opened["id"],)
         ).fetchone()
     assert row["status"] == "OPEN"
+
+
+def test_detailed_monitor_report_counts_rate_limited_position(isolated_db, monkeypatch):
+    from backend.exchanges import ExchangeRateLimitCooldown
+
+    opened = open_trade("kucoin", "BTC/USDT", "spot", "LONG", 100, 95)
+
+    async def rate_limited_ticker(exchange, symbol, market_type):
+        raise ExchangeRateLimitCooldown(exchange, 429, 60)
+
+    monkeypatch.setattr(registry, "ticker", rate_limited_ticker)
+    report = asyncio.run(monitor_open_positions_once(detailed=True))
+
+    assert report == {
+        "checked": 1,
+        "closed": 0,
+        "failed": 1,
+        "remaining_open": 1,
+    }
+
+    with connect() as db:
+        row = db.execute(
+            "SELECT status FROM trades WHERE id=?", (opened["id"],)
+        ).fetchone()
+    assert row["status"] == "OPEN"

@@ -1,0 +1,21 @@
+# Local Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Local databases, logs and generated artifacts
+*.db
+*.sqlite
+*.sqlite3
+*.log
+coverage.xml
+htmlcov/

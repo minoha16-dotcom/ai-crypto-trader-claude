@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from .config import settings
 from .database import init_db, connect
-from .exchanges import registry, EXCHANGE_IDS
+from .exchanges import registry, EXCHANGE_IDS, ExchangeRateLimitCooldown
 from .scanner import scan
 from .paper import open_trade, close_trade, journal, account
 from .risk import risk_manager
@@ -51,10 +51,28 @@ app = FastAPI(
 )
 
 
+@app.exception_handler(ExchangeRateLimitCooldown)
+async def exchange_rate_limit_handler(request: Request, exc: ExchangeRateLimitCooldown):
+    retry_after = str(max(1, int(exc.retry_after)))
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "detail": str(exc),
+            "exchange": exc.exchange_id,
+            "upstream_status": exc.status_code,
+            "retry_after_seconds": int(retry_after),
+        },
+        headers={
+            "Retry-After": retry_after,
+            "X-Exchange-RateLimit-Status": str(exc.status_code),
+        },
+    )
+
+
 @app.middleware("http")
 async def dashboard_auth_and_security_headers(request: Request, call_next):
     # Render health checks stay public; every dashboard/API route requires Basic Auth.
-    if request.url.path != "/api/health":
+    if request.url.path not in ("/api/health", "/api/ready"):
         username = os.getenv("DASHBOARD_USERNAME", "")
         password = os.getenv("DASHBOARD_PASSWORD", "")
         if not username or not password:
@@ -90,7 +108,7 @@ async def dashboard_auth_and_security_headers(request: Request, call_next):
 
 
 class PaperOpen(BaseModel):
-    exchange: str = "binance"
+    exchange: str = "kucoin"
     symbol: str = Field(min_length=3, max_length=30)
     market_type: str = "spot"
     side: str
@@ -127,7 +145,24 @@ class PaperClose(BaseModel):
 
 @app.get("/api/health")
 def health():
+    """Liveness only: confirms the web process can answer HTTP requests."""
     return {"status": "ok", "version": "2.1.0", "mode": "paper-only"}
+
+
+@app.get("/api/ready")
+def readiness():
+    """Readiness check: verify PostgreSQL/SQLite connectivity and required schema."""
+    try:
+        with connect() as db:
+            for table in ("signals", "trades", "daily_equity_snapshots"):
+                db.execute(f"SELECT 1 FROM {table} LIMIT 0")
+    except Exception:
+        # Do not disclose connection strings, hostnames, or database error details.
+        return JSONResponse(
+            {"status": "not_ready", "database": "unavailable"},
+            status_code=503,
+        )
+    return {"status": "ready", "database": "ok", "version": "2.1.0"}
 
 
 @app.get("/api/exchanges")
@@ -143,6 +178,8 @@ async def instrument(exchange, symbol, market_type="spot"):
         raise HTTPException(400, "market_type must be spot or futures")
     try:
         return await registry.market_spec(exchange, symbol, market_type)
+    except ExchangeRateLimitCooldown:
+        raise
     except Exception as exc:
         raise HTTPException(400, f"Unable to resolve exchange instrument: {exc}")
 
@@ -162,30 +199,44 @@ async def market(exchange, symbol, market_type="spot"):
             "ask": ticker.get("ask"), "base_volume": ticker.get("baseVolume"),
             "timestamp": ticker.get("timestamp"),
         }
+    except ExchangeRateLimitCooldown:
+        raise
     except Exception as exc:
         raise HTTPException(502, str(exc))
 
 
 @app.get("/api/backtest")
-async def backtest(exchange="binance", symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000):
+async def backtest(exchange="kucoin", symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000):
     if exchange not in EXCHANGE_IDS:
         raise HTTPException(400, "Unsupported exchange")
     if market_type not in ("spot", "futures"):
         raise HTTPException(400, "market_type must be spot or futures")
-    if limit < 52 or limit > 5000:
-        raise HTTPException(400, "limit must be between 52 and 5000")
+    if limit < 53 or limit > 5000:
+        raise HTTPException(400, "limit must be between 53 and 5000 so 52 closed candles remain after excluding the forming candle")
     try:
         resolved_symbol = await registry.resolve_symbol(exchange, symbol, market_type)
+        # Both Spot and Futures sizing must use the selected venue's real amount
+        # precision and amount/cost limits.
+        instrument = await registry.market_spec(
+            exchange, resolved_symbol, market_type
+        )
         candles = await registry.ohlcv(exchange, resolved_symbol, timeframe, limit, market_type)
         # The final exchange candle may still be forming; never use it for signals.
-        return {"exchange": exchange, "symbol": resolved_symbol, "market_type": market_type,
-                "timeframe": timeframe, **run_backtest(candles[:-1])}
+        return {
+            "exchange": exchange,
+            "symbol": resolved_symbol,
+            "market_type": market_type,
+            "timeframe": timeframe,
+            **run_backtest(candles[:-1], starting_balance=settings.paper_starting_balance, instrument=instrument),
+        }
+    except ExchangeRateLimitCooldown:
+        raise
     except Exception as exc:
         raise HTTPException(400, str(exc))
 
 
 @app.post("/api/scan")
-async def run_scan(exchange="binance", market_type="spot", symbols=None, timeframe="1h"):
+async def run_scan(exchange="kucoin", market_type="spot", symbols=None, timeframe="1h"):
     if exchange not in EXCHANGE_IDS:
         raise HTTPException(400, "Unsupported exchange")
     if market_type not in ("spot", "futures"):
@@ -197,6 +248,8 @@ async def run_scan(exchange="binance", market_type="spot", symbols=None, timefra
             exchange, [s.strip() for s in symbols.split(",") if s.strip()] if symbols else None,
             market_type, timeframe
         )}
+    except ExchangeRateLimitCooldown:
+        raise
     except Exception as exc:
         raise HTTPException(400, str(exc))
 
@@ -265,7 +318,10 @@ async def opportunities(limit: int = 12):
                 "market_type": row["market_type"], "timeframe": row["timeframe"],
                 "signal": row["signal"], "trend": row["trend"], "score": row["score"],
                 "rsi": row["rsi"], "live_price": None, "signal_price": row["price"],
-                "price_timestamp": None, "price_error": str(exc),
+                "price_timestamp": None,
+                "price_error": str(exc),
+                "price_error_status": 429 if isinstance(exc, ExchangeRateLimitCooldown) else None,
+                "retry_after_seconds": exc.retry_after if isinstance(exc, ExchangeRateLimitCooldown) else None,
             }
 
     marked = await __import__("asyncio").gather(*(mark_signal(row) for row in latest))
@@ -342,6 +398,8 @@ async def get_positions():
                 "unrealized_pnl_pct": None,
                 "price_timestamp": None,
                 "price_error": str(exc),
+                "price_error_status": 429 if isinstance(exc, ExchangeRateLimitCooldown) else None,
+                "retry_after_seconds": exc.retry_after if isinstance(exc, ExchangeRateLimitCooldown) else None,
             }
 
     return {"positions": await __import__("asyncio").gather(
@@ -425,6 +483,8 @@ async def paper_open(body: PaperOpen):
             prices_complete=prices_complete,
             instrument=instrument,
         )
+    except ExchangeRateLimitCooldown:
+        raise
     except Exception as exc:
         raise HTTPException(400, f"Unable to validate/open paper trade: {exc}")
 
@@ -433,6 +493,8 @@ async def paper_open(body: PaperOpen):
 def paper_close(trade_id: int, body: PaperClose):
     try:
         return close_trade(trade_id, body.exit_price)
+    except ExchangeRateLimitCooldown:
+        raise
     except Exception as exc:
         raise HTTPException(404, str(exc))
 

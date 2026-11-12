@@ -1,5 +1,5 @@
 import json
-from .exchanges import registry
+from .exchanges import registry, ExchangeRateLimitCooldown
 from .indicators import analyze
 from .database import connect
 from .config import settings
@@ -12,5 +12,9 @@ async def scan(exchange,symbols=None,market_type='spot',timeframe=None):
             item={'exchange':exchange,'symbol':resolved_symbol,'market_type':market_type,'timeframe':timeframe,**metrics}; results.append(item)
             with connect() as db:
                 db.execute('INSERT INTO signals(exchange,symbol,market_type,timeframe,signal,score,price,rsi,trend,payload) VALUES(?,?,?,?,?,?,?,?,?,?)',(exchange,resolved_symbol,market_type,timeframe,metrics['signal'],metrics['score'],metrics['price'],metrics['rsi14'],metrics['trend'],json.dumps(item)))
-        except Exception as exc: results.append({'exchange':exchange,'symbol':symbol,'error':str(exc)})
+        except ExchangeRateLimitCooldown:
+            # Preserve HTTP 429 semantics; do not disguise cooldowns as a symbol error.
+            raise
+        except Exception as exc:
+            results.append({'exchange':exchange,'symbol':symbol,'error':str(exc)})
     return results
