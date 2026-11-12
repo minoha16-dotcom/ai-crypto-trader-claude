@@ -22,4 +22,9 @@ jobs:
       - name: Verify Supabase connectivity and schema without writes
         env:
           TRADER_DATABASE_URL: ${{ secrets.TRADER_DATABASE_URL }}
-        run: python -m pytest -q tests/test_supabase_readonly_probe.py
+        run: |
+          if [ -z "$TRADER_DATABASE_URL" ]; then
+            echo "::error::Add repository secret TRADER_DATABASE_URL before running this workflow."
+            exit 1
+          fi
+          python -m pytest -q tests/test_supabase_readonly_probe.py

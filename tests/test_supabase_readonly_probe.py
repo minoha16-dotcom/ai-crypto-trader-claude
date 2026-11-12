@@ -6,6 +6,9 @@ import psycopg
 
 def test_supabase_connection_and_required_schema_read_only():
     url = os.environ.get("TRADER_DATABASE_URL", "").strip()
+    if not url:
+        import pytest
+        pytest.skip("TRADER_DATABASE_URL is only configured for the manual Supabase probe workflow")
     assert url.startswith(("postgres://", "postgresql://")), (
         "Set the GitHub Actions secret TRADER_DATABASE_URL to the Supabase "
         "PostgreSQL URI. The probe intentionally has no fallback database."
