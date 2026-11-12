@@ -72,7 +72,7 @@ async def exchange_rate_limit_handler(request: Request, exc: ExchangeRateLimitCo
 @app.middleware("http")
 async def dashboard_auth_and_security_headers(request: Request, call_next):
     # Render health checks stay public; every dashboard/API route requires Basic Auth.
-    if request.url.path != "/api/health":
+    if request.url.path not in ("/api/health", "/api/ready"):
         username = os.getenv("DASHBOARD_USERNAME", "")
         password = os.getenv("DASHBOARD_PASSWORD", "")
         if not username or not password:
@@ -145,7 +145,24 @@ class PaperClose(BaseModel):
 
 @app.get("/api/health")
 def health():
+    """Liveness only: confirms the web process can answer HTTP requests."""
     return {"status": "ok", "version": "2.1.0", "mode": "paper-only"}
+
+
+@app.get("/api/ready")
+def readiness():
+    """Readiness check: verify PostgreSQL/SQLite connectivity and required schema."""
+    try:
+        with connect() as db:
+            for table in ("signals", "trades", "daily_equity_snapshots"):
+                db.execute(f"SELECT 1 FROM {table} LIMIT 0")
+    except Exception:
+        # Do not disclose connection strings, hostnames, or database error details.
+        return JSONResponse(
+            {"status": "not_ready", "database": "unavailable"},
+            status_code=503,
+        )
+    return {"status": "ready", "database": "ok", "version": "2.1.0"}
 
 
 @app.get("/api/exchanges")

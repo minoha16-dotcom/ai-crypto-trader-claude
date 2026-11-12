@@ -14,6 +14,28 @@ def test_health_is_public(monkeypatch):
     assert response.json()["mode"] == "paper-only"
 
 
+def test_readiness_check_verifies_database_schema():
+    with TestClient(app) as client:
+        response = client.get("/api/ready")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert response.json()["database"] == "ok"
+
+
+def test_readiness_check_fails_closed_when_database_is_unavailable(monkeypatch):
+    def unavailable_database():
+        raise RuntimeError("sensitive connection details must not be returned")
+
+    monkeypatch.setattr("backend.main.connect", unavailable_database)
+    with TestClient(app) as client:
+        response = client.get("/api/ready")
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "not_ready",
+        "database": "unavailable",
+    }
+
+
 def test_dashboard_requires_auth(monkeypatch):
     monkeypatch.setenv("DASHBOARD_USERNAME", "trader")
     monkeypatch.setenv("DASHBOARD_PASSWORD", "secret")

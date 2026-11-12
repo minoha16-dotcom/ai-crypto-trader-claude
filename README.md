@@ -216,6 +216,8 @@ The backtest resolves the exchange's canonical Futures symbol and loads its cont
 - **Signals are heuristic:** indicator-based scans are not validated predictive models and can be wrong.
 - **Risk controls are not a guarantee:** configured limits do not eliminate market, software, or execution risk.
 - **Storage:** local development uses SQLite; Render uses PostgreSQL. Back up the PostgreSQL database and test restore procedures before relying on the journal.
+- **Database readiness:** `GET /api/health` checks process liveness; `GET /api/ready` checks database connectivity and required tables. The latter is the Render health-check path in the Blueprint.
+- **Supabase probe:** manually run the `Supabase read-only connectivity probe` GitHub Actions workflow after adding repository secret `TRADER_DATABASE_URL`. It verifies connectivity and schema using a read-only PostgreSQL transaction and does not modify account data.
 - **Testing:** run `pytest -q` in the repository. GitHub Actions is configured to run the test suite on pushes and pull requests; check the Actions tab for the actual result.
 - **Not financial advice:** make independent decisions and comply with applicable laws and exchange terms.
 
@@ -251,11 +253,11 @@ MIT. See [LICENSE](LICENSE).
 `render.yaml` describes the current PostgreSQL deployment branch `deploy/render-supabase-postgres`. It requires `DATABASE_URL`, `DASHBOARD_USERNAME`, and `DASHBOARD_PASSWORD` to be supplied as private Render environment values. Do not use the former SQLite/persistent-disk Blueprint for the current service.
 
 - The web service uses the Render Free plan in Frankfurt and connects to Supabase PostgreSQL. Free web services spin down after 15 minutes without inbound HTTP/WebSocket traffic; they are not suitable as the only host for continuous stop/target monitoring.
-- The Blueprint defines a separate Frankfurt Background Worker (`ai-crypto-trader-position-monitor`) running `python -m backend.monitor_worker`. It must use the exact same PostgreSQL `DATABASE_URL` as the web service. A PostgreSQL session advisory lock ensures only one monitor loop leads at a time.
-- The Background Worker requires an always-on paid compute plan (configured as `0.5c-512mb`). Adding its definition does not create or bill the service; a separate Blueprint sync/approval is required. Review the displayed plan and cost before approving.
+- The Blueprint does not create a paid Background Worker. The web service uses `/api/ready` to verify database connectivity and required tables.
+- The paid Background Worker is intentionally not included. The Free web process may sleep, so it cannot provide continuous stop/target monitoring.
 - Set a unique `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` in Render. Both values are required; the dashboard and API are protected by HTTP Basic Authentication.
 - HTTP Basic Authentication protects the dashboard and every API route except `/api/health`, which is public for health checks. API docs are disabled.
-- Scanning is manual: use the dashboard Scan button. The web process can monitor while awake, while the dedicated Background Worker keeps monitoring when the Free web service sleeps. Until that worker is provisioned and verified against the shared PostgreSQL database, continuous monitoring is not guaranteed.
+- Scanning is manual: use the dashboard Scan button. The web process can monitor while awake. The optional GitHub Actions monitor in PR #14 can perform scheduled checks every five minutes after its secret is configured and the workflow is enabled. Both methods are periodic; price levels can be crossed and reversed between checks. Stop/target monitoring is not guaranteed or real-time.
 - The app remains paper-only and uses public market data; it does not need exchange API keys or submit live orders.
 
 After deployment, check `/api/health` and sign in with the username and password you configured in Render. Store those credentials in a password manager; never place them in source control.
