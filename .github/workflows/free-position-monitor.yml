@@ -20,7 +20,7 @@ jobs:
     # Two independent opt-ins keep the schedule dormant by default.
     # Set BOTH repository variables to "true" only after all release conditions
     # (Supabase backup/restore plan, DB secret, Render branch and app checks) pass.
-    if: ${{ vars.ENABLE_PAPER_POSITION_MONITOR == 'true' && vars.PAPER_POSITION_MONITOR_PRODUCTION_APPROVED == 'true' && vars.PAPER_POSITION_MONITOR_BACKUP_RESTORE_VERIFIED == 'true' }}
+    if: ${{ vars.ENABLE_PAPER_POSITION_MONITOR == 'true' && vars.PAPER_POSITION_MONITOR_PRODUCTION_APPROVED == 'true' && vars.PAPER_POSITION_MONITOR_BACKUP_RESTORE_VERIFIED == 'EXPORT_AND_RESTORE_TEST_PASSED' }}
     runs-on: ubuntu-latest
     timeout-minutes: 4
     env:
