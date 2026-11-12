@@ -567,7 +567,11 @@ def test_bybit_ip_rate_limit_403_closes_sessions_and_enforces_ten_minutes():
         status_code = 403
 
     class FakeClient:
-        last_response_headers = {}
+        # Even a shorter advertised reset must not undercut Bybit's documented
+        # 10-minute wait for this explicit IP-level 403 block.
+        last_response_headers = {
+            "X-Bapi-Limit-Reset-Timestamp": str(int((time.time() + 60) * 1000))
+        }
         last_http_response = '{"retCode":10018,"retMsg":"403, access too frequent"}'
 
         def __init__(self):
