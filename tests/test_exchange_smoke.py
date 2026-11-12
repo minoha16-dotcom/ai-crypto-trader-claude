@@ -33,7 +33,6 @@ def test_exchange_smoke_reports_provider_rate_limits_as_inconclusive(monkeypatch
     from backend.exchanges import ExchangeRateLimitCooldown
 
     monkeypatch.setenv("SMOKE_REQUEST_PAUSE_SECONDS", "0")
-    monkeypatch.setenv("SMOKE_MAX_COOLDOWN_WAIT_SECONDS", "0")
     calls = []
 
     class FakeRegistry:
@@ -62,11 +61,12 @@ def test_exchange_smoke_reports_provider_rate_limits_as_inconclusive(monkeypatch
     assert result is None
     assert calls == [
         ("kucoin", "spot"), ("kucoin", "futures"),
-        ("bybit", "spot"), ("bybit", "futures"),
+        ("bybit", "spot"),
         ("okx", "spot"), ("okx", "futures"),
     ]
     output = capsys.readouterr().out
     assert "COOLDOWN bybit spot" in output
-    assert "SUMMARY passed=5" in output
+    assert "INCONCLUSIVE bybit futures: skipped after" in output
+    assert "SUMMARY passed=4" in output
     assert "cooldown_blocked=1" in output
-    assert "INCONCLUSIVE" in output
+    assert "INCONCLUSIVE: 2 checks" in output
