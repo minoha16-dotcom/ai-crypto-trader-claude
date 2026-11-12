@@ -1,0 +1,104 @@
+name: Free scheduled paper-position monitor
+
+on:
+  schedule:
+    # GitHub's minimum supported schedule interval is five minutes.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Prevent overlapping runs. The PostgreSQL advisory lock also coordinates
+# with the Render web process while it is awake.
+concurrency:
+  group: paper-position-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    # Two independent opt-ins keep the schedule dormant by default.
+    # Set BOTH repository variables to "true" only after all release conditions
+    # (Supabase backup/restore plan, DB secret, Render branch and app checks) pass.
+    if: ${{ vars.ENABLE_PAPER_POSITION_MONITOR == 'true' && vars.PAPER_POSITION_MONITOR_PRODUCTION_APPROVED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      DATABASE_URL: ${{ secrets.TRADER_DATABASE_URL }}
+      DATABASE_SSLMODE: require
+    steps:
+      - name: Check out the unified application branch
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: application
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: application/requirements.txt
+
+      - name: Install monitor dependencies
+        run: |
+          python -m pip install --disable-pip-version-check \
+            "ccxt>=4.4,<5" \
+            "pydantic-settings>=2.6,<3" \
+            "psycopg[binary]>=3.2,<4"
+
+      - name: Check paper positions against public exchange prices
+        working-directory: application
+        run: |
+          python - <<'PY'
+          import asyncio
+          import os
+
+          database_url = os.environ.get("DATABASE_URL", "").strip()
+          if not database_url:
+              raise SystemExit(
+                  "Missing repository secret TRADER_DATABASE_URL. "
+                  "Add the same Supabase PostgreSQL connection URI used by "
+                  "Render in Settings > Secrets and variables > Actions."
+              )
+          if not database_url.startswith(("postgres://", "postgresql://")):
+              raise SystemExit(
+                  "TRADER_DATABASE_URL must be the shared PostgreSQL URL; "
+                  "SQLite cannot coordinate this scheduled monitor."
+              )
+
+          from backend.exchanges import registry
+          from backend.position_monitor import (
+              _monitor_leader_lock,
+              monitor_open_positions_once,
+          )
+
+          async def main():
+              try:
+                  # Reuse Render's PostgreSQL advisory lock. If Render is
+                  # awake and its own monitor owns the lock, this run skips.
+                  with _monitor_leader_lock() as is_leader:
+                      if not is_leader:
+                          print(
+                              "SKIPPED: another process owns the paper-position "
+                              "monitor lock."
+                          )
+                          return
+                      report = await monitor_open_positions_once(detailed=True)
+                      print(
+                          "Monitor report: "
+                          f"checked={report['checked']} "
+                          f"closed={report['closed']} "
+                          f"remaining_open={report['remaining_open']} "
+                          f"failed={report['failed']}"
+                      )
+                      if report["failed"]:
+                          raise SystemExit(
+                              f"Monitor incomplete: {report['failed']} open position(s) "
+                              "could not be checked. Inspect the job logs; no live orders were sent."
+                          )
+              finally:
+                  await registry.close()
+
+          asyncio.run(main())
+          PY
