@@ -73,6 +73,7 @@ async def main():
     skipped = 0
     cooldown_blocked = 0
     inconclusive = 0
+    cooldown_exchanges = set()
     checks = [
         (exchange_id, market_type)
         for exchange_id in EXCHANGES
@@ -80,6 +81,13 @@ async def main():
     ]
     try:
         for index, (exchange_id, market_type) in enumerate(checks):
+            if exchange_id in cooldown_exchanges:
+                inconclusive += 1
+                print(
+                    f"INCONCLUSIVE {exchange_id} {market_type}: skipped after "
+                    "the other market type triggered a rate-limit cooldown."
+                )
+                continue
             if index and pause_seconds:
                 await asyncio.sleep(pause_seconds)
             try:
@@ -98,14 +106,10 @@ async def main():
                         f"COOLDOWN {exchange_id} {market_type}: HTTP {error.status_code}; "
                         f"provider asked this runner to wait {error.retry_after}s."
                     )
-                    # Wait only between Spot and Futures checks for the same venue.
-                    if index + 1 < len(checks) and checks[index + 1][0] == exchange_id:
-                        max_wait = max(0, int(os.getenv("SMOKE_MAX_COOLDOWN_WAIT_SECONDS", "90")))
-                        if error.retry_after <= max_wait:
-                            print(f"WAIT {exchange_id}: {error.retry_after}s before the other market type.")
-                            await asyncio.sleep(error.retry_after)
-                        else:
-                            print(f"INCONCLUSIVE {exchange_id} {checks[index + 1][1]}: cooldown exceeds wait budget.")
+                    # Do not immediately re-hit the same venue through its other
+                    # market client. Bybit applies shared request/IP protections;
+                    # the registry will enforce the cooldown for normal app traffic.
+                    cooldown_exchanges.add(exchange_id)
                 else:
                     failed += 1
                     print(f"FAIL {exchange_id} {market_type}: {type(error).__name__}: {error}")
