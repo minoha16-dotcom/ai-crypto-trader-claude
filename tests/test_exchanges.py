@@ -558,3 +558,68 @@ def test_bybit_reset_timestamp_ignores_stale_value():
     })
     assert delay is None
 
+
+
+def test_bybit_ip_rate_limit_403_closes_sessions_and_enforces_ten_minutes():
+    from backend.exchanges import ExchangeRateLimitCooldown
+
+    class AccessTooFrequent(Exception):
+        status_code = 403
+
+    class FakeClient:
+        last_response_headers = {}
+        last_http_response = '{"retCode":10018,"retMsg":"403, access too frequent"}'
+
+        def __init__(self):
+            self.close_count = 0
+
+        async def close(self):
+            self.close_count += 1
+
+    async def run():
+        registry = ExchangeRegistry()
+        spot = FakeClient()
+        futures = FakeClient()
+        registry._clients[("bybit", "spot")] = spot
+        registry._clients[("bybit", "futures")] = futures
+        registry._shared_throttlers["bybit"] = object()
+        registry._ticker_cache[("bybit", "spot", "BTC/USDT")] = (
+            9999999999.0, {"last": 1.0}
+        )
+
+        async def forbidden_operation():
+            raise AccessTooFrequent("403 Forbidden: access too frequent")
+
+        with pytest.raises(ExchangeRateLimitCooldown) as error:
+            await registry._request("bybit", spot, forbidden_operation)
+
+        assert error.value.status_code == 403
+        assert error.value.retry_after >= 600
+        assert spot.close_count == 1
+        assert futures.close_count == 1
+        assert registry._clients == {}
+        assert "bybit" not in registry._shared_throttlers
+        assert not any(key[0] == "bybit" for key in registry._ticker_cache)
+
+        # No new session may be opened until the 10-minute cooldown expires.
+        with pytest.raises(ExchangeRateLimitCooldown) as blocked:
+            await registry.get("bybit", "futures")
+        assert blocked.value.status_code == 403
+        assert registry._clients == {}
+        await registry.close()
+
+    asyncio.run(run())
+
+
+def test_bybit_403_invalid_request_is_not_misclassified_as_ip_ban():
+    from backend.exchanges import ExchangeRegistry
+
+    class Forbidden(Exception):
+        status_code = 403
+
+    class FakeClient:
+        last_http_response = '{"retMsg":"invalid request"}'
+
+    assert not ExchangeRegistry._is_bybit_ip_rate_limit_error(
+        FakeClient(), Forbidden("403 Forbidden: invalid request")
+    )
