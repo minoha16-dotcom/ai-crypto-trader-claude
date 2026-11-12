@@ -272,7 +272,7 @@ async function refreshWatchlist(){
   const available=results.filter(item=>item.data&&Number(item.data.last)>0).length;
   body.innerHTML=results.map(item=>{
    if(!item.data||!(Number(item.data.last)>0)){
-    return '<tr><td class="pair-cell">'+escapeHtml(item.symbol)+'</td><td colspan="5"><span class="muted">Unavailable · '+escapeHtml(item.error||'No valid ticker')+'</span></td><td>—</td></tr>';
+    return '<tr><td class="pair-cell">'+escapeHtml(item.symbol)+'</td><td colspan="3"><span class="muted">Unavailable · '+escapeHtml(item.error||'No valid ticker')+'</span></td><td>—</td></tr>';
    }
    const data=item.data;
    return '<tr><td class="pair-cell">'+escapeHtml(item.symbol)+'</td><td class="price-value">'+marketNumber(data.last)+'</td><td><span class="quote-line">B '+marketNumber(data.bid)+'</span><span class="quote-line">A '+marketNumber(data.ask)+'</span></td><td>'+marketVolume(data.base_volume)+'<small class="timestamp-line">'+marketTimestamp(data.timestamp)+'</small></td><td><button type="button" class="table-action" data-watch-pair="'+escapeHtml(item.symbol)+'" data-watch-price="'+Number(data.last)+'">Use</button></td></tr>';
