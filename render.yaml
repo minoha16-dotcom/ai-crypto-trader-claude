@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: ai-crypto-trader-claude
+    runtime: python
+    plan: free
+    region: frankfurt
+    branch: deploy/render-supabase-postgres
+    buildCommand: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+    # Keep the 512 MiB Free instance bounded under concurrent dashboard/API bursts.
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT --limit-concurrency 16 --backlog 64 --timeout-keep-alive 5
+    healthCheckPath: /api/ready
+    autoDeployTrigger: off
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.18"
+      - key: DATABASE_URL
+        sync: false
+      - key: DASHBOARD_USERNAME
+        sync: false
+      - key: DASHBOARD_PASSWORD
+        sync: false
+      - key: POSITION_MONITOR_INTERVAL_SECONDS
+        value: "10"
+      - key: PYTHONUNBUFFERED
+        value: "1"
