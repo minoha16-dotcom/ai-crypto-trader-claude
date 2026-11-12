@@ -153,6 +153,26 @@ class ExchangeRegistry:
                 return None, value
 
     @staticmethod
+    def _bybit_reset_delay_from_headers(headers):
+        """Return Bybit's X-Bapi-Limit-Reset-Timestamp delay when present."""
+        raw = headers.get("x-bapi-limit-reset-timestamp")
+        if raw is None:
+            return None
+        try:
+            timestamp = float(str(raw).strip())
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(timestamp) or timestamp <= 0:
+            return None
+        # Bybit publishes this Unix timestamp in milliseconds.
+        if timestamp > 10_000_000_000:
+            timestamp /= 1000.0
+        delay = timestamp - time.time()
+        # A stale/current timestamp is not a useful reset instruction. Fall
+        # back to the conservative local cooldown instead of retrying at once.
+        return delay if delay > 0 else None
+
+    @staticmethod
     def _ban_timestamp_delay(error_text):
         # Binance can return "IP banned until <epoch-ms>" in its JSON body.
         match = re.search(r"(?:IP\s+)?banned\s+until\s+(\d{10,13})", error_text, re.IGNORECASE)
@@ -166,16 +186,23 @@ class ExchangeRegistry:
     def _activate_rate_limit(self, exchange_id, client, error, status_code):
         headers = self._response_headers(client, error)
         header_delay, header_value = self._retry_after_from_headers(headers)
+        bybit_reset_delay = (
+            self._bybit_reset_delay_from_headers(headers)
+            if exchange_id == "bybit" else None
+        )
         body = getattr(client, "last_http_response", None)
         details = " ".join(part for part in (str(error), str(body or "")) if part)
         ban_delay = self._ban_timestamp_delay(details)
 
-        candidates = [value for value in (header_delay, ban_delay) if value is not None]
+        candidates = [
+            value for value in (header_delay, bybit_reset_delay, ban_delay)
+            if value is not None
+        ]
         if candidates:
             delay = max(candidates)
-            if header_delay is not None and header_delay >= (ban_delay or 0):
-                source = "Retry-After header"
-            elif ban_delay is not None:
+            if bybit_reset_delay is not None and delay == bybit_reset_delay:
+                source = "Bybit X-Bapi-Limit-Reset-Timestamp"
+            elif ban_delay is not None and delay == ban_delay:
                 source = "response ban timestamp"
             else:
                 source = "Retry-After header"
@@ -193,8 +220,10 @@ class ExchangeRegistry:
         retry_after_log = header_value if header_value is not None else "not supplied"
         logger.warning(
             "Exchange rate limit activated: exchange=%s HTTP=%s Retry-After=%s "
-            "cooldown_seconds=%d source=%s",
-            exchange_id, status_code, retry_after_log, int(math.ceil(remaining)), source,
+            "Bybit-Reset-Timestamp=%s cooldown_seconds=%d source=%s",
+            exchange_id, status_code, retry_after_log,
+            headers.get("x-bapi-limit-reset-timestamp", "not supplied"),
+            int(math.ceil(remaining)), source,
         )
         return ExchangeRateLimitCooldown(exchange_id, status_code, remaining)
 
