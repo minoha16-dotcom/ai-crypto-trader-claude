@@ -466,3 +466,38 @@ def test_ticker_cache_stays_bounded_under_many_distinct_symbols(monkeypatch):
         await registry.close()
 
     asyncio.run(run())
+
+
+def test_kucoin_futures_uses_dedicated_ccxt_client(monkeypatch):
+    from backend import exchanges as exchange_module
+
+    class FakeSpotClient:
+        def __init__(self, config):
+            self.options = config["options"]
+            self.throttler = object()
+        async def close(self):
+            pass
+
+    class FakeFuturesClient:
+        def __init__(self, config):
+            self.options = config["options"]
+            self.throttler = object()
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(exchange_module.ccxt, "kucoin", FakeSpotClient)
+    monkeypatch.setattr(exchange_module.ccxt, "kucoinfutures", FakeFuturesClient, raising=False)
+
+    async def run():
+        registry = ExchangeRegistry()
+        spot = await registry.get("kucoin", "spot")
+        futures = await registry.get("kucoin", "futures")
+        assert isinstance(spot, FakeSpotClient)
+        assert isinstance(futures, FakeFuturesClient)
+        assert spot.options["defaultType"] == "spot"
+        assert futures.options["defaultType"] == "swap"
+        assert ("kucoin", "spot") in registry._clients
+        assert ("kucoin", "futures") in registry._clients
+        await registry.close()
+
+    asyncio.run(run())

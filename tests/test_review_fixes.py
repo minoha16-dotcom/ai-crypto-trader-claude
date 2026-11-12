@@ -269,3 +269,19 @@ def test_rate_limit_api_preserves_upstream_http_status(monkeypatch, upstream_sta
     assert response.headers["Retry-After"] == "11"
     assert response.headers["X-Exchange-RateLimit-Status"] == str(upstream_status)
     assert response.json()["upstream_status"] == upstream_status
+
+
+def test_backtest_daily_loss_limit_blocks_new_entries_after_realized_loss(monkeypatch):
+    candles = _flat_candles(70)
+    candles[51] = [51 * 60_000, 90.0, 95.0, 88.0, 91.0, 1000.0]
+
+    def repeated_long(_history):
+        return {"signal": "LONG", "price": 100.0, "atr14": 2.0}
+
+    monkeypatch.setattr(backtest, "analyze", repeated_long)
+    monkeypatch.setattr(settings, "max_daily_loss_pct", 0.05)
+    result = backtest.run_backtest(candles)
+
+    assert result["trade_count"] == 1
+    assert result["trades"][0]["pnl"] < 0
+    assert any(item["reason"] == "DAILY_LOSS_LIMIT" for item in result["skipped_signals"])
