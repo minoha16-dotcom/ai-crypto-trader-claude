@@ -80,11 +80,25 @@ jobs:
                               "monitor lock."
                           )
                           return
-                      closed = await monitor_open_positions_once()
+                      try:
+                          report = await monitor_open_positions_once(detailed=True)
+                      except TypeError as exc:
+                          raise RuntimeError(
+                              "The production branch must first include PR #13's "
+                              "detailed monitor report before this scheduled monitor is enabled."
+                          ) from exc
                       print(
-                          "Monitor completed. Positions automatically closed "
-                          f"by Stop Loss / Take Profit: {closed}"
+                          "Monitor report: "
+                          f"checked={report['checked']} "
+                          f"closed={report['closed']} "
+                          f"remaining_open={report['remaining_open']} "
+                          f"failed={report['failed']}"
                       )
+                      if report["failed"]:
+                          raise SystemExit(
+                              f"Monitor incomplete: {report['failed']} open position(s) "
+                              "could not be checked. Inspect the job logs; no live orders were sent."
+                          )
               finally:
                   await registry.close()
 
