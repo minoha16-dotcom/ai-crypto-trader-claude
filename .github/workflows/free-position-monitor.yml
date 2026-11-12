@@ -17,6 +17,9 @@ concurrency:
 
 jobs:
   monitor:
+    # Keep the scheduled monitor dormant until PR #13 is deployed and the
+    # operator explicitly enables it in repository Settings > Variables.
+    if: ${{ vars.ENABLE_PAPER_POSITION_MONITOR == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 4
     env:
