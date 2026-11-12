@@ -273,7 +273,10 @@ def test_rate_limit_api_preserves_upstream_http_status(monkeypatch, upstream_sta
 
 def test_backtest_daily_loss_limit_blocks_new_entries_after_realized_loss(monkeypatch):
     candles = _flat_candles(70)
-    candles[51] = [51 * 60_000, 90.0, 95.0, 88.0, 91.0, 1000.0]
+    # CCXT timestamps are milliseconds; keep all candles within one UTC day.
+    base_timestamp = 1_700_000_000_000
+    candles = [[base_timestamp + i * 60_000, *candle[1:]] for i, candle in enumerate(candles)]
+    candles[51] = [base_timestamp + 51 * 60_000, 90.0, 95.0, 88.0, 91.0, 1000.0]
 
     def repeated_long(_history):
         return {"signal": "LONG", "price": 100.0, "atr14": 2.0}
