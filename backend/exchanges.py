@@ -20,7 +20,7 @@ REGISTRY_EXCHANGE_IDS = EXCHANGE_IDS + LEGACY_EXCHANGE_IDS
 MARKET_TYPES = ("spot", "futures")
 DEFAULT_TICKER_CACHE_TTL_SECONDS = 2.0
 MAX_TICKER_CACHE_ENTRIES = 512
-RATE_LIMIT_FALLBACK_SECONDS = {418: 300, 429: 60}
+RATE_LIMIT_FALLBACK_SECONDS = {418: 300, 429: 60, 403: 600}
 logger = logging.getLogger(__name__)
 
 
@@ -61,6 +61,8 @@ class ExchangeRegistry:
     async def get(self, exchange_id, market_type="spot"):
         if exchange_id not in REGISTRY_EXCHANGE_IDS:
             raise ValueError("Unsupported exchange: " + str(exchange_id))
+        # Do not even open a new HTTP session while a venue-wide cooldown is active.
+        self._ensure_request_allowed(exchange_id)
         if market_type not in MARKET_TYPES:
             raise ValueError("market_type must be spot or futures")
         key = (exchange_id, market_type)
@@ -90,6 +92,62 @@ class ExchangeRegistry:
                 client.throttler = shared_throttler
             self._clients[key] = client
         return self._clients[key]
+
+    @staticmethod
+    def _is_bybit_ip_rate_limit_error(client, error):
+        """Recognize only Bybit's explicit 403 IP-frequency ban response."""
+        current = error
+        visited = set()
+        status_code = None
+        messages = []
+        while current is not None and id(current) not in visited:
+            visited.add(id(current))
+            messages.append(str(current))
+            for attr in ("status_code", "http_status", "status"):
+                try:
+                    candidate = int(getattr(current, attr, None))
+                except (TypeError, ValueError):
+                    continue
+                if candidate == 403:
+                    status_code = candidate
+                    break
+            if status_code is not None:
+                break
+            current = getattr(current, "__cause__", None) or getattr(current, "__context__", None)
+
+        body = getattr(client, "last_http_response", None)
+        if body:
+            messages.append(str(body))
+        combined = " ".join(messages).lower()
+        status_code = status_code or (
+            403 if re.search(r"(?<!\\d)403(?!\\d)", combined) else None
+        )
+        if status_code != 403:
+            return False
+        return (
+            "access too frequent" in combined
+            or "ip rate limit" in combined
+            or "ip rate-limit" in combined
+        )
+
+    async def _retire_exchange_clients(self, exchange_id):
+        """Close all clients for a venue after an exchange-wide IP ban."""
+        keys = [key for key in self._clients if key[0] == exchange_id]
+        clients = [self._clients.pop(key) for key in keys]
+        for key in keys:
+            self._markets_loaded.discard(key)
+        self._shared_throttlers.pop(exchange_id, None)
+        for key in [key for key in self._ticker_cache if key[0] == exchange_id]:
+            self._ticker_cache.pop(key, None)
+        if clients:
+            await asyncio.gather(
+                *(client.close() for client in clients),
+                return_exceptions=True,
+            )
+        logger.warning(
+            "Closed %d %s HTTP client session(s) after IP rate-limit ban",
+            len(clients), exchange_id,
+        )
 
     @staticmethod
     def _status_code_from_error(error):
@@ -250,6 +308,14 @@ class ExchangeRegistry:
         except ExchangeRateLimitCooldown:
             raise
         except Exception as error:
+            if exchange_id == "bybit" and self._is_bybit_ip_rate_limit_error(client, error):
+                cooldown = self._activate_rate_limit(
+                    exchange_id, client, error, 403
+                )
+                # Bybit instructs clients to terminate HTTP sessions and wait
+                # at least 10 minutes after this specific IP-level 403 response.
+                await self._retire_exchange_clients(exchange_id)
+                raise cooldown from error
             status_code = self._status_code_from_error(error)
             if status_code in (418, 429):
                 raise self._activate_rate_limit(
