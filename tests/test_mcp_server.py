@@ -42,7 +42,7 @@ def test_mcp_positions_opportunities_and_instrument_tools(monkeypatch):
     assert calls == [
         ("GET", "/api/positions", None),
         ("GET", "/api/opportunities", {"limit": 5}),
-        ("GET", "/api/instruments/binance/BTC/USDT", {"market_type": "spot"}),
+        ("GET", "/api/instruments/kucoin/BTC/USDT", {"market_type": "spot"}),
     ]
 
 

@@ -37,7 +37,7 @@ def test_all_mcp_tools_route_to_paper_backend_endpoints(monkeypatch):
     assert calls == [
         ("GET", "/api/health", None, None),
         ("GET", "/api/exchanges", None, None),
-        ("GET", "/api/markets/binance/BTC/USDT", {"market_type": "spot"}, None),
+        ("GET", "/api/markets/kucoin/BTC/USDT", {"market_type": "spot"}, None),
         ("POST", "/api/scan", {
             "exchange": "bybit", "market_type": "futures",
             "symbols": "BTC/USDT,ETH/USDT", "timeframe": "1h",
