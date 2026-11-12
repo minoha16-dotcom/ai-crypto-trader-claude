@@ -51,7 +51,7 @@ a{color:inherit}
 .panel-status{padding:6px 9px;border:1px solid rgba(124,153,190,.17);border-radius:999px;color:#94aac5;font-size:9px;font-weight:750;white-space:nowrap;background:rgba(255,255,255,.02)}
 .panel-status.live{color:#68dfb4;border-color:rgba(43,212,154,.24);background:rgba(43,212,154,.06)}
 .panel-status.warn{color:var(--amber);border-color:rgba(244,189,96,.24)}
-.chart-controls{display:grid;grid-template-columns:minmax(110px,1fr) 110px 110px 90px auto;gap:8px;align-items:end;margin-bottom:12px}
+.row{display:flex;gap:9px;flex-wrap:wrap;align-items:end}.row>*{min-width:105px}.row label{flex:1 1 120px}.chart-controls{display:grid;grid-template-columns:minmax(110px,1fr) 110px 110px 90px auto;gap:8px;align-items:end;margin-bottom:12px}
 .chart-controls label,.live-controls label,.row label{display:grid;gap:5px;color:#91a5c0;font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
 input,select{min-height:36px;min-width:0;width:100%;padding:8px 10px;border:1px solid #2c415e;border-radius:8px;outline:none;background:#0a1524;color:#eaf2ff;font:inherit;font-size:11px}
 input:focus,select:focus{border-color:#69a7ff;box-shadow:0 0 0 3px rgba(105,167,255,.1)}
@@ -352,7 +352,7 @@ async function loadMarketChart(){
  status.textContent='Loading candles…';
  try{
   const exchange=$('chart-exchange').value,market=$('chart-market').value,symbol=chartSymbol(),timeframe=$('chart-timeframe').value;
-  const url='/api/candles/'+encodeURIComponent(exchange)+'/'+encodeURIComponent(symbol)+'?market_type='+encodeURIComponent(market)+'&timeframe='+encodeURIComponent(timeframe)+'&limit=80';
+  const url='/api/candles/'+encodeURIComponent(exchange)+'/'+encodeURIComponent(symbol).replace(/%2F/g,'/')+'?market_type='+encodeURIComponent(market)+'&timeframe='+encodeURIComponent(timeframe)+'&limit=80';
   const data=await api(url);
   drawMarketChart(data.candles||[]);
   status.textContent='PUBLIC OHLCV · '+exchange.toUpperCase()+' · '+new Date().toLocaleTimeString();
