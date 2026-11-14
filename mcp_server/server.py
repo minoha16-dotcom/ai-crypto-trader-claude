@@ -199,6 +199,82 @@ async def run_backtest(
 
 
 @mcp.tool()
+async def run_walk_forward(
+    exchange: Literal["kucoin", "bybit", "okx"] | None = None,
+    symbol: str = "BTC/USDT",
+    market_type: Literal["spot", "futures"] = "spot",
+    timeframe: Literal["5m", "15m", "30m", "1h", "2h", "4h", "1d"] = "1h",
+    limit: int = 1500,
+    train_bars: int = 250,
+    validation_bars: int = 100,
+    test_bars: int = 100,
+    step_bars: int = 100,
+    warmup_bars: int = 50,
+    purge_bars: int = 20,
+    embargo_bars: int | None = None,
+    max_holding_bars: int = 20,
+    window_mode: Literal["rolling", "expanding"] = "rolling",
+    max_folds: int = 10,
+    volume_ratio_threshold: float | None = None,
+    max_missing_bars: int = 0,
+) -> dict:
+    """Run chronological paper-only walk-forward evaluation; never submits orders."""
+    symbol = symbol.strip().upper()
+    if not symbol or len(symbol) > 30 or "/" not in symbol:
+        raise ValueError("Use a CCXT symbol such as BTC/USDT.")
+    if not 53 <= limit <= 5000:
+        raise ValueError("limit must be between 53 and 5000.")
+    if volume_ratio_threshold is not None and (
+        not math.isfinite(volume_ratio_threshold) or volume_ratio_threshold < 0
+    ):
+        raise ValueError("volume_ratio_threshold must be finite and non-negative.")
+    if isinstance(warmup_bars, bool) or not isinstance(warmup_bars, int) or warmup_bars < 50:
+        raise ValueError("warmup_bars must be an integer of at least 50.")
+    if (
+        isinstance(max_holding_bars, bool)
+        or not isinstance(max_holding_bars, int)
+        or max_holding_bars < 1
+    ):
+        raise ValueError("max_holding_bars must be a positive integer.")
+    if (
+        isinstance(purge_bars, bool)
+        or not isinstance(purge_bars, int)
+        or purge_bars < max_holding_bars
+    ):
+        raise ValueError("purge_bars must be at least max_holding_bars.")
+    required_embargo = max(warmup_bars, max_holding_bars)
+    if embargo_bars is not None and (
+        isinstance(embargo_bars, bool)
+        or not isinstance(embargo_bars, int)
+        or embargo_bars < required_embargo
+    ):
+        raise ValueError("embargo_bars must be at least max(warmup_bars, max_holding_bars).")
+    exchange = await _configured_exchange(exchange)
+    params = {
+        "exchange": exchange,
+        "symbol": symbol,
+        "market_type": market_type,
+        "timeframe": timeframe,
+        "limit": limit,
+        "train_bars": train_bars,
+        "validation_bars": validation_bars,
+        "test_bars": test_bars,
+        "step_bars": step_bars,
+        "warmup_bars": warmup_bars,
+        "purge_bars": purge_bars,
+        "max_holding_bars": max_holding_bars,
+        "window_mode": window_mode,
+        "max_folds": max_folds,
+        "max_missing_bars": max_missing_bars,
+    }
+    if embargo_bars is not None:
+        params["embargo_bars"] = embargo_bars
+    if volume_ratio_threshold is not None:
+        params["volume_ratio_threshold"] = volume_ratio_threshold
+    return await _api("GET", "/api/walk-forward", params=params)
+
+
+@mcp.tool()
 async def get_signals(limit: int = 30) -> dict:
     """Read recent scanner signals saved in the local database."""
     if not 1 <= limit <= 100:

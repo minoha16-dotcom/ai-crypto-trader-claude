@@ -182,3 +182,68 @@ def test_backtest_target_uses_configured_reward_risk_ratio(monkeypatch):
 
     assert result["open_position"]["target"] == pytest.approx(112.0)
     assert result["assumptions"]["reward_risk_ratio"] == pytest.approx(3.0)
+
+
+def test_backtest_can_start_scoring_after_warmup(monkeypatch):
+    observed_lengths = []
+
+    def fake_analyze(history, volume_ratio_threshold=None):
+        observed_lengths.append(len(history))
+        return {"signal": "WAIT", "price": 100.0, "atr14": 2.0}
+
+    monkeypatch.setattr(backtest, "analyze", fake_analyze)
+    result = run_backtest(rising_candles(70), start_index=55)
+
+    assert observed_lengths
+    assert observed_lengths[0] == 56
+    assert result["assumptions"]["evaluation_start_index"] == 55
+    assert result["assumptions"]["warmup_candles_excluded_from_scoring"] == 55
+
+
+@pytest.mark.parametrize("start_index", [48, 69])
+def test_backtest_rejects_invalid_evaluation_start_index(start_index):
+    with pytest.raises(ValueError, match="start_index"):
+        run_backtest(rising_candles(70), start_index=start_index)
+
+
+def test_backtest_enforces_maximum_holding_horizon(monkeypatch):
+    monkeypatch.setattr(settings, "taker_fee_rate", 0.0)
+    monkeypatch.setattr(settings, "slippage_bps", 0.0)
+    monkeypatch.setattr(backtest, "analyze", one_long_then_wait(rising_candles()))
+    candles = [
+        [i * 3600000, 100.0, 101.0, 99.0, 100.0, 100.0]
+        for i in range(60)
+    ]
+
+    result = run_backtest(candles, max_holding_bars=2)
+
+    assert result["trade_count"] == 1
+    assert result["trades"][0]["exit_reason"] == "TIME_EXIT"
+    assert result["trades"][0]["exit_index"] == 51
+    assert result["open_positions"] == []
+    assert result["assumptions"]["max_holding_bars"] == 2
+
+
+def test_backtest_can_force_close_remaining_position_at_period_end(monkeypatch):
+    monkeypatch.setattr(settings, "taker_fee_rate", 0.0)
+    monkeypatch.setattr(settings, "slippage_bps", 0.0)
+    monkeypatch.setattr(backtest, "analyze", one_long_then_wait(rising_candles()))
+    candles = [
+        [i * 3600000, 100.0, 101.0, 99.0, 100.0, 100.0]
+        for i in range(60)
+    ]
+
+    result = run_backtest(candles, close_open_at_end=True)
+
+    assert result["trade_count"] == 1
+    assert result["trades"][0]["exit_reason"] == "PERIOD_END"
+    assert result["trades"][0]["exit_index"] == 59
+    assert result["open_positions"] == []
+    assert result["unrealized_pnl"] == pytest.approx(0.0)
+    assert result["assumptions"]["open_at_end"] == "forced close at final candle close"
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5])
+def test_backtest_rejects_invalid_maximum_holding_horizon(value):
+    with pytest.raises(ValueError, match="max_holding_bars"):
+        run_backtest(rising_candles(60), max_holding_bars=value)

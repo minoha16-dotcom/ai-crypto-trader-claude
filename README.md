@@ -76,7 +76,7 @@ Plain Skills do not require Python packages. In a normal chat, pasting a Skill d
 
 These components have separate responsibilities; they are not interchangeable:
 
-- **Backend (FastAPI):** authoritative implementation for public market data, indicator calculations, central risk checks, paper-trade state, journal, and the currently implemented single-window backtest.
+- **Backend (FastAPI):** authoritative implementation for public market data, indicator calculations, central risk checks, paper-trade state, journal, and the implemented single-window backtest plus rolling/expanding walk-forward evaluation.
 - **Claude Skills/plugin:** reusable natural-language analysis instructions and workflow guidance. Skills do not independently fetch exchange data, change server settings, or write to the paper journal.
 - **MCP bridge:** exposes selected backend endpoints as tools to an MCP-compatible client. The private ChatGPT integration uses the MCP bridge to call the same backend. MCP is a tool adapter, not a Skill runtime or a second strategy engine.
 
@@ -168,9 +168,42 @@ GET /api/backtest?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&
 GET /api/backtest?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1000&volume_ratio_threshold=1.2
 ~~~
 
-Omitting the override uses SIGNAL_MIN_VOLUME_RATIO. The same optional parameter is available on the MCP run_backtest tool.
+Omitting the override uses SIGNAL_MIN_VOLUME_RATIO. The same optional parameter is available on the MCP run_backtest tool. The MCP run_walk_forward tool exposes the chronological evaluation endpoint and its fold/window controls.
 
-A full Walk-Forward orchestrator is not implemented yet. The methodology, chronological fold rules, boundary purging, volume-ratio experiment, correlated-indicator analysis, and acceptance criteria are documented in [docs/strategy-validation.md](docs/strategy-validation.md). Do not label a strategy or threshold as validated until the untouched out-of-sample folds have been run and reviewed.
+## Walk-Forward evaluation
+
+The backend exposes `GET /api/walk-forward`, and the private MCP bridge
+exposes `run_walk_forward`. The runner evaluates the current fixed strategy in
+rolling or expanding chronological folds and reports per-period and aggregate
+metrics. It supplies warm-up-only indicator history and enforces bounded
+trade-horizon controls:
+
+- `max_holding_bars=20`: a trade exits at the close of the bar that reaches
+  the configured maximum, unless its stop or target exits first.
+- `purge_bars` must be at least the maximum holding horizon (default 20).
+- `embargo_bars` defaults to `max(warmup_bars, max_holding_bars)` (50 bars
+  with the default warm-up) and rejects a smaller explicit value.
+- Any position still open at a segment boundary is closed at the final candle
+  close with modeled fees and slippage; no open mark-to-market P&L carries
+  across periods. Breakeven trades are reported separately from losses.
+
+Example request:
+
+~~~text
+GET /api/walk-forward?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1500&train_bars=250&validation_bars=100&test_bars=100&step_bars=100&warmup_bars=50&purge_bars=20&embargo_bars=50&max_holding_bars=20&window_mode=rolling&max_folds=10
+~~~
+
+The holding limit and forced boundary exit are walk-forward evaluation
+assumptions; the ordinary `/api/backtest` default is unchanged. These controls
+bound the configured feature lookback and trade horizon, but do not constitute
+a formal proof against every possible source of data leakage. The runner uses
+fixed backend Settings; it does not optimize parameters or select a threshold
+using validation data. Each period starts with an independent balance, so
+fold P&L is not a continuous portfolio simulation. Strategy validation still
+requires reviewing pre-registered folds, sensitivity checks, and
+correlated-indicator ablations. See
+[docs/strategy-validation.md](docs/strategy-validation.md) for methodology,
+API parameters, limitations, and acceptance criteria.
 
 ## MCP: optional private ChatGPT integration
 
@@ -263,6 +296,7 @@ The Render Free web service spins down after 15 consecutive minutes without inbo
 │   ├── config.py
 │   ├── indicators.py
 │   ├── backtest.py
+│   ├── walk_forward.py
 │   └── version.py
 ├── docs/
 │   └── strategy-validation.md

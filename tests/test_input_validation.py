@@ -250,3 +250,87 @@ def test_paper_open_defaults_to_kucoin():
         stop=59000,
     )
     assert trade.exchange == "kucoin"
+
+
+def test_walk_forward_endpoint_uses_closed_candles_and_exchange_contract(monkeypatch):
+    observed = {}
+
+    async def fake_resolve_symbol(exchange, symbol, market_type):
+        return "BTC/USDT"
+
+    async def fake_market_spec(exchange, symbol, market_type):
+        return {
+            "symbol": symbol,
+            "market_type": market_type,
+            "contract_type": "spot",
+            "contract_size": 1.0,
+            "amount_precision": 3,
+            "precision_mode": 2,
+        }
+
+    async def fake_ohlcv(exchange, symbol, timeframe, limit, market_type):
+        rows = [
+            [i * 3_600_000, 100, 101, 99, 100, 1000]
+            for i in range(limit)
+        ]
+        return rows, {
+            "requested": limit, "received": limit, "shortfall": 0,
+            "request_count": 1, "request_limit": 53,
+            "gaps": [], "continuity": "continuous",
+        }
+
+    def fake_walk_forward(rows, **kwargs):
+        observed["candle_count"] = len(rows)
+        observed["last_timestamp"] = rows[-1][0]
+        observed.update(kwargs)
+        return {"fold_count": 1, "engine": "test"}
+
+    monkeypatch.setattr(main.registry, "resolve_symbol", fake_resolve_symbol)
+    monkeypatch.setattr(main.registry, "market_spec", fake_market_spec)
+    monkeypatch.setattr(main.registry, "ohlcv_with_metadata", fake_ohlcv)
+    monkeypatch.setattr(main, "run_walk_forward_backtest", fake_walk_forward)
+    monkeypatch.setattr(settings, "paper_starting_balance", 4321.0)
+
+    result = asyncio.run(main.walk_forward(
+        exchange="okx",
+        symbol="BTC/USDT",
+        market_type="spot",
+        timeframe="1h",
+        limit=60,
+        volume_ratio_threshold=1.2,
+    ))
+
+    assert result["fold_count"] == 1
+    assert result["symbol"] == "BTC/USDT"
+    assert observed["candle_count"] == 59
+    assert observed["last_timestamp"] == 58 * 3_600_000
+    assert observed["expected_candle_ms"] == 3_600_000
+    assert observed["starting_balance"] == pytest.approx(4321.0)
+    assert observed["volume_ratio_threshold"] == 1.2
+    assert observed["max_holding_bars"] == 20
+    assert observed["purge_bars"] == 20
+    assert observed["embargo_bars"] is None
+
+
+def test_walk_forward_endpoint_rejects_incomplete_exchange_history(monkeypatch):
+    async def fake_resolve_symbol(exchange, symbol, market_type):
+        return symbol
+
+    async def fake_market_spec(exchange, symbol, market_type):
+        return {"symbol": symbol, "market_type": market_type}
+
+    async def fake_ohlcv(exchange, symbol, timeframe, limit, market_type):
+        return [[i * 3_600_000, 100, 101, 99, 100, 1000] for i in range(60)], {
+            "requested": limit, "received": 60, "shortfall": limit - 60,
+            "request_count": 1, "request_limit": 53,
+            "gaps": [], "continuity": "continuous",
+        }
+
+    monkeypatch.setattr(main.registry, "resolve_symbol", fake_resolve_symbol)
+    monkeypatch.setattr(main.registry, "market_spec", fake_market_spec)
+    monkeypatch.setattr(main.registry, "ohlcv_with_metadata", fake_ohlcv)
+
+    response = asyncio.run(main.walk_forward(limit=100))
+    assert response.status_code == 422
+    payload = json.loads(response.body)
+    assert "fewer candles than requested" in payload["detail"]
