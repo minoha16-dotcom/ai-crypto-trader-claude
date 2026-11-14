@@ -11,8 +11,14 @@ intended for one user's private development setup.
 - `close_paper_trade` closes a simulated position at the exit price supplied by the user.
 - `get_ai_recommendations` ranks scanner setups against local closed paper-trade outcomes. It returns suggestions only and never opens a trade.
 - Spot SHORT is rejected by the backend.
-- Futures simulation remains simplified; it does not fully model contract sizing,
-  margin, funding, slippage or liquidation.
+- Futures paper positions use an isolated-margin approximation with a bounded
+  leverage setting, assumed funding rate/interval, fixed maintenance-margin
+  ratio, and an estimated liquidation trigger. It does not reproduce exchange
+  maintenance tiers, mark-price feeds, bankruptcy prices, inverse collateral
+  accounting, or venue liquidation rules.
+- Advisor scores are historical ranking scores from user-selected, closed,
+  signal-linked paper trades, not calibrated profit probabilities; unselected
+  signals are not represented and selection bias is possible.
 - Do not expose the unauthenticated FastAPI backend or MCP listener directly to
   the public internet. Keep both bound to loopback and use an approved private
   MCP tunnel for ChatGPT connectivity.
