@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     app_name: str = "AI Crypto Trader V2"
     database_url: str = "sqlite:///./data/trader.db"
     default_exchange: str = "kucoin"
+    # Official global Bybit REST hostname; api.bytick.com is an alternate official host.
+    bybit_api_hostname: str = "bybit.com"
     default_market_type: str = "spot"
     # Dashboard login is loaded from process environment or the local .env file.
     dashboard_username: str = Field(default="", repr=False)
@@ -56,6 +58,14 @@ class Settings(BaseSettings):
     )
     scan_symbols: str = "BTC/USDT,ETH/USDT,SOL/USDT"
     scan_timeframe: str = "1h"
+
+    @field_validator("bybit_api_hostname")
+    @classmethod
+    def validate_bybit_api_hostname(cls, value):
+        normalized = str(value).strip().lower()
+        if normalized not in ("bybit.com", "bytick.com"):
+            raise ValueError("bybit_api_hostname must be bybit.com or bytick.com")
+        return normalized
 
     @field_validator("default_exchange")
     @classmethod
