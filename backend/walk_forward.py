@@ -1,10 +1,12 @@
 """Chronological walk-forward evaluation for the existing paper backtest engine.
 
 Each period is simulated independently with a fresh starting balance. Indicator
-warm-up candles are supplied as read-only history and are never scored. Purge
-and embargo intervals are excluded between train, validation, and test periods.
-The strategy/configuration is frozen for this first implementation: this runner
-measures generalization but does not optimize parameters or claim profitability.
+warm-up candles are supplied as read-only history and are never scored. A
+configured maximum holding horizon bounds trade outcomes; remaining positions
+are force-closed at the period's final candle close. Purge and embargo intervals
+are enforced against the holding and feature-lookback horizons. The strategy
+configuration is frozen: this runner does not optimize parameters or claim
+profitability.
 """
 import math
 
@@ -63,6 +65,7 @@ def _period_summary(result, starting_balance, candle_count):
     trades = result.get("trades", [])
     winners = [trade for trade in trades if float(trade.get("pnl", 0)) > 0]
     losers = [trade for trade in trades if float(trade.get("pnl", 0)) < 0]
+    breakevens = [trade for trade in trades if float(trade.get("pnl", 0)) == 0]
     gross_profit = sum(float(trade["pnl"]) for trade in winners)
     gross_loss = abs(sum(float(trade["pnl"]) for trade in losers))
     net_pnl = float(result.get("net_pnl", 0.0))
@@ -71,15 +74,17 @@ def _period_summary(result, starting_balance, candle_count):
         "closed_trades": len(trades),
         "winning_trades": len(winners),
         "losing_trades": len(losers),
+        "breakeven_trades": len(breakevens),
+        "period_end_closures": sum(
+            1 for trade in trades if trade.get("exit_reason") == "PERIOD_END"
+        ),
         "open_positions_at_end": len(result.get("open_positions", [])),
         "skipped_signals": len(result.get("skipped_signals", [])),
         "starting_balance": float(starting_balance),
         "ending_balance": float(result.get("ending_balance", starting_balance)),
         "ending_equity": float(result.get("ending_equity", starting_balance)),
-        "net_pnl_including_open_mark": net_pnl,
-        "net_return_pct_including_open_mark": (
-            net_pnl / float(starting_balance) * 100.0
-        ),
+        "net_pnl": net_pnl,
+        "net_return_pct": net_pnl / float(starting_balance) * 100.0,
         "realized_pnl": float(result.get("realized_pnl", 0.0)),
         "unrealized_pnl": float(result.get("unrealized_pnl", 0.0)),
         "win_rate_pct": float(result.get("win_rate_pct", 0.0)),
@@ -107,7 +112,7 @@ def _range(candles, start, end):
 
 def _evaluate_period(
     candles, start, end, warmup_bars, starting_balance,
-    instrument, volume_ratio_threshold,
+    instrument, volume_ratio_threshold, max_holding_bars,
 ):
     history_start = start - warmup_bars
     period_candles = candles[history_start:end]
@@ -119,6 +124,8 @@ def _evaluate_period(
         instrument=instrument,
         volume_ratio_threshold=volume_ratio_threshold,
         start_index=warmup_bars,
+        max_holding_bars=max_holding_bars,
+        close_open_at_end=True,
     )
     return _period_summary(result, starting_balance, end - start)
 
@@ -131,8 +138,9 @@ def run_walk_forward_backtest(
     test_bars=100,
     step_bars=100,
     warmup_bars=50,
-    purge_bars=1,
-    embargo_bars=1,
+    purge_bars=20,
+    embargo_bars=None,
+    max_holding_bars=20,
     window_mode="rolling",
     max_folds=10,
     starting_balance=10000.0,
@@ -143,10 +151,13 @@ def run_walk_forward_backtest(
 ):
     """Evaluate a fixed strategy in non-overlapping chronological test folds.
 
-    train_bars and validation_bars are nominal window sizes. purge_bars are
-    removed from the end of each of those windows; embargo_bars are then skipped
-    before the next window. Every period is replayed with warm-up-only history
-    immediately before its scored range. Test windows never overlap.
+    train_bars and validation_bars are nominal window sizes. The engine enforces
+    purge_bars >= max_holding_bars and embargo_bars >= max(warmup_bars,
+    max_holding_bars). Every period is replayed with warm-up-only history
+    immediately before its scored range. Positions are time-exited at the
+    configured holding limit and force-closed at the period end, so no trade or
+    unrealized mark-to-market P&L carries across a split. Test windows never
+    overlap.
     """
     train_bars = _integer("train_bars", train_bars, 3)
     validation_bars = _integer("validation_bars", validation_bars, 3)
@@ -154,10 +165,23 @@ def run_walk_forward_backtest(
     step_bars = _integer("step_bars", step_bars, 1)
     warmup_bars = _integer("warmup_bars", warmup_bars, 50)
     purge_bars = _integer("purge_bars", purge_bars, 0)
-    embargo_bars = _integer("embargo_bars", embargo_bars, 0)
+    max_holding_bars = _integer("max_holding_bars", max_holding_bars, 1)
+    if embargo_bars is None:
+        embargo_bars = max(warmup_bars, max_holding_bars)
+    else:
+        embargo_bars = _integer("embargo_bars", embargo_bars, 0)
     max_folds = _integer("max_folds", max_folds, 1)
     max_missing_bars = _integer("max_missing_bars", max_missing_bars, 0)
 
+    if purge_bars < max_holding_bars:
+        raise ValueError(
+            "purge_bars must be at least max_holding_bars to bound trade-label overlap"
+        )
+    required_embargo = max(warmup_bars, max_holding_bars)
+    if embargo_bars < required_embargo:
+        raise ValueError(
+            "embargo_bars must be at least max(warmup_bars, max_holding_bars)"
+        )
     if train_bars <= purge_bars + 1:
         raise ValueError("train_bars must leave at least two scored candles after purging")
     if validation_bars <= purge_bars + 1:
@@ -205,15 +229,15 @@ def run_walk_forward_backtest(
 
         train_result = _evaluate_period(
             candles, train_start, train_end, warmup_bars, starting_balance,
-            instrument, volume_ratio_threshold,
+            instrument, volume_ratio_threshold, max_holding_bars,
         )
         validation_result = _evaluate_period(
             candles, validation_start, validation_end, warmup_bars, starting_balance,
-            instrument, volume_ratio_threshold,
+            instrument, volume_ratio_threshold, max_holding_bars,
         )
         test_result = _evaluate_period(
             candles, test_start, test_end, warmup_bars, starting_balance,
-            instrument, volume_ratio_threshold,
+            instrument, volume_ratio_threshold, max_holding_bars,
         )
 
         folds.append({
@@ -256,13 +280,15 @@ def run_walk_forward_backtest(
     test_periods = [fold["test"] for fold in folds]
     total_trades = sum(period["closed_trades"] for period in test_periods)
     total_wins = sum(period["winning_trades"] for period in test_periods)
+    total_losses = sum(period["losing_trades"] for period in test_periods)
+    total_breakevens = sum(period["breakeven_trades"] for period in test_periods)
     gross_profit = sum(period["gross_profit"] for period in test_periods)
     gross_loss = sum(period["gross_loss"] for period in test_periods)
     total_r = sum(
         period["expectancy_r"] * period["closed_trades"]
         for period in test_periods
     )
-    returns = [period["net_return_pct_including_open_mark"] for period in test_periods]
+    returns = [period["net_return_pct"] for period in test_periods]
 
     return {
         "engine": "fixed-strategy chronological walk-forward v1",
@@ -284,6 +310,11 @@ def run_walk_forward_backtest(
             "warmup_bars": warmup_bars,
             "purge_bars": purge_bars,
             "embargo_bars": embargo_bars,
+            "max_holding_bars": max_holding_bars,
+            "boundary_gaps": {
+                "purge_minimum": "max_holding_bars",
+                "embargo_minimum": "max(warmup_bars, max_holding_bars)",
+            },
             "test_windows_overlap": False,
             "period_balances_reset_independently": True,
             "strategy_parameters": "fixed from backend Settings; no automatic tuning",
@@ -292,23 +323,25 @@ def run_walk_forward_backtest(
                 "selection is performed by this runner"
             ),
             "open_positions": (
-                "positions still open at a period end are marked to market and "
-                "reported separately; they are not treated as closed trades"
+                "all remaining positions are force-closed at the final candle "
+                "close of each period with normal exit fees and slippage; no "
+                "unrealized P&L carries into another period"
             ),
         },
         "folds": folds,
         "aggregate_test": {
             "total_closed_trades": total_trades,
             "winning_trades": total_wins,
-            "losing_trades": total_trades - total_wins,
+            "losing_trades": total_losses,
+            "breakeven_trades": total_breakevens,
             "trade_weighted_win_rate_pct": (
                 total_wins / total_trades * 100.0 if total_trades else 0.0
             ),
-            "mean_fold_net_return_pct_including_open_mark": (
+            "mean_fold_net_return_pct": (
                 sum(returns) / len(returns) if returns else 0.0
             ),
             "sum_of_independent_fold_net_pnl": sum(
-                period["net_pnl_including_open_mark"] for period in test_periods
+                period["net_pnl"] for period in test_periods
             ),
             "expectancy_r": total_r / total_trades if total_trades else 0.0,
             "profit_factor": gross_profit / gross_loss if gross_loss > 0 else None,
@@ -322,6 +355,8 @@ def run_walk_forward_backtest(
         "limitations": [
             "This runner evaluates the current fixed strategy; it does not optimize or select parameters.",
             "Each period starts with an independent balance; fold P&L is not a continuous portfolio equity curve.",
+            "The walk-forward runner applies a configured maximum holding period and force-closes remaining positions at each period end; this differs from the unbounded single-window backtest.",
+            "Purge and embargo constraints bound the configured feature lookback and trade horizon but are safeguards, not a formal proof against every possible source of leakage.",
             "The OHLCV engine does not model funding, margin, liquidation, order-book depth, or real fills.",
             "A strategy is not validated until pre-registered folds, sensitivity checks, and out-of-sample results are independently reviewed.",
         ],
