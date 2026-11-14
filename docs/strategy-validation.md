@@ -1,8 +1,49 @@
 # Strategy validation design
 
-Status: research design and acceptance criteria. The current API provides a
-single chronological OHLCV backtest; a complete walk-forward orchestrator and
-historical experiment report are not yet implemented.
+Status: the v1 chronological walk-forward runner is implemented in the backend API and private MCP bridge. Historical experiment reports still require explicit data runs and review.
+
+
+## 0. Implemented Walk-Forward Runner (v1)
+
+The backend now exposes `GET /api/walk-forward`; the private MCP bridge
+exposes the same operation as `run_walk_forward`. It supports rolling and
+expanding windows, explicit train/validation/test sizes, a configurable step,
+indicator warm-up, purge and embargo bars, Volume Ratio override, and a cap of
+50 folds.
+
+The runner:
+- requires strictly increasing, unique candle timestamps and can enforce
+  timeframe alignment plus a configured maximum number of missing bars;
+- evaluates only closed candles supplied by the API (the final exchange candle
+  is excluded);
+- supplies the immediately preceding warm-up candles to the indicator engine
+  but starts scoring at the first candle of the named period;
+- removes the configured purge bars from the end of the training and
+  validation periods, then skips the configured embargo bars before the next
+  period;
+- runs each train, validation, and test period independently with a fresh
+  starting balance; and
+- prevents overlapping test windows by requiring `step_bars >= test_bars`.
+
+Important limitation: this v1 runner uses the current strategy and risk settings
+as fixed, pre-registered rules. It reports train and validation diagnostics and
+untouched forward-test metrics, but it does not fit a model, search parameters,
+or select a threshold from validation. The same selected configuration is used
+in all three periods. Automated parameter selection and candidate comparison
+must be implemented as a separate, carefully tested stage before describing
+this as an optimized strategy.
+
+The result contains the index and timestamp boundaries for every period,
+per-period metrics, aggregate test metrics, and explicit limitations. Open
+positions at a period boundary are marked to market and remain separate from
+closed trades. Period balances reset independently, so the sum of fold P&L is
+not a continuous portfolio equity curve.
+
+Example:
+
+```text
+GET /api/walk-forward?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1500&train_bars=250&validation_bars=100&test_bars=100&step_bars=100&warmup_bars=50&purge_bars=1&embargo_bars=1&window_mode=rolling&max_folds=10
+```
 
 ## 1. Objective and non-goals
 
