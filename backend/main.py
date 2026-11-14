@@ -19,7 +19,7 @@ from .paper import open_trade, close_trade, journal, account
 from .risk import risk_manager
 from .backtest import run_backtest
 from .walk_forward import run_walk_forward_backtest
-from .position_monitor import run_position_monitor
+from .position_monitor import run_position_monitor, POLL_INTERVAL_SECONDS
 from .metrics import position_pnl, position_risk
 from .advisor import analyze_closed_trade_history
 from .version import APP_VERSION
@@ -671,6 +671,8 @@ async def get_positions():
             "Periodic best-effort checks of public last-traded prices; not real-time, "
             "not guaranteed, and no exchange stop/target orders are placed."
         ),
+        "monitor_interval_seconds": POLL_INTERVAL_SECONDS,
+        "maximum_accepted_ticker_age_seconds": settings.position_monitor_max_price_age_seconds,
         "exit_price_model": "observed last-traded price at the monitor poll; gaps can cross the configured level",
     }
 
