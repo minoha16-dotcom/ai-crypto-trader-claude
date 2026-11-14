@@ -121,3 +121,58 @@ def test_mcp_scan_rejects_unsupported_backend_default(monkeypatch):
     monkeypatch.setattr(server, "_api", fake_api)
     with pytest.raises(ValueError, match="supported default exchange"):
         asyncio.run(server.scan_opportunities())
+
+
+def test_mcp_walk_forward_tool_forwards_parameters_and_volume_threshold(monkeypatch):
+    captured = {}
+
+    async def fake_api(method, path, *, params=None, payload=None):
+        captured.update(method=method, path=path, params=params)
+        return {"fold_count": 2, "engine": "fixed-strategy chronological walk-forward v1"}
+
+    monkeypatch.setattr(server, "_api", fake_api)
+    result = asyncio.run(server.run_walk_forward(
+        exchange="okx",
+        symbol="btc/usdt",
+        market_type="futures",
+        timeframe="4h",
+        limit=1200,
+        train_bars=400,
+        validation_bars=150,
+        test_bars=100,
+        step_bars=100,
+        warmup_bars=50,
+        purge_bars=5,
+        embargo_bars=3,
+        window_mode="expanding",
+        max_folds=4,
+        volume_ratio_threshold=0.8,
+        max_missing_bars=1,
+    ))
+
+    assert result["fold_count"] == 2
+    assert captured["method"] == "GET"
+    assert captured["path"] == "/api/walk-forward"
+    assert captured["params"]["exchange"] == "okx"
+    assert captured["params"]["symbol"] == "BTC/USDT"
+    assert captured["params"]["window_mode"] == "expanding"
+    assert captured["params"]["volume_ratio_threshold"] == 0.8
+    assert captured["params"]["max_missing_bars"] == 1
+
+
+def test_mcp_walk_forward_tool_uses_backend_default_when_exchange_is_omitted(monkeypatch):
+    calls = []
+
+    async def fake_api(method, path, *, params=None, payload=None):
+        calls.append((method, path, params))
+        if path == "/api/exchanges":
+            return {"exchanges": ["kucoin", "bybit", "okx"], "default_exchange": "bybit"}
+        return {"fold_count": 1}
+
+    monkeypatch.setattr(server, "_api", fake_api)
+    result = asyncio.run(server.run_walk_forward(symbol="BTC/USDT", limit=600))
+
+    assert result["fold_count"] == 1
+    assert calls[0] == ("GET", "/api/exchanges", None)
+    assert calls[1][0:2] == ("GET", "/api/walk-forward")
+    assert calls[1][2]["exchange"] == "bybit"
