@@ -20,7 +20,8 @@ from .risk import risk_manager
 from .backtest import run_backtest
 from .walk_forward import run_walk_forward_backtest
 from .position_monitor import run_position_monitor, POLL_INTERVAL_SECONDS
-from .metrics import position_pnl, position_risk
+from .metrics import position_pnl, position_risk, trading_cost_rate
+from .futures import liquidation_price, margin_snapshot
 from .advisor import analyze_closed_trade_history
 from .version import APP_VERSION
 
@@ -161,6 +162,11 @@ class PaperOpen(BaseModel):
     entry: float = Field(gt=0, allow_inf_nan=False)
     stop: float = Field(gt=0, allow_inf_nan=False)
     target: float | None = Field(default=None, gt=0, allow_inf_nan=False)
+    leverage: float = Field(default=1.0, ge=1, le=settings.max_futures_leverage, allow_inf_nan=False)
+    funding_rate: float | None = Field(default=None, ge=-0.02, le=0.02, allow_inf_nan=False)
+    funding_interval_hours: float | None = Field(default=None, gt=0, le=24, allow_inf_nan=False)
+    maintenance_margin_rate: float | None = Field(default=None, gt=0, lt=0.2, allow_inf_nan=False)
+    liquidation_fee_rate: float | None = Field(default=None, ge=0, lt=0.05, allow_inf_nan=False)
     signal_id: int | None = None
 
     @model_validator(mode="after")
@@ -173,6 +179,10 @@ class PaperOpen(BaseModel):
             raise ValueError("side must be LONG or SHORT")
         if self.market_type == "spot" and self.side == "SHORT":
             raise ValueError("SHORT paper positions are not supported for spot markets")
+        if self.market_type == "spot" and self.leverage != 1.0:
+            raise ValueError("Spot paper positions do not support leverage")
+        if self.market_type == "futures" and self.leverage > settings.max_futures_leverage:
+            raise ValueError("Requested leverage exceeds MAX_FUTURES_LEVERAGE")
         if self.side == "LONG" and self.stop >= self.entry:
             raise ValueError("LONG stop must be below entry")
         if self.side == "SHORT" and self.stop <= self.entry:
@@ -610,8 +620,32 @@ async def get_positions():
             if last is None or not math.isfinite(float(last)) or float(last) <= 0:
                 raise ValueError("Exchange did not return a valid last price")
             last = float(last)
-            pnl_metrics = position_pnl(row["entry"], row["quantity"], row["side"], last, row.get("contract_size", 1.0), row.get("contract_type", "spot"))
+            funding_paid = float(row.get("funding_paid") or 0)
+            pnl_metrics = position_pnl(
+                row["entry"], row["quantity"], row["side"], last,
+                row.get("contract_size", 1.0), row.get("contract_type", "spot"),
+                funding_paid=funding_paid,
+            )
             unrealized = pnl_metrics["unrealized_pnl"]
+            margin_metrics = {}
+            if row["market_type"] == "futures" and row.get("contract_type") in ("linear", "inverse"):
+                current_liquidation = liquidation_price(
+                    row["entry"], row["quantity"], row["contract_size"],
+                    row["contract_type"], row["side"], row.get("leverage", 1.0),
+                    row.get("maintenance_margin_rate", settings.paper_futures_maintenance_margin_rate),
+                    trading_cost_rate(),
+                    row.get("liquidation_fee_rate", settings.paper_futures_liquidation_fee_rate),
+                    funding_paid,
+                )
+                margin_metrics = margin_snapshot(
+                    row["entry"], last, row["quantity"], row["contract_size"],
+                    row["contract_type"], row["side"], row.get("leverage", 1.0),
+                    row.get("maintenance_margin_rate", settings.paper_futures_maintenance_margin_rate),
+                    row.get("initial_margin", 0.0), unrealized,
+                    current_liquidation, funding_paid,
+                )
+                margin_metrics["liquidation_price"] = current_liquidation
+                margin_metrics["funding_events"] = int(row.get("funding_events") or 0)
             stop_gap = abs(last - float(row["stop"]))
             stop_span = abs(float(row["entry"]) - float(row["stop"]))
             target = row.get("target")
@@ -621,7 +655,10 @@ async def get_positions():
             target_proximity = max(0.0, 1.0 - target_gap / target_span) if target_gap is not None and target_span else None
             alert = None
             exit_reason = None
-            if (row["side"] == "LONG" and last <= float(row["stop"])) or (row["side"] == "SHORT" and last >= float(row["stop"])):
+            if margin_metrics.get("is_liquidated"):
+                alert = "LIQUIDATION_REACHED"
+                exit_reason = "LIQUIDATION"
+            elif (row["side"] == "LONG" and last <= float(row["stop"])) or (row["side"] == "SHORT" and last >= float(row["stop"])):
                 alert = "STOP_REACHED"
                 exit_reason = "STOP"
             elif target is not None and ((row["side"] == "LONG" and last >= float(target)) or (row["side"] == "SHORT" and last <= float(target))):
@@ -636,6 +673,7 @@ async def get_positions():
             # processes the same observed market price.
             return {
                 **row,
+                **margin_metrics,
                 "status": row["status"],
                 "exit_reason": exit_reason,
                 "exit_result": None,
@@ -707,6 +745,9 @@ async def risk():
         "remaining_daily_loss": remaining_daily_loss,
         "prices_complete": prices_complete,
         "status": "BLOCKED" if not prices_complete or remaining_daily_loss <= 0 or len(positions) >= settings.max_open_trades else "ACTIVE",
+        "futures_margin_used": sum(float(p.get("initial_margin") or 0) for p in positions),
+        "max_futures_margin_pct": settings.max_futures_margin_pct,
+        "max_futures_leverage": settings.max_futures_leverage,
         "reward_risk_ratio": settings.reward_risk_ratio,
     }
 
