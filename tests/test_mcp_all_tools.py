@@ -30,6 +30,10 @@ def test_all_mcp_tools_route_to_paper_backend_endpoints(monkeypatch):
         await server.open_paper_trade(
             "kucoin", "btc/usdt", "spot", "LONG", 100.0, 95.0, 110.0
         )
+        await server.open_paper_trade(
+            "bybit", "btc/usdt", "futures", "SHORT", 100.0, 105.0, 80.0,
+            leverage=3, funding_rate=0.0002, funding_interval_hours=4,
+        )
         await server.close_paper_trade(7, 105.0)
 
     asyncio.run(exercise())
@@ -58,6 +62,13 @@ def test_all_mcp_tools_route_to_paper_backend_endpoints(monkeypatch):
             "market_type": "spot", "side": "LONG",
             "entry": 100.0, "stop": 95.0, "target": 110.0,
             "leverage": 1.0,
+        }),
+        ("POST", "/api/paper/open", None, {
+            "exchange": "bybit", "symbol": "BTC/USDT",
+            "market_type": "futures", "side": "SHORT",
+            "entry": 100.0, "stop": 105.0, "target": 80.0,
+            "leverage": 3, "funding_rate": 0.0002,
+            "funding_interval_hours": 4,
         }),
         ("POST", "/api/paper/7/close", None, {"exit_price": 105.0}),
     ]
