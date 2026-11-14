@@ -231,8 +231,13 @@ async def run_walk_forward(
     max_folds: int = 10,
     volume_ratio_threshold: float | None = None,
     max_missing_bars: int = 0,
+    leverage: float = 1.0,
+    funding_rate: float | None = None,
+    funding_interval_hours: float | None = None,
+    maintenance_margin_rate: float | None = None,
+    liquidation_fee_rate: float | None = None,
 ) -> dict:
-    """Run chronological paper-only walk-forward evaluation; never submits orders."""
+    """Run chronological paper-only evaluation with isolated Futures assumptions."""
     symbol = symbol.strip().upper()
     if not symbol or len(symbol) > 30 or "/" not in symbol:
         raise ValueError("Use a CCXT symbol such as BTC/USDT.")
@@ -280,7 +285,16 @@ async def run_walk_forward(
         "window_mode": window_mode,
         "max_folds": max_folds,
         "max_missing_bars": max_missing_bars,
+        "leverage": leverage,
     }
+    if funding_rate is not None:
+        params["funding_rate"] = funding_rate
+    if funding_interval_hours is not None:
+        params["funding_interval_hours"] = funding_interval_hours
+    if maintenance_margin_rate is not None:
+        params["maintenance_margin_rate"] = maintenance_margin_rate
+    if liquidation_fee_rate is not None:
+        params["liquidation_fee_rate"] = liquidation_fee_rate
     if embargo_bars is not None:
         params["embargo_bars"] = embargo_bars
     if volume_ratio_threshold is not None:
