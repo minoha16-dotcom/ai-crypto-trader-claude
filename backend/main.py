@@ -335,7 +335,16 @@ async def market_candles(
 
 
 @app.get("/api/backtest")
-async def backtest(exchange=settings.default_exchange, symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000, volume_ratio_threshold: float | None = None):
+async def backtest(
+    exchange=settings.default_exchange, symbol="BTC/USDT", market_type="spot",
+    timeframe="1h", limit: int = 1000,
+    volume_ratio_threshold: float | None = None,
+    leverage: float = 1.0,
+    funding_rate: float | None = None,
+    funding_interval_hours: float | None = None,
+    maintenance_margin_rate: float | None = None,
+    liquidation_fee_rate: float | None = None,
+):
     if exchange not in EXCHANGE_IDS:
         raise HTTPException(400, "Unsupported exchange")
     if market_type not in ("spot", "futures"):
@@ -382,7 +391,12 @@ async def backtest(exchange=settings.default_exchange, symbol="BTC/USDT", market
             "candle_shortfall": candle_meta["shortfall"],
             **await run_in_threadpool(
                 run_backtest, closed_candles, settings.paper_starting_balance, instrument,
-                volume_ratio_threshold
+                volume_ratio_threshold,
+                leverage=leverage,
+                funding_rate=funding_rate,
+                funding_interval_hours=funding_interval_hours,
+                maintenance_margin_rate=maintenance_margin_rate,
+                liquidation_fee_rate=liquidation_fee_rate,
             ),
         }
     except ExchangeRateLimitCooldown:
@@ -421,6 +435,11 @@ async def walk_forward(
     max_folds: int = 10,
     volume_ratio_threshold: float | None = None,
     max_missing_bars: int = 0,
+    leverage: float = 1.0,
+    funding_rate: float | None = None,
+    funding_interval_hours: float | None = None,
+    maintenance_margin_rate: float | None = None,
+    liquidation_fee_rate: float | None = None,
 ):
     """Run a chronological, paper-only walk-forward evaluation on public OHLCV."""
     if exchange not in EXCHANGE_IDS:
@@ -466,6 +485,11 @@ async def walk_forward(
             volume_ratio_threshold=volume_ratio_threshold,
             expected_candle_ms=_WALK_FORWARD_TIMEFRAME_MS[timeframe],
             max_missing_bars=max_missing_bars,
+            leverage=leverage,
+            funding_rate=funding_rate,
+            funding_interval_hours=funding_interval_hours,
+            maintenance_margin_rate=maintenance_margin_rate,
+            liquidation_fee_rate=liquidation_fee_rate,
         )
         return {
             "exchange": exchange,
