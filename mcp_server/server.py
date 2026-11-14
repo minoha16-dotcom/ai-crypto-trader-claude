@@ -28,6 +28,20 @@ mcp = FastMCP(
 )
 
 
+async def _configured_exchange(exchange: str | None) -> str:
+    """Use an explicit supported exchange or the backend's configured default."""
+    allowed = {"kucoin", "bybit", "okx"}
+    if exchange is not None:
+        if exchange not in allowed:
+            raise ValueError("Unsupported exchange.")
+        return exchange
+    config = await _api("GET", "/api/exchanges")
+    selected = config.get("default_exchange")
+    if selected not in allowed:
+        raise ValueError("Backend did not return a supported default exchange.")
+    return selected
+
+
 async def _api(method: str, path: str, *, params: dict | None = None, payload: dict | None = None):
     """Call the local FastAPI service and return JSON with safe error handling."""
     try:
@@ -87,12 +101,13 @@ async def get_market_data(
 
 @mcp.tool()
 async def scan_opportunities(
-    exchange: Literal["kucoin", "bybit", "okx"] = "kucoin",
+    exchange: Literal["kucoin", "bybit", "okx"] | None = None,
     market_type: Literal["spot", "futures"] = "spot",
     symbols: str = "BTC/USDT,ETH/USDT",
     timeframe: Literal["5m", "15m", "30m", "1h", "2h", "4h", "1d"] = "1h",
 ) -> dict:
-    """Scan up to 20 comma-separated markets using the project's EMA/RSI/ATR rules."""
+    """Scan markets using the explicit exchange or backend DEFAULT_EXCHANGE."""
+    exchange = await _configured_exchange(exchange)
     items = [item.strip().upper() for item in symbols.split(",") if item.strip()]
     if not items or len(items) > 20 or any("/" not in item or len(item) > 30 for item in items):
         raise ValueError("Provide 1–20 CCXT symbols, e.g. BTC/USDT,ETH/USDT.")
@@ -105,12 +120,13 @@ async def scan_opportunities(
 
 @mcp.tool()
 async def get_ai_recommendations(
-    exchange: Literal["kucoin", "bybit", "okx"] = "kucoin",
+    exchange: Literal["kucoin", "bybit", "okx"] | None = None,
     market_type: Literal["spot", "futures"] = "spot",
     symbols: str = "BTC/USDT,ETH/USDT",
     timeframe: Literal["5m", "15m", "30m", "1h", "2h", "4h", "1d"] = "1h",
 ) -> dict:
-    """Rank paper-trade setups using local closed-trade history; never opens trades."""
+    """Rank setups on the explicit exchange or backend DEFAULT_EXCHANGE."""
+    exchange = await _configured_exchange(exchange)
     items = [item.strip().upper() for item in symbols.split(",") if item.strip()]
     if not items or len(items) > 20 or any("/" not in item or len(item) > 30 for item in items):
         raise ValueError("Provide 1–20 CCXT symbols, e.g. BTC/USDT,ETH/USDT.")
