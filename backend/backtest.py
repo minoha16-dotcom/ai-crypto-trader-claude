@@ -252,6 +252,10 @@ def run_backtest(
             max_open_risk_budget / per_contract_risk,
             notional_cap / per_contract_notional,
         )
+        if is_futures:
+            margin_budget = equity * float(settings.max_futures_margin_pct) / 100.0
+            max_quantity_by_margin = margin_budget * leverage / per_contract_notional
+            quantity = min(quantity, max_quantity_by_margin)
         # Cap to the venue's maximum amount before precision rounding, matching
         # the live RiskManager and avoiding a valid capped order being skipped.
         max_amount = spec.get("max_amount")
@@ -300,6 +304,27 @@ def run_backtest(
             })
             i += 1
             continue
+        initial_margin_value = initial_margin(notional, leverage) if is_futures else 0.0
+        if is_futures and initial_margin_value > equity * float(settings.max_futures_margin_pct) / 100.0 * (1 + 1e-12):
+            skipped_signals.append({
+                "index": i, "reason": "Position exceeds configured Futures initial-margin budget"
+            })
+            i += 1
+            continue
+        funding_paid = 0.0
+        funding_events = 0
+        next_funding_at = (
+            float(candles[i + 1][0]) / 1000.0 + funding_interval_hours * 3600.0
+            if is_futures else None
+        )
+        current_liquidation_price = (
+            liquidation_price(
+                entry, quantity, contract_size, contract_type, side, leverage,
+                maintenance_margin_rate, fee_rate + slippage,
+                liquidation_fee_rate, funding_paid,
+            )
+            if is_futures else None
+        )
 
         position = {
             "side": side,
@@ -310,6 +335,15 @@ def run_backtest(
             "contract_size": contract_size,
             "contract_type": contract_type,
             "notional": notional,
+            "leverage": leverage,
+            "initial_margin": initial_margin_value,
+            "maintenance_margin_rate": maintenance_margin_rate if is_futures else None,
+            "liquidation_fee_rate": liquidation_fee_rate if is_futures else None,
+            "liquidation_price": current_liquidation_price,
+            "funding_rate": funding_rate if is_futures else None,
+            "funding_interval_hours": funding_interval_hours if is_futures else None,
+            "funding_paid": funding_paid,
+            "funding_events": funding_events,
             "entry_index": i + 1,
             "entry_timestamp": candles[i + 1][0],
         }
@@ -326,24 +360,63 @@ def run_backtest(
             daily_start_equity.setdefault(bar_day, equity)
             daily_realized_pnl.setdefault(bar_day, 0.0)
 
+            # Funding is settled on the first observed candle at/after each
+            # configured interval. If data jumps over several events, they are
+            # accrued at that candle's open price (a disclosed bar-data approximation).
+            if is_futures and next_funding_at is not None:
+                payment, events, next_funding_at = due_funding(
+                    candle_open, quantity, contract_size, contract_type, side,
+                    funding_rate, next_funding_at, timestamp / 1000.0,
+                    funding_interval_hours,
+                )
+                if events:
+                    funding_paid += payment
+                    funding_events += events
+                    current_liquidation_price = liquidation_price(
+                        entry, quantity, contract_size, contract_type, side,
+                        leverage, maintenance_margin_rate, fee_rate + slippage,
+                        liquidation_fee_rate, funding_paid,
+                    )
+                    position["funding_paid"] = funding_paid
+                    position["funding_events"] = funding_events
+                    position["liquidation_price"] = current_liquidation_price
+
+            # Liquidation is checked before stop/target. OHLC cannot reveal the
+            # intrabar sequence; liquidation takes priority as the conservative case.
+            liquidation_hit = False
+            if is_futures and current_liquidation_price is not None:
+                if side == "LONG" and candle_open <= current_liquidation_price:
+                    exit_reference, exit_reason = candle_open, "LIQUIDATION_GAP"
+                    liquidation_hit = True
+                elif side == "SHORT" and candle_open >= current_liquidation_price:
+                    exit_reference, exit_reason = candle_open, "LIQUIDATION_GAP"
+                    liquidation_hit = True
+                elif (
+                    (side == "LONG" and low <= current_liquidation_price)
+                    or (side == "SHORT" and high >= current_liquidation_price)
+                ):
+                    exit_reference, exit_reason = current_liquidation_price, "LIQUIDATION"
+                    liquidation_hit = True
+
             # First honor gaps at the candle open. Stop-market exits fill at the
             # worse opening price; favorable target gaps fill at the opening price.
-            if side == "LONG" and candle_open <= stop:
-                exit_reference, exit_reason = candle_open, "STOP_GAP"
-            elif side == "SHORT" and candle_open >= stop:
-                exit_reference, exit_reason = candle_open, "STOP_GAP"
-            elif side == "LONG" and candle_open >= target:
-                exit_reference, exit_reason = candle_open, "TARGET_GAP"
-            elif side == "SHORT" and candle_open <= target:
-                exit_reference, exit_reason = candle_open, "TARGET_GAP"
-            else:
-                stop_hit = low <= stop if side == "LONG" else high >= stop
-                target_hit = high >= target if side == "LONG" else low <= target
-                # OHLC cannot reveal intrabar ordering; remain conservative.
-                if stop_hit:
-                    exit_reference, exit_reason = stop, "STOP"
-                elif target_hit:
-                    exit_reference, exit_reason = target, "TARGET"
+            if not liquidation_hit:
+                if side == "LONG" and candle_open <= stop:
+                    exit_reference, exit_reason = candle_open, "STOP_GAP"
+                elif side == "SHORT" and candle_open >= stop:
+                    exit_reference, exit_reason = candle_open, "STOP_GAP"
+                elif side == "LONG" and candle_open >= target:
+                    exit_reference, exit_reason = candle_open, "TARGET_GAP"
+                elif side == "SHORT" and candle_open <= target:
+                    exit_reference, exit_reason = candle_open, "TARGET_GAP"
+                else:
+                    stop_hit = low <= stop if side == "LONG" else high >= stop
+                    target_hit = high >= target if side == "LONG" else low <= target
+                    # OHLC cannot reveal intrabar ordering; remain conservative.
+                    if stop_hit:
+                        exit_reference, exit_reason = stop, "STOP"
+                    elif target_hit:
+                        exit_reference, exit_reason = target, "TARGET"
 
             if exit_reference is None and max_holding_bars is not None:
                 bars_held = j - position["entry_index"] + 1
@@ -369,15 +442,15 @@ def run_backtest(
             )
             favorable_pnl = _costed_pnl(
                 entry, favorable_price, quantity, side,
-                contract_size, contract_type, fee_rate
+                contract_size, contract_type, fee_rate, funding_paid
             )[0]
             adverse_pnl = _costed_pnl(
                 entry, adverse_price, quantity, side,
-                contract_size, contract_type, fee_rate
+                contract_size, contract_type, fee_rate, funding_paid
             )[0]
             close_pnl = _costed_pnl(
                 entry, close_price, quantity, side,
-                contract_size, contract_type, fee_rate
+                contract_size, contract_type, fee_rate, funding_paid
             )[0]
             peak_equity = max(peak_equity, equity + favorable_pnl)
             max_drawdown = max(
@@ -401,8 +474,17 @@ def run_backtest(
                 1 - slippage if side == "LONG" else 1 + slippage
             )
             unrealized, gross_unrealized, unrealized_costs = _costed_pnl(
-                entry, mark, quantity, side, contract_size, contract_type, fee_rate
+                entry, mark, quantity, side, contract_size, contract_type, fee_rate,
+                funding_paid,
             )
+            margin_metrics = {}
+            if is_futures:
+                margin_metrics = margin_snapshot(
+                    entry, final_close, quantity, contract_size, contract_type,
+                    side, leverage, maintenance_margin_rate, initial_margin_value,
+                    unrealized, current_liquidation_price, funding_paid,
+                )
+                margin_metrics["funding_events"] = funding_events
             open_position = {
                 **position,
                 "status": "OPEN",
@@ -413,6 +495,10 @@ def run_backtest(
                 "unrealized_pnl_pct": (
                     unrealized / notional * 100.0 if notional else 0.0
                 ),
+                "funding_paid": funding_paid,
+                "funding_events": funding_events,
+                "next_funding_at": next_funding_at,
+                **margin_metrics,
             }
             final_equity = equity + unrealized
             max_drawdown = max(max_drawdown, _drawdown(peak_equity, final_equity))
@@ -427,8 +513,14 @@ def run_backtest(
         exit_price = exit_reference * (
             1 - slippage if side == "LONG" else 1 + slippage
         )
+        liquidation_cost = (
+            contract_notional(exit_price, quantity, contract_size, contract_type)
+            * liquidation_fee_rate
+            if is_futures and str(exit_reason).startswith("LIQUIDATION") else 0.0
+        )
         pnl, gross, costs = _costed_pnl(
-            entry, exit_price, quantity, side, contract_size, contract_type, fee_rate
+            entry, exit_price, quantity, side, contract_size, contract_type,
+            fee_rate, funding_paid, liquidation_cost,
         )
         initial_risk = contract_risk_amount(
             entry, stop_fill, quantity, contract_size, contract_type
@@ -451,6 +543,9 @@ def run_backtest(
             "exit_timestamp": candles[exit_index][0],
             "gross_pnl": gross,
             "costs": costs,
+            "funding_paid": funding_paid,
+            "funding_events": funding_events,
+            "liquidation_fee": liquidation_cost,
             "pnl": pnl,
             "r_multiple": r_multiple,
             "status": "CLOSED",
@@ -523,8 +618,22 @@ def run_backtest(
             "max_holding_bars": max_holding_bars,
             "fee_rate_per_side": fee_rate,
             "slippage_bps_per_side": float(settings.slippage_bps),
-            "funding": "not modeled",
-            "margin_and_liquidation": "not modeled",
+            "funding": (
+                "fixed configured rate; settled at first candle at/after each interval, "
+                "missed events use that candle open"
+                if is_futures else "not applicable for Spot"
+            ),
+            "margin_and_liquidation": (
+                "isolated margin, fixed maintenance-margin rate and modeled liquidation "
+                "fee; no exchange tier tables, mark-price feed or bankruptcy-price engine"
+                if is_futures else "not applicable for Spot"
+            ),
+            "futures_leverage": leverage if is_futures else None,
+            "futures_funding_rate_per_interval": funding_rate if is_futures else None,
+            "futures_funding_interval_hours": funding_interval_hours if is_futures else None,
+            "futures_maintenance_margin_rate": maintenance_margin_rate if is_futures else None,
+            "futures_liquidation_fee_rate": liquidation_fee_rate if is_futures else None,
+            "futures_margin_mode": "isolated" if is_futures else None,
             "position_mode": "one position at a time (stricter than the live three-position limit)",
             "risk_per_trade_pct": risk_pct,
             "max_open_risk_pct": max_open_risk_pct,
