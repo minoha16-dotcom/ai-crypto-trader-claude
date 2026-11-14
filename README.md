@@ -140,6 +140,12 @@ The canonical example is .env.example. Values below are defaults; environment va
 | TAKER_FEE_RATE | 0.0006 | Estimated fee per side |
 | SLIPPAGE_BPS | 2.0 | Estimated slippage per side |
 | POSITION_MONITOR_MAX_PRICE_AGE_SECONDS | 120 | Reject timestamped ticker snapshots older than this age when auto-closing paper positions |
+| MAX_FUTURES_LEVERAGE | 5 | Maximum leverage accepted by the Futures paper simulator |
+| MAX_FUTURES_MARGIN_PCT | 50 | Maximum account equity reserved as aggregate Futures initial margin |
+| PAPER_FUTURES_DEFAULT_FUNDING_RATE | 0.0001 | Assumed funding payment rate per settlement; not a live venue feed |
+| PAPER_FUTURES_FUNDING_INTERVAL_HOURS | 8 | Assumed interval between funding settlements |
+| PAPER_FUTURES_MAINTENANCE_MARGIN_RATE | 0.005 | Fixed maintenance-margin ratio used by the simplified liquidation estimate |
+| PAPER_FUTURES_LIQUIDATION_FEE_RATE | 0.005 | Assumed paper liquidation fee rate |
 
 The default open-position limit remains 3 and the default reward/risk ratio remains 2.0; these values are now centralized in Settings and are not hidden constants.
 
@@ -170,6 +176,16 @@ GET /api/backtest?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&
 ~~~
 
 Omitting the override uses SIGNAL_MIN_VOLUME_RATIO. The same optional parameter is available on the MCP run_backtest tool. The MCP run_walk_forward tool exposes the chronological evaluation endpoint and its fold/window controls.
+
+## Isolated Futures paper simulation
+
+Futures paper positions now accept leverage, a funding rate per settlement, and a funding interval. The default is 1x leverage, a 0.01% assumed funding rate every 8 hours, a fixed 0.5% maintenance-margin ratio, and a 0.5% liquidation fee. Leverage is capped by MAX_FUTURES_LEVERAGE (5x by default), and aggregate initial margin is capped by MAX_FUTURES_MARGIN_PCT (50% of account equity by default). Spot remains unleveraged and does not accrue funding.
+
+The model calculates initial margin as notional divided by leverage. Funding is signed: a positive rate is charged to LONG and credited to SHORT; a negative rate reverses that direction. In live paper monitoring, any missed funding settlements are accrued at the currently observed notional because historical marks for each missed settlement are unavailable. In OHLCV backtests, funding is accrued on the first candle at or after each interval using that candle's open. If several intervals were missed, the same candle open is used for each missed event.
+
+Liquidation uses an estimated isolated-margin threshold with a fixed maintenance rate and configured fee assumptions. In bar backtests, liquidation is checked before stop/target, and the liquidation threshold is assumed to have been touched if the candle's adverse extreme crosses it. This is deliberately conservative where OHLCV cannot reveal intrabar ordering.
+
+This is **not an exchange-equivalent liquidation engine**. It does not load venue-specific maintenance-margin tiers, risk limits, mark-price rules, bankruptcy prices, auto-deleveraging, funding history, insurance-fund rules, collateral conversion, or order-book fills. Inverse contracts use a quote-equivalent approximation rather than an exchange's full coin-collateral account model. The estimate can differ materially from KuCoin, Bybit, or OKX. Never use this simulator to size a live position or infer a venue's actual liquidation price.
 
 ## Walk-Forward evaluation
 
@@ -274,10 +290,10 @@ The Render Free web service spins down after 15 consecutive minutes without inbo
 ## Fine print
 
 - Public data only: never add exchange API keys, private account credentials, or withdrawal permissions.
-- Futures are simplified simulations. Contract metadata and amount precision are used, but funding, margin, liquidation, order-book depth, and real fills are not fully modeled.
-- The paper monitor checks public last-traded prices periodically while the host is awake. Gaps and price reversals between polls can produce different results from stop/target levels.
-- Backtests are historical bar simulations, not forecasts; they do not fully model funding, margin, liquidation, order-book depth, or real execution.
-- Scan outputs are heuristic and are not validated predictive models.
+- Futures are isolated-margin paper simulations with fixed assumed funding, maintenance-margin and liquidation-fee rates. Venue-specific margin tiers, mark prices, bankruptcy prices, and full inverse coin-collateral accounting are not modeled.
+- The paper monitor checks public last-traded prices periodically while the host is awake. Gaps and price reversals between polls can produce different results from stop/target or estimated liquidation levels.
+- Backtests are historical bar simulations, not forecasts; their funding schedule uses candle opens and their liquidation checks use OHLC extremes, not exchange mark-price feeds or exact fills.
+- Advisor historical scores come only from user-selected closed paper trades linked to scanner signals. Unopened signals are absent, so selection bias is possible. Chronological Brier diagnostics are not calibrated probabilities or proof of predictive edge.
 - Risk controls do not eliminate market, software, or execution risk.
 - Local development uses SQLite; Render uses PostgreSQL. Back up the PostgreSQL database and test restore procedures.
 - Dashboard credentials are mandatory. Never commit .env or put credentials in issues, chat, or source control.
