@@ -186,10 +186,11 @@ def test_backtest_api_loads_real_spot_instrument_precision(monkeypatch):
             "gaps": [], "continuity": "continuous",
         }
 
-    def fake_backtest(candles, starting_balance=10000.0, instrument=None):
+    def fake_backtest(candles, starting_balance=10000.0, instrument=None, volume_ratio_threshold=None):
         observed["starting_balance"] = starting_balance
         observed["instrument"] = instrument
         observed["candle_count"] = len(candles)
+        observed["volume_ratio_threshold"] = volume_ratio_threshold
         return {"trade_count": 0}
 
     monkeypatch.setattr(settings, "paper_starting_balance", 12345.0)
