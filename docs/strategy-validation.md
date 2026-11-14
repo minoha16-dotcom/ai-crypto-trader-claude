@@ -5,44 +5,55 @@ Status: the v1 chronological walk-forward runner is implemented in the backend A
 
 ## 0. Implemented Walk-Forward Runner (v1)
 
-The backend now exposes `GET /api/walk-forward`; the private MCP bridge
-exposes the same operation as `run_walk_forward`. It supports rolling and
-expanding windows, explicit train/validation/test sizes, a configurable step,
-indicator warm-up, purge and embargo bars, Volume Ratio override, and a cap of
-50 folds.
+The backend exposes `GET /api/walk-forward`; the private MCP bridge exposes
+the same operation as `run_walk_forward`. It supports rolling and expanding
+windows, train/validation/test sizes, a configurable step, warm-up history,
+Volume Ratio override, timestamp continuity checks, and a cap of 50 folds.
 
-The runner:
-- requires strictly increasing, unique candle timestamps and can enforce
-  timeframe alignment plus a configured maximum number of missing bars;
-- evaluates only closed candles supplied by the API (the final exchange candle
-  is excluded);
-- supplies the immediately preceding warm-up candles to the indicator engine
-  but starts scoring at the first candle of the named period;
-- removes the configured purge bars from the end of the training and
-  validation periods, then skips the configured embargo bars before the next
-  period;
-- runs each train, validation, and test period independently with a fresh
-  starting balance; and
-- prevents overlapping test windows by requiring `step_bars >= test_bars`.
+The runner's boundary policy is explicit and enforced:
+- `max_holding_bars` defaults to 20. A position is exited at the close of
+  the bar that reaches this maximum, unless its stop or target exits first.
+- `purge_bars` must be at least `max_holding_bars`; its default is 20.
+- `embargo_bars` defaults to the greater of `warmup_bars` and
+  `max_holding_bars` (50 bars with the default warm-up of 50). A smaller
+  explicit value is rejected.
+- Every train, validation, and test simulation is independent and starts with
+  a fresh balance. Any remaining position is force-closed at that period's
+  final candle close with normal modeled fees and slippage
+  (`exit_reason=PERIOD_END`). No open mark-to-market P&L is carried into
+  another segment or included as unrealized period return.
+- The aggregate reports winning, losing, and breakeven trades separately.
+  Test windows must not overlap (`step_bars >= test_bars`).
 
-Important limitation: this v1 runner uses the current strategy and risk settings
-as fixed, pre-registered rules. It reports train and validation diagnostics and
-untouched forward-test metrics, but it does not fit a model, search parameters,
-or select a threshold from validation. The same selected configuration is used
-in all three periods. Automated parameter selection and candidate comparison
-must be implemented as a separate, carefully tested stage before describing
-this as an optimized strategy.
+Each period receives the immediately preceding warm-up candles as indicator
+context, but those candles are not scored. The API excludes the final forming
+exchange candle, rejects incomplete requested history, and validates candle
+timestamps and configured gap tolerance.
+
+The maximum holding limit is an explicit **walk-forward evaluation assumption**;
+it does not alter the ordinary `GET /api/backtest` endpoint's default behavior.
+The forced period-end exit prevents trades from remaining open across split
+boundaries, but it is still a bar-based market-exit assumption. Purge and
+embargo constraints bound the configured feature lookback and holding horizon;
+they are safeguards, not a formal proof against every possible source of data
+leakage.
+
+Important limitation: v1 evaluates the current strategy and risk settings as
+fixed, pre-registered rules. It reports train and validation diagnostics and
+forward-test metrics, but it does not fit a model, search parameters, or select
+a threshold using validation. Automated parameter selection and candidate
+comparison must be implemented as a separate, carefully tested stage before
+describing this as an optimized strategy.
 
 The result contains the index and timestamp boundaries for every period,
-per-period metrics, aggregate test metrics, and explicit limitations. Open
-positions at a period boundary are marked to market and remain separate from
-closed trades. Period balances reset independently, so the sum of fold P&L is
-not a continuous portfolio equity curve.
+per-period metrics, aggregate test metrics, and explicit limitations. Period
+balances reset independently, so the sum of fold P&L is not a continuous
+portfolio equity curve.
 
 Example:
 
 ```text
-GET /api/walk-forward?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1500&train_bars=250&validation_bars=100&test_bars=100&step_bars=100&warmup_bars=50&purge_bars=1&embargo_bars=1&window_mode=rolling&max_folds=10
+GET /api/walk-forward?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1500&train_bars=250&validation_bars=100&test_bars=100&step_bars=100&warmup_bars=50&purge_bars=20&embargo_bars=50&max_holding_bars=20&window_mode=rolling&max_folds=10
 ```
 
 ## 1. Objective and non-goals
@@ -74,10 +85,12 @@ depth, and realistic execution remain limitations until explicitly modeled.
 5. Keep indicator warm-up candles available at the start of a segment, but
    do not score trades whose signal or entry depends on information from the
    future segment. Exclude the forming final candle.
-6. Purge trades that cross a split boundary. Apply an embargo at least as long
-   as the greater of the feature lookback and the maximum allowed holding
-   horizon. If no maximum holding horizon is configured, record that limitation
-   and do not claim complete leakage protection.
+6. Bound the trade-label horizon and prevent positions from crossing a
+   split: configure a maximum holding horizon, purge at least that many bars,
+   and force-close any remaining position at the period's final candle close.
+   Apply an embargo at least as long as the greater of the feature lookback
+   and maximum holding horizon. These are explicit safeguards, not a proof
+   against every possible source of data leakage.
 7. Do not tune on the final test fold. If a configuration is changed after
    inspecting an out-of-sample result, that period becomes development data
    and a new untouched test period is required.
