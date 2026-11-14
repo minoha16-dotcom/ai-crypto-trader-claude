@@ -199,6 +199,58 @@ async def run_backtest(
 
 
 @mcp.tool()
+async def run_walk_forward(
+    exchange: Literal["kucoin", "bybit", "okx"] | None = None,
+    symbol: str = "BTC/USDT",
+    market_type: Literal["spot", "futures"] = "spot",
+    timeframe: Literal["5m", "15m", "30m", "1h", "2h", "4h", "1d"] = "1h",
+    limit: int = 1500,
+    train_bars: int = 250,
+    validation_bars: int = 100,
+    test_bars: int = 100,
+    step_bars: int = 100,
+    warmup_bars: int = 50,
+    purge_bars: int = 1,
+    embargo_bars: int = 1,
+    window_mode: Literal["rolling", "expanding"] = "rolling",
+    max_folds: int = 10,
+    volume_ratio_threshold: float | None = None,
+    max_missing_bars: int = 0,
+) -> dict:
+    """Run chronological paper-only walk-forward evaluation; never submits orders."""
+    exchange = await _configured_exchange(exchange)
+    symbol = symbol.strip().upper()
+    if not symbol or len(symbol) > 30 or "/" not in symbol:
+        raise ValueError("Use a CCXT symbol such as BTC/USDT.")
+    if not 53 <= limit <= 5000:
+        raise ValueError("limit must be between 53 and 5000.")
+    if volume_ratio_threshold is not None and (
+        not math.isfinite(volume_ratio_threshold) or volume_ratio_threshold < 0
+    ):
+        raise ValueError("volume_ratio_threshold must be finite and non-negative.")
+    params = {
+        "exchange": exchange,
+        "symbol": symbol,
+        "market_type": market_type,
+        "timeframe": timeframe,
+        "limit": limit,
+        "train_bars": train_bars,
+        "validation_bars": validation_bars,
+        "test_bars": test_bars,
+        "step_bars": step_bars,
+        "warmup_bars": warmup_bars,
+        "purge_bars": purge_bars,
+        "embargo_bars": embargo_bars,
+        "window_mode": window_mode,
+        "max_folds": max_folds,
+        "max_missing_bars": max_missing_bars,
+    }
+    if volume_ratio_threshold is not None:
+        params["volume_ratio_threshold"] = volume_ratio_threshold
+    return await _api("GET", "/api/walk-forward", params=params)
+
+
+@mcp.tool()
 async def get_signals(limit: int = 30) -> dict:
     """Read recent scanner signals saved in the local database."""
     if not 1 <= limit <= 100:
