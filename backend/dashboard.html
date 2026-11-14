@@ -213,7 +213,7 @@ canvas#chart{width:100%;height:150px}
       <div class="ticket-grid">
        <label>Leverage (isolated)<input id="futures-leverage" type="number" min="1" max="5" step="1" value="1"></label>
        <label>Funding rate / settlement<input id="futures-funding-rate" type="number" min="-0.02" max="0.02" step="0.0001" value="0.0001"></label>
-       <label>Funding interval (hours)<select id="futures-funding-interval"><option value="8" selected>8 hours</option><option value="4">4 hours</option><option value="1">1 hour</option></select></label>
+       <label>Funding interval (hours)<input id="futures-funding-interval" type="number" min="0.01" max="24" step="0.5" value="8"></label>
       </div>
       <p id="futures-assumptions-note" class="helper-note">Paper assumptions only. These are not live exchange rates or venue tier data.</p>
      </div>
