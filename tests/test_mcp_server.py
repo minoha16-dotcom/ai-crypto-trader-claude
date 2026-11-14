@@ -62,3 +62,25 @@ def test_mcp_backtest_tool_validates_symbol_and_limit(kwargs):
 def test_mcp_opportunities_tool_validates_limit():
     with pytest.raises(ValueError):
         asyncio.run(server.get_opportunities(31))
+
+
+
+def test_mcp_backtest_tool_forwards_volume_ratio_threshold(monkeypatch):
+    captured = {}
+
+    async def fake_api(method, path, *, params=None, payload=None):
+        captured.update(method=method, path=path, params=params)
+        return {"trade_count": 0}
+
+    monkeypatch.setattr(server, "_api", fake_api)
+    result = asyncio.run(server.run_backtest(
+        "okx", "BTC/USDT", "spot", "1h", 200, 0.8
+    ))
+    assert result["trade_count"] == 0
+    assert captured["params"]["volume_ratio_threshold"] == 0.8
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -0.1])
+def test_mcp_backtest_rejects_invalid_volume_ratio_threshold(value):
+    with pytest.raises(ValueError, match="volume_ratio_threshold"):
+        asyncio.run(server.run_backtest("okx", "BTC/USDT", volume_ratio_threshold=value))
