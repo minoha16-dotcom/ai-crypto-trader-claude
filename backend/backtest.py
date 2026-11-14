@@ -15,7 +15,7 @@ from .contracts import (
     contract_risk_amount,
     normalize_amount,
 )
-from .indicators import analyze
+from .indicators import analyze, FEATURE_ABLATIONS
 from .metrics import validate_trading_configuration
 from .futures import (
     due_funding,
@@ -72,6 +72,7 @@ def run_backtest(
     starting_balance=10000.0,
     instrument=None,
     volume_ratio_threshold=None,
+    feature_ablation="baseline",
     start_index=49,
     max_holding_bars=None,
     close_open_at_end=False,
@@ -87,6 +88,10 @@ def run_backtest(
         volume_ratio_threshold = float(volume_ratio_threshold)
         if not math.isfinite(volume_ratio_threshold) or volume_ratio_threshold < 0:
             raise ValueError("volume_ratio_threshold must be finite and non-negative")
+    if feature_ablation not in FEATURE_ABLATIONS:
+        raise ValueError(
+            "feature_ablation must be one of: " + ", ".join(FEATURE_ABLATIONS)
+        )
     _validate_candles(candles)
     if isinstance(start_index, bool) or not isinstance(start_index, int):
         raise ValueError("start_index must be an integer")
@@ -177,14 +182,23 @@ def run_backtest(
     i = start_index
 
     while i < len(candles) - 1:
-        metrics = (
-            analyze(candles[: i + 1])
-            if volume_ratio_threshold is None
-            else analyze(
+        if feature_ablation == "baseline":
+            # Preserve the exact legacy call shape for the unchanged baseline.
+            # This also keeps existing integrations that wrap analyze() compatible.
+            metrics = (
+                analyze(candles[: i + 1])
+                if volume_ratio_threshold is None
+                else analyze(
+                    candles[: i + 1],
+                    volume_ratio_threshold=volume_ratio_threshold,
+                )
+            )
+        else:
+            metrics = analyze(
                 candles[: i + 1],
                 volume_ratio_threshold=volume_ratio_threshold,
+                feature_ablation=feature_ablation,
             )
-        )
         side = metrics["signal"]
         if side not in ("LONG", "SHORT"):
             i += 1

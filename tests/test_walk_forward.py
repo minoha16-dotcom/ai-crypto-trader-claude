@@ -24,13 +24,14 @@ def fake_backtest(calls):
         rows, *, starting_balance, instrument, volume_ratio_threshold, start_index,
         max_holding_bars, close_open_at_end, leverage=1.0, funding_rate=None,
         funding_interval_hours=None, maintenance_margin_rate=None,
-        liquidation_fee_rate=None,
+        liquidation_fee_rate=None, feature_ablation="baseline",
     ):
         calls.append({
             "rows": rows,
             "starting_balance": starting_balance,
             "instrument": instrument,
             "volume_ratio_threshold": volume_ratio_threshold,
+            "feature_ablation": feature_ablation,
             "start_index": start_index,
             "max_holding_bars": max_holding_bars,
             "close_open_at_end": close_open_at_end,
@@ -78,6 +79,7 @@ def test_rolling_walk_forward_creates_chronological_non_overlapping_test_folds(m
         max_folds=2,
         starting_balance=1000.0,
         volume_ratio_threshold=0.8,
+        feature_ablation="without_ema_alignment",
     )
 
     assert result["fold_count"] == 2
@@ -99,6 +101,7 @@ def test_rolling_walk_forward_creates_chronological_non_overlapping_test_folds(m
     for call in calls:
         assert call["start_index"] == 50
         assert call["volume_ratio_threshold"] == 0.8
+        assert call["feature_ablation"] == "without_ema_alignment"
         assert len(call["rows"]) > call["start_index"]
     # The runner passes only historical warm-up plus rows through that period's
     # exclusive end. No candle after a scored range enters its backtest call.

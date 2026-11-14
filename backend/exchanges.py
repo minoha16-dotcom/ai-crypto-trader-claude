@@ -11,7 +11,7 @@ from email.utils import parsedate_to_datetime
 import ccxt.async_support as ccxt
 
 from .contracts import validate_instrument
-from .config import SUPPORTED_EXCHANGES
+from .config import SUPPORTED_EXCHANGES, settings
 
 # New trades use the canonical configured exchanges. Binance is retained solely
 # for existing persisted positions so public marks and paper exits remain available.
@@ -46,9 +46,19 @@ class ExchangeRateLimitCooldown(RuntimeError):
 
 
 class ExchangeRegistry:
-    def __init__(self, ticker_cache_ttl=DEFAULT_TICKER_CACHE_TTL_SECONDS):
+    def __init__(
+        self, ticker_cache_ttl=DEFAULT_TICKER_CACHE_TTL_SECONDS,
+        bybit_api_hostname=None,
+    ):
         if not isinstance(ticker_cache_ttl, (int, float)) or not math.isfinite(float(ticker_cache_ttl)) or ticker_cache_ttl < 0:
             raise ValueError("ticker_cache_ttl must be a finite non-negative number")
+        hostname = (
+            settings.bybit_api_hostname
+            if bybit_api_hostname is None else str(bybit_api_hostname).strip().lower()
+        )
+        if hostname not in ("bybit.com", "bytick.com"):
+            raise ValueError("bybit_api_hostname must be bybit.com or bytick.com")
+        self._bybit_api_hostname = hostname
         self._clients = {}
         self._markets_loaded = set()
         self._markets_inflight = {}
@@ -79,6 +89,10 @@ class ExchangeRegistry:
             klass = getattr(ccxt, client_name)
             options = {"defaultType": "swap" if market_type == "futures" else "spot"}
             client = klass({"enableRateLimit": True, "timeout": 15000, "options": options})
+            if exchange_id == "bybit":
+                # Both hosts are documented Bybit mainnet endpoints. Keep the
+                # adapter on one explicitly configured host for its full session.
+                client.hostname = self._bybit_api_hostname
             shared_throttler = self._shared_throttlers.get(exchange_id)
             client_throttler = getattr(client, "throttler", None)
             if client_throttler is None:

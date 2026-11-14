@@ -38,6 +38,12 @@ The optional Volume Ratio threshold can be tested at 0.8, 1.0, and 1.2 by
 running the same dataset with only that threshold changed. Omitting the
 override uses the Settings default.
 
+The research runner also supports controlled directional-vote ablations:
+`without_ema_alignment`, `without_price_vs_ema20`, and
+`single_composite_trend`. Compare these against the unchanged baseline on
+identical chronological folds. They are diagnostic variants, not production
+defaults; do not select a winner from one market or one test fold.
+
 ## Current Walk-forward runner limitations
 
 The v1 runner evaluates fixed backend settings; it does not automatically tune
