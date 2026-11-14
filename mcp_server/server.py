@@ -175,8 +175,13 @@ async def run_backtest(
     timeframe: Literal["5m", "15m", "30m", "1h", "2h", "4h", "1d"] = "1h",
     limit: int = 1000,
     volume_ratio_threshold: float | None = None,
+    leverage: float = 1.0,
+    funding_rate: float | None = None,
+    funding_interval_hours: float | None = None,
+    maintenance_margin_rate: float | None = None,
+    liquidation_fee_rate: float | None = None,
 ) -> dict:
-    """Run the backend's historical OHLCV paper backtest; does not submit orders."""
+    """Run the historical paper backtest with optional isolated Futures assumptions."""
     symbol = symbol.strip().upper()
     if not symbol or len(symbol) > 30 or "/" not in symbol:
         raise ValueError("Use a CCXT symbol such as BTC/USDT.")
@@ -192,9 +197,18 @@ async def run_backtest(
         "market_type": market_type,
         "timeframe": timeframe,
         "limit": limit,
+        "leverage": leverage,
     }
     if volume_ratio_threshold is not None:
         params["volume_ratio_threshold"] = volume_ratio_threshold
+    if funding_rate is not None:
+        params["funding_rate"] = funding_rate
+    if funding_interval_hours is not None:
+        params["funding_interval_hours"] = funding_interval_hours
+    if maintenance_margin_rate is not None:
+        params["maintenance_margin_rate"] = maintenance_margin_rate
+    if liquidation_fee_rate is not None:
+        params["liquidation_fee_rate"] = liquidation_fee_rate
     return await _api("GET", "/api/backtest", params=params)
 
 
