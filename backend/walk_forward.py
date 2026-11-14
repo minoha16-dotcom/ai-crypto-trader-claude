@@ -11,6 +11,7 @@ profitability.
 import math
 
 from .backtest import run_backtest
+from .indicators import FEATURE_ABLATIONS
 
 
 def _integer(name, value, minimum=0):
@@ -116,7 +117,7 @@ def _range(candles, start, end):
 
 def _evaluate_period(
     candles, start, end, warmup_bars, starting_balance,
-    instrument, volume_ratio_threshold, max_holding_bars,
+    instrument, volume_ratio_threshold, feature_ablation, max_holding_bars,
     leverage, funding_rate, funding_interval_hours,
     maintenance_margin_rate, liquidation_fee_rate,
 ):
@@ -129,6 +130,7 @@ def _evaluate_period(
         starting_balance=starting_balance,
         instrument=instrument,
         volume_ratio_threshold=volume_ratio_threshold,
+        feature_ablation=feature_ablation,
         start_index=warmup_bars,
         max_holding_bars=max_holding_bars,
         close_open_at_end=True,
@@ -157,6 +159,7 @@ def run_walk_forward_backtest(
     starting_balance=10000.0,
     instrument=None,
     volume_ratio_threshold=None,
+    feature_ablation="baseline",
     expected_candle_ms=None,
     max_missing_bars=0,
     leverage=1.0,
@@ -215,6 +218,10 @@ def run_walk_forward_backtest(
         volume_ratio_threshold = float(volume_ratio_threshold)
         if not math.isfinite(volume_ratio_threshold) or volume_ratio_threshold < 0:
             raise ValueError("volume_ratio_threshold must be finite and non-negative")
+    if feature_ablation not in FEATURE_ABLATIONS:
+        raise ValueError(
+            "feature_ablation must be one of: " + ", ".join(FEATURE_ABLATIONS)
+        )
 
     _validate_candles(candles, expected_candle_ms, max_missing_bars)
     candle_count = len(candles)
@@ -245,7 +252,7 @@ def run_walk_forward_backtest(
 
         train_result = _evaluate_period(
             candles, train_start, train_end, warmup_bars, starting_balance,
-            instrument, volume_ratio_threshold, max_holding_bars,
+            instrument, volume_ratio_threshold, feature_ablation, max_holding_bars,
             leverage, funding_rate, funding_interval_hours,
             maintenance_margin_rate, liquidation_fee_rate,
         )
@@ -346,6 +353,7 @@ def run_walk_forward_backtest(
             "test_windows_overlap": False,
             "period_balances_reset_independently": True,
             "strategy_parameters": "fixed from backend Settings; no automatic tuning",
+            "feature_ablation": feature_ablation,
             "train_validation_role": (
                 "diagnostic in-sample and validation measurements; no parameter "
                 "selection is performed by this runner"
