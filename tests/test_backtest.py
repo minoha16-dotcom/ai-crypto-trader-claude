@@ -124,3 +124,46 @@ def test_backtest_profit_factor_is_json_safe_when_no_losses(monkeypatch):
     result = run_backtest(exit_on_target_candles())
     assert result["profit_factor"] is None
     assert "Infinity" not in json.dumps(result, allow_nan=False)
+
+
+@pytest.mark.parametrize("threshold", [0.8, 1.0, 1.2])
+def test_volume_ratio_thresholds_are_configurable_at_08_10_12(threshold):
+    candles = rising_candles(80)
+    # The previous 20 closed candles average exactly 100 volume units.
+    candles[-1][5] = threshold * 100
+    metrics = analyze(candles, volume_ratio_threshold=threshold)
+    assert metrics["volume_ratio"] == pytest.approx(threshold)
+    assert metrics["volume_ratio_threshold"] == pytest.approx(threshold)
+    assert metrics["signal"] == "LONG"
+    assert "VOLUME_BELOW_AVERAGE" not in metrics["filter_reasons"]
+
+
+def test_volume_ratio_below_selected_threshold_is_filtered():
+    candles = rising_candles(80)
+    candles[-1][5] = 80.0
+    metrics = analyze(candles, volume_ratio_threshold=1.0)
+    assert metrics["volume_ratio"] == pytest.approx(0.8)
+    assert metrics["signal"] == "WAIT"
+    assert "VOLUME_BELOW_AVERAGE" in metrics["filter_reasons"]
+
+
+def test_backtest_passes_experimental_volume_threshold_and_reports_it(monkeypatch):
+    observed = []
+
+    def fake_analyze(_candles, volume_ratio_threshold=None):
+        observed.append(volume_ratio_threshold)
+        return {"signal": "WAIT", "price": 100.0, "atr14": 2.0}
+
+    monkeypatch.setattr(backtest, "analyze", fake_analyze)
+    result = run_backtest(
+        rising_candles(60),
+        volume_ratio_threshold=0.8,
+    )
+    assert observed
+    assert set(observed) == {0.8}
+    assert result["assumptions"]["volume_ratio_threshold"] == 0.8
+
+
+def test_backtest_rejects_invalid_volume_ratio_threshold():
+    with pytest.raises(ValueError, match="volume_ratio_threshold"):
+        run_backtest(rising_candles(60), volume_ratio_threshold=float("nan"))
