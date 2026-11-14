@@ -174,24 +174,35 @@ Omitting the override uses SIGNAL_MIN_VOLUME_RATIO. The same optional parameter 
 
 The backend exposes `GET /api/walk-forward`, and the private MCP bridge
 exposes `run_walk_forward`. The runner evaluates the current fixed strategy in
-rolling or expanding chronological folds. It reports train, validation, and
-forward-test diagnostics, includes warm-up-only indicator history, removes
-purge bars, skips embargo bars, rejects overlapping test windows, and reports
-per-fold plus aggregate out-of-sample metrics.
+rolling or expanding chronological folds and reports per-period and aggregate
+metrics. It supplies warm-up-only indicator history and enforces bounded
+trade-horizon controls:
+
+- `max_holding_bars=20`: a trade exits at the close of the bar that reaches
+  the configured maximum, unless its stop or target exits first.
+- `purge_bars` must be at least the maximum holding horizon (default 20).
+- `embargo_bars` defaults to `max(warmup_bars, max_holding_bars)` (50 bars
+  with the default warm-up) and rejects a smaller explicit value.
+- Any position still open at a segment boundary is closed at the final candle
+  close with modeled fees and slippage; no open mark-to-market P&L carries
+  across periods. Breakeven trades are reported separately from losses.
 
 Example request:
 
 ~~~text
-GET /api/walk-forward?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1500&train_bars=250&validation_bars=100&test_bars=100&step_bars=100&warmup_bars=50&purge_bars=1&embargo_bars=1&window_mode=rolling&max_folds=10
+GET /api/walk-forward?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1500&train_bars=250&validation_bars=100&test_bars=100&step_bars=100&warmup_bars=50&purge_bars=20&embargo_bars=50&max_holding_bars=20&window_mode=rolling&max_folds=10
 ~~~
 
-Important: v1 uses fixed backend Settings; it does not optimize parameters or
-select a threshold using validation data. Train and validation runs are
-diagnostic, and each period starts with an independent balance. The runner is
-a research tool, not a profitability guarantee or a continuous portfolio
-simulation. Strategy validation still requires running and reviewing the
-pre-registered folds, sensitivity checks, and correlated-indicator ablations.
-See [docs/strategy-validation.md](docs/strategy-validation.md) for assumptions,
+The holding limit and forced boundary exit are walk-forward evaluation
+assumptions; the ordinary `/api/backtest` default is unchanged. These controls
+bound the configured feature lookback and trade horizon, but do not constitute
+a formal proof against every possible source of data leakage. The runner uses
+fixed backend Settings; it does not optimize parameters or select a threshold
+using validation data. Each period starts with an independent balance, so
+fold P&L is not a continuous portfolio simulation. Strategy validation still
+requires reviewing pre-registered folds, sensitivity checks, and
+correlated-indicator ablations. See
+[docs/strategy-validation.md](docs/strategy-validation.md) for methodology,
 API parameters, limitations, and acceptance criteria.
 
 ## MCP: optional private ChatGPT integration
