@@ -49,7 +49,10 @@ def trading_cost_rate():
     return config["fee_rate"] + config["slippage"]
 
 
-def position_pnl(entry, quantity, side, mark_price, contract_size=1.0, contract_type="spot"):
+def position_pnl(
+    entry, quantity, side, mark_price, contract_size=1.0,
+    contract_type="spot", funding_paid=0.0, additional_exit_fee=0.0,
+):
     entry = float(entry)
     quantity = float(quantity)
     mark_price = float(mark_price)
@@ -63,12 +66,19 @@ def position_pnl(entry, quantity, side, mark_price, contract_size=1.0, contract_
     exit_cost = contract_notional(
         mark_price, quantity, contract_size, contract_type
     ) * rate
-    costs = entry_cost + exit_cost
-    net = gross - costs
+    extra_fee = float(additional_exit_fee)
+    funding = float(funding_paid)
+    if not math.isfinite(extra_fee) or extra_fee < 0:
+        raise ValueError("additional_exit_fee must be finite and non-negative")
+    if not math.isfinite(funding):
+        raise ValueError("funding_paid must be finite")
+    costs = entry_cost + exit_cost + extra_fee
+    net = gross - costs - funding
     notional = contract_notional(entry, quantity, contract_size, contract_type)
     return {
         "gross_pnl": gross,
         "estimated_costs": costs,
+        "funding_paid": funding,
         "unrealized_pnl": net,
         "unrealized_pnl_pct": net / notional * 100.0 if notional else 0.0,
     }
