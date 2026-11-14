@@ -88,7 +88,7 @@ def _run_smoke_with_fake_registry(monkeypatch, fake_check):
 
 
 def test_exchange_smoke_returns_zero_only_when_all_six_checks_pass(monkeypatch):
-    def fake_check(registry, exchange, market_type):
+    async def fake_check(registry, exchange, market_type):
         return {
             "exchange": exchange,
             "market_type": market_type,
@@ -104,7 +104,7 @@ def test_exchange_smoke_returns_zero_only_when_all_six_checks_pass(monkeypatch):
 
 
 def test_exchange_smoke_returns_one_for_a_real_endpoint_failure(monkeypatch):
-    def fake_check(registry, exchange, market_type):
+    async def fake_check(registry, exchange, market_type):
         if exchange == "okx" and market_type == "futures":
             raise RuntimeError("invalid contract metadata")
         return {
@@ -122,7 +122,7 @@ def test_exchange_smoke_returns_one_for_a_real_endpoint_failure(monkeypatch):
 
 
 def test_exchange_smoke_does_not_treat_all_geo_blocks_as_success(monkeypatch):
-    def fake_check(registry, exchange, market_type):
+    async def fake_check(registry, exchange, market_type):
         raise RuntimeError("HTTP 451 restricted location")
 
     assert _run_smoke_with_fake_registry(monkeypatch, fake_check) == 2
