@@ -9,9 +9,14 @@ import json
 import math
 import os
 import statistics
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+# A direct "python scripts/run_strategy_validation.py" invocation places
+# scripts/ on sys.path. Add the repository root so backend imports resolve.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from backend.config import settings
 from backend.exchanges import ExchangeRegistry
