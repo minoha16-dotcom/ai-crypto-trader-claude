@@ -56,9 +56,13 @@ def _validate_candles(candles):
             raise ValueError(f"Candle {index} has inconsistent high/low values")
 
 
-def run_backtest(candles, starting_balance=10000.0, instrument=None):
+def run_backtest(candles, starting_balance=10000.0, instrument=None, volume_ratio_threshold=None):
     if len(candles) < 52:
         raise ValueError("At least 52 candles are required for next-open backtesting")
+    if volume_ratio_threshold is not None:
+        volume_ratio_threshold = float(volume_ratio_threshold)
+        if not math.isfinite(volume_ratio_threshold) or volume_ratio_threshold < 0:
+            raise ValueError("volume_ratio_threshold must be finite and non-negative")
     _validate_candles(candles)
     starting_balance = float(starting_balance)
     if not math.isfinite(starting_balance) or starting_balance <= 0:
@@ -100,7 +104,14 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
     i = 49
 
     while i < len(candles) - 1:
-        metrics = analyze(candles[: i + 1])
+        metrics = (
+            analyze(candles[: i + 1])
+            if volume_ratio_threshold is None
+            else analyze(
+                candles[: i + 1],
+                volume_ratio_threshold=volume_ratio_threshold,
+            )
+        )
         side = metrics["signal"]
         if side not in ("LONG", "SHORT"):
             i += 1
@@ -134,7 +145,8 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
         entry = raw_entry * (1 + slippage if side == "LONG" else 1 - slippage)
         distance = max(atr_value * 2, reference_price * 0.005)
         stop = raw_entry - distance if side == "LONG" else raw_entry + distance
-        target = raw_entry + 2 * distance if side == "LONG" else raw_entry - 2 * distance
+        reward_distance = distance * float(settings.reward_risk_ratio)
+        target = raw_entry + reward_distance if side == "LONG" else raw_entry - reward_distance
         if stop <= 0:
             skipped_signals.append({"index": i, "reason": "Calculated stop is not positive"})
             i += 1
@@ -413,6 +425,11 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None):
             "stop_gap_fill": "adverse candle open plus exit slippage",
             "target_gap_fill": "favorable candle open plus exit slippage",
             "same_candle_stop_and_target": "stop first",
+            "reward_risk_ratio": float(settings.reward_risk_ratio),
+            "volume_ratio_threshold": (
+                float(settings.signal_min_volume_ratio)
+                if volume_ratio_threshold is None else volume_ratio_threshold
+            ),
             "drawdown": "mark-to-market with adverse intrabar OHLC extremes",
             "open_at_end": "reported as unrealized; not added to realized balance",
             "fee_rate_per_side": fee_rate,
