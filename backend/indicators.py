@@ -3,6 +3,14 @@ import math
 from .config import settings
 
 
+FEATURE_ABLATIONS = (
+    "baseline",
+    "without_ema_alignment",
+    "without_price_vs_ema20",
+    "single_composite_trend",
+)
+
+
 def ema(values, period):
     if period <= 0:
         raise ValueError("period must be positive")
@@ -85,7 +93,7 @@ def adx(candles, period=14):
     return value
 
 
-def analyze(candles, volume_ratio_threshold=None):
+def analyze(candles, volume_ratio_threshold=None, feature_ablation="baseline"):
     closes = [float(candle[4]) for candle in candles]
     if len(closes) < 50:
         raise ValueError("At least 50 candles required")
@@ -95,15 +103,42 @@ def analyze(candles, volume_ratio_threshold=None):
     )
     if not math.isfinite(threshold) or threshold < 0:
         raise ValueError("volume_ratio_threshold must be finite and non-negative")
+    if feature_ablation not in FEATURE_ABLATIONS:
+        raise ValueError(
+            "feature_ablation must be one of: " + ", ".join(FEATURE_ABLATIONS)
+        )
 
     ema20, ema50 = ema(closes, 20), ema(closes, 50)
     strength, volatility, last = rsi(closes), atr(candles), closes[-1]
     trend = "bullish" if last > ema20 > ema50 else "bearish" if last < ema20 < ema50 else "sideways"
-    score = (
-        (1 if ema20 > ema50 else -1 if ema20 < ema50 else 0)
-        + (1 if strength >= 55 else -1 if strength <= 45 else 0)
-        + (1 if last > ema20 else -1 if last < ema20 else 0)
-    )
+
+    ema_alignment_vote = 1 if ema20 > ema50 else -1 if ema20 < ema50 else 0
+    rsi_vote = 1 if strength >= 55 else -1 if strength <= 45 else 0
+    price_vs_ema20_vote = 1 if last > ema20 else -1 if last < ema20 else 0
+    if feature_ablation == "without_ema_alignment":
+        ema_alignment_vote = 0
+    elif feature_ablation == "without_price_vs_ema20":
+        price_vs_ema20_vote = 0
+
+    if feature_ablation == "single_composite_trend":
+        # Replace two correlated trend votes with one composite confirmation.
+        composite_trend_vote = (
+            1 if last > ema20 > ema50
+            else -1 if last < ema20 < ema50
+            else 0
+        )
+        score = composite_trend_vote + rsi_vote
+        directional_votes = {
+            "composite_trend": composite_trend_vote,
+            "rsi_zone": rsi_vote,
+        }
+    else:
+        score = ema_alignment_vote + rsi_vote + price_vs_ema20_vote
+        directional_votes = {
+            "ema_alignment": ema_alignment_vote,
+            "rsi_zone": rsi_vote,
+            "price_vs_ema20": price_vs_ema20_vote,
+        }
     signal = "LONG" if score >= 2 else "SHORT" if score <= -2 else "WAIT"
     trend_strength = adx(candles)
     volumes = [float(candle[5]) for candle in candles]
@@ -125,5 +160,7 @@ def analyze(candles, volume_ratio_threshold=None):
         "volume_ratio": volume_ratio, "volume_ratio_threshold": threshold,
         "filter_reasons": filter_reasons,
         "trend": trend, "score": score, "signal": signal,
+        "feature_ablation": feature_ablation,
+        "directional_votes": directional_votes,
         "stop_distance": max(volatility * 2, last * 0.005),
     }
