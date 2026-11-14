@@ -250,12 +250,19 @@ def apply_due_funding(trade_id, mark_price, now=None):
             result["funding_paid"] = float(result.get("funding_paid") or 0) + payment
             result["funding_events"] = int(result.get("funding_events") or 0) + events
             result["next_funding_at"] = next_at
+            if result["market_type"] == "futures":
+                result["liquidation_price"] = liquidation_price(
+                    result["entry"], result["quantity"], result["contract_size"],
+                    result["contract_type"], result["side"], result["leverage"],
+                    result["maintenance_margin_rate"], trading_cost_rate(),
+                    result["liquidation_fee_rate"], result["funding_paid"],
+                )
             db.execute(
-                "UPDATE trades SET funding_paid=?,funding_events=?,next_funding_at=? "
-                "WHERE id=? AND status='OPEN'",
+                "UPDATE trades SET funding_paid=?,funding_events=?,next_funding_at=?,"
+                "liquidation_price=? WHERE id=? AND status='OPEN'",
                 (
                     result["funding_paid"], result["funding_events"],
-                    next_at, trade_id,
+                    next_at, result.get("liquidation_price"), trade_id,
                 ),
             )
         return result
@@ -284,10 +291,16 @@ def close_trade(trade_id, exit_price, exit_reason="MANUAL", observed_at=None):
         funding_paid = float(row["funding_paid"] or 0)
         extra_exit_fee = 0.0
         if row["market_type"] == "futures":
+            current_liquidation = liquidation_price(
+                row["entry"], row["quantity"], row["contract_size"],
+                row["contract_type"], row["side"], row["leverage"],
+                row["maintenance_margin_rate"], trading_cost_rate(),
+                row["liquidation_fee_rate"], funding_paid,
+            )
             hit_liquidation = (
-                row["liquidation_price"] is not None
+                current_liquidation is not None
                 and liquidation_triggered(
-                    row["side"], exit_price, row["liquidation_price"]
+                    row["side"], exit_price, current_liquidation
                 )
             )
             if hit_liquidation:
