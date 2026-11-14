@@ -165,7 +165,7 @@ Run the pre-registered public-data experiment from the repository root:
 
 ```powershell
 $env:STRATEGY_VALIDATION_EXCHANGES = "kucoin,okx"
-$env:STRATEGY_VALIDATION_LIMIT = "1800"
+$env:STRATEGY_VALIDATION_LIMIT = "5000"
 python scripts/run_strategy_validation.py
 ```
 
