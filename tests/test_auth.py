@@ -3,6 +3,7 @@ import pytest
 
 from fastapi.testclient import TestClient
 
+from backend.config import Settings, settings
 from backend.main import app
 
 
@@ -72,6 +73,8 @@ def test_api_mutations_require_auth(monkeypatch):
     ("trader", ""),
 ])
 def test_startup_refuses_missing_or_incomplete_credentials(monkeypatch, username, password):
+    monkeypatch.setattr(settings, "dashboard_username", "")
+    monkeypatch.setattr(settings, "dashboard_password", "")
     if username is None:
         monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
     else:
@@ -91,6 +94,8 @@ def test_startup_refuses_missing_or_incomplete_credentials(monkeypatch, username
     ("trader", ""),
 ])
 def test_protected_requests_fail_closed_without_both_credentials(monkeypatch, username, password):
+    monkeypatch.setattr(settings, "dashboard_username", "")
+    monkeypatch.setattr(settings, "dashboard_password", "")
     if username is None:
         monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
     else:
@@ -101,3 +106,31 @@ def test_protected_requests_fail_closed_without_both_credentials(monkeypatch, us
         monkeypatch.setenv("DASHBOARD_PASSWORD", password)
     response = TestClient(app).get("/")
     assert response.status_code == 503
+
+
+
+def test_dashboard_credentials_load_from_dotenv(tmp_path, monkeypatch):
+    monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DASHBOARD_USERNAME=file-user\nDASHBOARD_PASSWORD=file-password\n",
+        encoding="utf-8",
+    )
+
+    loaded = Settings(_env_file=env_file)
+    assert loaded.dashboard_username == "file-user"
+    assert loaded.dashboard_password == "file-password"
+
+
+def test_dashboard_auth_uses_loaded_dotenv_settings_when_process_env_is_missing(monkeypatch):
+    monkeypatch.delenv("DASHBOARD_USERNAME", raising=False)
+    monkeypatch.delenv("DASHBOARD_PASSWORD", raising=False)
+    monkeypatch.setattr(settings, "dashboard_username", "dotenv-user")
+    monkeypatch.setattr(settings, "dashboard_password", "dotenv-password")
+    token = base64.b64encode(b"dotenv-user:dotenv-password").decode()
+
+    with TestClient(app) as client:
+        response = client.get("/", headers={"Authorization": f"Basic {token}"})
+
+    assert response.status_code == 200

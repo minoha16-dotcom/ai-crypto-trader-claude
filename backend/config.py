@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/trader.db"
     default_exchange: str = "kucoin"
     default_market_type: str = "spot"
+    # Dashboard login is loaded from process environment or the local .env file.
+    dashboard_username: str = Field(default="", repr=False)
+    dashboard_password: str = Field(default="", repr=False)
 
     risk_per_trade_pct: float = Field(default=0.5, gt=0, le=100, allow_inf_nan=False)
     max_open_risk_pct: float = Field(default=2.0, gt=0, le=100, allow_inf_nan=False)

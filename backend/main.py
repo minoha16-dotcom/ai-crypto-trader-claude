@@ -54,8 +54,17 @@ app = FastAPI(
 )
 
 
+def _dashboard_credentials():
+    """Read dashboard credentials from process env, falling back to loaded .env settings."""
+    return (
+        os.getenv("DASHBOARD_USERNAME", settings.dashboard_username),
+        os.getenv("DASHBOARD_PASSWORD", settings.dashboard_password),
+    )
+
+
 def _require_dashboard_credentials():
-    if not os.getenv("DASHBOARD_USERNAME") or not os.getenv("DASHBOARD_PASSWORD"):
+    username, password = _dashboard_credentials()
+    if not username or not password:
         raise RuntimeError("DASHBOARD_USERNAME and DASHBOARD_PASSWORD must both be configured.")
 
 
@@ -110,8 +119,7 @@ async def exchange_rate_limit_handler(request: Request, exc: ExchangeRateLimitCo
 async def dashboard_auth_and_security_headers(request: Request, call_next):
     # Render health checks stay public; every dashboard/API route requires Basic Auth.
     if request.url.path not in ("/api/health", "/api/ready"):
-        username = os.getenv("DASHBOARD_USERNAME", "")
-        password = os.getenv("DASHBOARD_PASSWORD", "")
+        username, password = _dashboard_credentials()
         if not username or not password:
             return JSONResponse(
                 {"detail": "Dashboard credentials are not configured."},
