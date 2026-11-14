@@ -11,10 +11,11 @@ from email.utils import parsedate_to_datetime
 import ccxt.async_support as ccxt
 
 from .contracts import validate_instrument
+from .config import SUPPORTED_EXCHANGES
 
-# New trades use KuCoin, Bybit and OKX. Retain Binance solely for existing
-# persisted positions so their public marks and paper exits remain available.
-EXCHANGE_IDS = ("kucoin", "bybit", "okx")
+# New trades use the canonical configured exchanges. Binance is retained solely
+# for existing persisted positions so public marks and paper exits remain available.
+EXCHANGE_IDS = SUPPORTED_EXCHANGES
 LEGACY_EXCHANGE_IDS = ("binance",)
 REGISTRY_EXCHANGE_IDS = EXCHANGE_IDS + LEGACY_EXCHANGE_IDS
 MARKET_TYPES = ("spot", "futures")

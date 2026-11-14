@@ -18,6 +18,7 @@ FLOAT_SETTINGS = (
     "signal_min_atr_pct",
     "paper_starting_balance",
     "paper_entry_max_deviation_pct",
+    "reward_risk_ratio",
 )
 
 
@@ -33,3 +34,26 @@ def test_default_cost_and_risk_settings_are_valid():
     assert config.risk_per_trade_pct <= config.max_open_risk_pct
     assert config.taker_fee_rate >= 0
     assert config.slippage_bps >= 0
+
+
+@pytest.mark.parametrize("exchange", ["kucoin", "bybit", "okx", " KUCOIN "])
+def test_default_exchange_is_normalized_to_supported_platform(exchange):
+    config = Settings(_env_file=None, default_exchange=exchange)
+    assert config.default_exchange == exchange.strip().lower()
+
+
+def test_default_exchange_rejects_legacy_only_binance():
+    with pytest.raises(ValidationError, match="default_exchange"):
+        Settings(_env_file=None, default_exchange="binance")
+
+
+@pytest.mark.parametrize("max_open_trades", [0, 101, -1])
+def test_max_open_trades_must_be_bounded(max_open_trades):
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, max_open_trades=max_open_trades)
+
+
+def test_configuration_keeps_existing_paper_limits_as_defaults():
+    config = Settings(_env_file=None)
+    assert config.max_open_trades == 3
+    assert config.reward_risk_ratio == 2.0

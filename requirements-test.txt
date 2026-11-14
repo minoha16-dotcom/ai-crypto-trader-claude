@@ -1,0 +1,6 @@
+# Test dependencies; includes the backend runtime and MCP modules imported by tests.
+-r requirements.txt
+
+pytest>=8,<9
+httpx>=0.27,<1
+mcp>=1.28,<2

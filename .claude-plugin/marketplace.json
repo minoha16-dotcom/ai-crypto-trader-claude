@@ -3,13 +3,13 @@
   "owner": { "name": "Project Maintainer" },
   "metadata": {
     "description": "Claude plugins for cryptocurrency market research and risk-aware trading workflows.",
-    "version": "2.0.0"
+    "version": "2.1.0"
   },
   "plugins": [{
     "name": "ai-crypto-trader",
     "source": "./plugins/ai-crypto-trader",
-    "description": "V2 crypto research assistant with 12 skills, Spot/Futures workflows, and centralized risk planning.",
-    "version": "2.0.0",
+    "description": "V2.1 crypto research assistant with 12 skills, Spot/Futures workflows, and centralized risk planning.",
+    "version": "2.1.0",
     "category": "finance"
   }]
 }

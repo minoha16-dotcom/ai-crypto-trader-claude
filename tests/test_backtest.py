@@ -124,3 +124,126 @@ def test_backtest_profit_factor_is_json_safe_when_no_losses(monkeypatch):
     result = run_backtest(exit_on_target_candles())
     assert result["profit_factor"] is None
     assert "Infinity" not in json.dumps(result, allow_nan=False)
+
+
+@pytest.mark.parametrize("threshold", [0.8, 1.0, 1.2])
+def test_volume_ratio_thresholds_are_configurable_at_08_10_12(threshold):
+    candles = rising_candles(80)
+    # The previous 20 closed candles average exactly 100 volume units.
+    candles[-1][5] = threshold * 100
+    metrics = analyze(candles, volume_ratio_threshold=threshold)
+    assert metrics["volume_ratio"] == pytest.approx(threshold)
+    assert metrics["volume_ratio_threshold"] == pytest.approx(threshold)
+    assert metrics["signal"] == "LONG"
+    assert "VOLUME_BELOW_AVERAGE" not in metrics["filter_reasons"]
+
+
+def test_volume_ratio_below_selected_threshold_is_filtered():
+    candles = rising_candles(80)
+    candles[-1][5] = 80.0
+    metrics = analyze(candles, volume_ratio_threshold=1.0)
+    assert metrics["volume_ratio"] == pytest.approx(0.8)
+    assert metrics["signal"] == "WAIT"
+    assert "VOLUME_BELOW_AVERAGE" in metrics["filter_reasons"]
+
+
+def test_backtest_passes_experimental_volume_threshold_and_reports_it(monkeypatch):
+    observed = []
+
+    def fake_analyze(_candles, volume_ratio_threshold=None):
+        observed.append(volume_ratio_threshold)
+        return {"signal": "WAIT", "price": 100.0, "atr14": 2.0}
+
+    monkeypatch.setattr(backtest, "analyze", fake_analyze)
+    result = run_backtest(
+        rising_candles(60),
+        volume_ratio_threshold=0.8,
+    )
+    assert observed
+    assert set(observed) == {0.8}
+    assert result["assumptions"]["volume_ratio_threshold"] == 0.8
+
+
+def test_backtest_rejects_invalid_volume_ratio_threshold():
+    with pytest.raises(ValueError, match="volume_ratio_threshold"):
+        run_backtest(rising_candles(60), volume_ratio_threshold=float("nan"))
+
+
+
+def test_backtest_target_uses_configured_reward_risk_ratio(monkeypatch):
+    monkeypatch.setattr(settings, "reward_risk_ratio", 3.0)
+    monkeypatch.setattr(backtest, "analyze", one_long_then_wait(rising_candles()))
+    candles = [
+        [i * 3600000, 100.0, 101.0, 99.0, 100.0, 100.0]
+        for i in range(60)
+    ]
+
+    result = run_backtest(candles)
+
+    assert result["open_position"]["target"] == pytest.approx(112.0)
+    assert result["assumptions"]["reward_risk_ratio"] == pytest.approx(3.0)
+
+
+def test_backtest_can_start_scoring_after_warmup(monkeypatch):
+    observed_lengths = []
+
+    def fake_analyze(history, volume_ratio_threshold=None):
+        observed_lengths.append(len(history))
+        return {"signal": "WAIT", "price": 100.0, "atr14": 2.0}
+
+    monkeypatch.setattr(backtest, "analyze", fake_analyze)
+    result = run_backtest(rising_candles(70), start_index=55)
+
+    assert observed_lengths
+    assert observed_lengths[0] == 56
+    assert result["assumptions"]["evaluation_start_index"] == 55
+    assert result["assumptions"]["warmup_candles_excluded_from_scoring"] == 55
+
+
+@pytest.mark.parametrize("start_index", [48, 69])
+def test_backtest_rejects_invalid_evaluation_start_index(start_index):
+    with pytest.raises(ValueError, match="start_index"):
+        run_backtest(rising_candles(70), start_index=start_index)
+
+
+def test_backtest_enforces_maximum_holding_horizon(monkeypatch):
+    monkeypatch.setattr(settings, "taker_fee_rate", 0.0)
+    monkeypatch.setattr(settings, "slippage_bps", 0.0)
+    monkeypatch.setattr(backtest, "analyze", one_long_then_wait(rising_candles()))
+    candles = [
+        [i * 3600000, 100.0, 101.0, 99.0, 100.0, 100.0]
+        for i in range(60)
+    ]
+
+    result = run_backtest(candles, max_holding_bars=2)
+
+    assert result["trade_count"] == 1
+    assert result["trades"][0]["exit_reason"] == "TIME_EXIT"
+    assert result["trades"][0]["exit_index"] == 51
+    assert result["open_positions"] == []
+    assert result["assumptions"]["max_holding_bars"] == 2
+
+
+def test_backtest_can_force_close_remaining_position_at_period_end(monkeypatch):
+    monkeypatch.setattr(settings, "taker_fee_rate", 0.0)
+    monkeypatch.setattr(settings, "slippage_bps", 0.0)
+    monkeypatch.setattr(backtest, "analyze", one_long_then_wait(rising_candles()))
+    candles = [
+        [i * 3600000, 100.0, 101.0, 99.0, 100.0, 100.0]
+        for i in range(60)
+    ]
+
+    result = run_backtest(candles, close_open_at_end=True)
+
+    assert result["trade_count"] == 1
+    assert result["trades"][0]["exit_reason"] == "PERIOD_END"
+    assert result["trades"][0]["exit_index"] == 59
+    assert result["open_positions"] == []
+    assert result["unrealized_pnl"] == pytest.approx(0.0)
+    assert result["assumptions"]["open_at_end"] == "forced close at final candle close"
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5])
+def test_backtest_rejects_invalid_maximum_holding_horizon(value):
+    with pytest.raises(ValueError, match="max_holding_bars"):
+        run_backtest(rising_candles(60), max_holding_bars=value)

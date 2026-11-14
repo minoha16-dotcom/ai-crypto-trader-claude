@@ -1,8 +1,8 @@
 {
   "name": "ai-crypto-trader",
-  "version": "2.0.0",
-  "description": "V2 research-focused crypto assistant with 12 specialized skills for technical and on-chain analysis, news, Spot/Futures, and risk planning. No live order execution.",
+  "version": "2.1.0",
+  "description": "V2.1 research-focused crypto assistant with 12 specialized skills for technical and on-chain analysis, news, Spot/Futures, and risk planning. No live order execution.",
   "author": { "name": "Project Maintainer" },
   "license": "MIT",
-  "keywords": ["crypto", "trading", "technical-analysis", "on-chain", "risk-management", "paper-trading"]
+  "keywords": ["crypto", "trading", "technical-analysis", "on-chain", "risk-management", "paper-trading", "walk-forward", "market-research"]
 }
