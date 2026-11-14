@@ -772,6 +772,10 @@ async def risk():
         "futures_margin_used": sum(float(p.get("initial_margin") or 0) for p in positions),
         "max_futures_margin_pct": settings.max_futures_margin_pct,
         "max_futures_leverage": settings.max_futures_leverage,
+        "paper_futures_default_funding_rate": settings.paper_futures_default_funding_rate,
+        "paper_futures_funding_interval_hours": settings.paper_futures_funding_interval_hours,
+        "paper_futures_maintenance_margin_rate": settings.paper_futures_maintenance_margin_rate,
+        "paper_futures_liquidation_fee_rate": settings.paper_futures_liquidation_fee_rate,
         "reward_risk_ratio": settings.reward_risk_ratio,
     }
 
