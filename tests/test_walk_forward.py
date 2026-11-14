@@ -22,7 +22,9 @@ def candles(count):
 def fake_backtest(calls):
     def run(
         rows, *, starting_balance, instrument, volume_ratio_threshold, start_index,
-        max_holding_bars, close_open_at_end,
+        max_holding_bars, close_open_at_end, leverage=1.0, funding_rate=None,
+        funding_interval_hours=None, maintenance_margin_rate=None,
+        liquidation_fee_rate=None,
     ):
         calls.append({
             "rows": rows,
@@ -32,6 +34,11 @@ def fake_backtest(calls):
             "start_index": start_index,
             "max_holding_bars": max_holding_bars,
             "close_open_at_end": close_open_at_end,
+            "leverage": leverage,
+            "funding_rate": funding_rate,
+            "funding_interval_hours": funding_interval_hours,
+            "maintenance_margin_rate": maintenance_margin_rate,
+            "liquidation_fee_rate": liquidation_fee_rate,
         })
         pnl = 10.0
         trade = {"pnl": pnl, "r_multiple": 0.5}
@@ -188,7 +195,9 @@ def test_walk_forward_validates_non_finite_volume_threshold():
 def test_aggregate_test_counts_breakeven_trades_separately(monkeypatch):
     def mixed_result(
         rows, *, starting_balance, instrument, volume_ratio_threshold,
-        start_index, max_holding_bars, close_open_at_end,
+        start_index, max_holding_bars, close_open_at_end, leverage=1.0,
+        funding_rate=None, funding_interval_hours=None,
+        maintenance_margin_rate=None, liquidation_fee_rate=None,
     ):
         trades = [
             {"pnl": 10.0, "r_multiple": 1.0},
@@ -286,3 +295,39 @@ def test_walk_forward_integration_uses_real_backtest_and_closes_period_boundarie
     assert "PERIOD_END" in reasons
     assert result["policy"]["max_holding_bars"] == 3
     assert result["policy"]["boundary_gaps"]["purge_minimum"] == "max_holding_bars"
+
+
+
+def test_walk_forward_forwards_isolated_futures_assumptions_to_each_period(monkeypatch):
+    calls = []
+    monkeypatch.setattr(walk_forward, "run_backtest", fake_backtest(calls))
+    result = walk_forward.run_walk_forward_backtest(
+        candles(420),
+        train_bars=100,
+        validation_bars=40,
+        test_bars=40,
+        step_bars=40,
+        warmup_bars=50,
+        purge_bars=20,
+        embargo_bars=50,
+        max_folds=1,
+        instrument={
+            "contract_type": "linear",
+            "contract_size": 0.001,
+            "amount_precision": 3,
+            "precision_mode": 2,
+            "market_type": "futures",
+        },
+        leverage=3,
+        funding_rate=0.0002,
+        funding_interval_hours=4,
+        maintenance_margin_rate=0.006,
+        liquidation_fee_rate=0.004,
+    )
+    assert result["policy"]["futures_leverage"] == 3
+    assert result["policy"]["futures_funding_rate"] == pytest.approx(0.0002)
+    assert result["policy"]["futures_funding_interval_hours"] == 4
+    assert len(calls) == 3
+    assert all(call["leverage"] == 3 for call in calls)
+    assert all(call["funding_rate"] == pytest.approx(0.0002) for call in calls)
+    assert all(call["funding_interval_hours"] == 4 for call in calls)

@@ -180,3 +180,51 @@ def test_monitor_reports_missing_exchange_timestamp_as_unverified(
     assert report["failed"] == 0
     assert report["timestamp_unavailable"] == 1
     assert report["failures"] == []
+
+
+
+def test_monitor_accrues_due_funding_and_liquidates_before_stop_target(
+    isolated_db, monkeypatch
+):
+    from backend import position_monitor
+    from backend.paper import open_trade
+
+    instrument = {
+        "contract_size": 0.001,
+        "contract_type": "linear",
+        "amount_precision": 3,
+        "precision_mode": 2,
+        "min_amount": 0.001,
+        "max_amount": 100000,
+        "market_type": "futures",
+    }
+    opened = open_trade(
+        "bybit", "BTC/USDT:USDT", "futures", "LONG", 100, 95, 120,
+        instrument=instrument, leverage=5, funding_rate=0.001,
+        funding_interval_hours=8,
+    )
+    now_seconds = float(opened["next_funding_at"]) + 1.0
+    monkeypatch.setattr(position_monitor.time, "time", lambda: now_seconds)
+
+    async def liquidation_ticker(exchange, symbol, market_type):
+        return {"last": 50.0, "timestamp": now_seconds * 1000.0}
+
+    monkeypatch.setattr(registry, "ticker", liquidation_ticker)
+    report = asyncio.run(monitor_open_positions_once(detailed=True))
+
+    assert report["checked"] == 1
+    assert report["closed"] == 1
+    assert report["failed"] == 0
+
+    with connect() as db:
+        row = db.execute(
+            "SELECT status, exit_reason, funding_paid, funding_events, exit_price, pnl "
+            "FROM trades WHERE id=?",
+            (opened["id"],),
+        ).fetchone()
+    assert row["status"] == "CLOSED"
+    assert row["exit_reason"] == "LIQUIDATION"
+    assert row["funding_events"] == 1
+    assert row["funding_paid"] > 0
+    assert row["exit_price"] == pytest.approx(50.0)
+    assert row["pnl"] < 0

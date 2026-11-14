@@ -175,8 +175,13 @@ async def run_backtest(
     timeframe: Literal["5m", "15m", "30m", "1h", "2h", "4h", "1d"] = "1h",
     limit: int = 1000,
     volume_ratio_threshold: float | None = None,
+    leverage: float = 1.0,
+    funding_rate: float | None = None,
+    funding_interval_hours: float | None = None,
+    maintenance_margin_rate: float | None = None,
+    liquidation_fee_rate: float | None = None,
 ) -> dict:
-    """Run the backend's historical OHLCV paper backtest; does not submit orders."""
+    """Run the historical paper backtest with optional isolated Futures assumptions."""
     symbol = symbol.strip().upper()
     if not symbol or len(symbol) > 30 or "/" not in symbol:
         raise ValueError("Use a CCXT symbol such as BTC/USDT.")
@@ -192,9 +197,18 @@ async def run_backtest(
         "market_type": market_type,
         "timeframe": timeframe,
         "limit": limit,
+        "leverage": leverage,
     }
     if volume_ratio_threshold is not None:
         params["volume_ratio_threshold"] = volume_ratio_threshold
+    if funding_rate is not None:
+        params["funding_rate"] = funding_rate
+    if funding_interval_hours is not None:
+        params["funding_interval_hours"] = funding_interval_hours
+    if maintenance_margin_rate is not None:
+        params["maintenance_margin_rate"] = maintenance_margin_rate
+    if liquidation_fee_rate is not None:
+        params["liquidation_fee_rate"] = liquidation_fee_rate
     return await _api("GET", "/api/backtest", params=params)
 
 
@@ -217,8 +231,13 @@ async def run_walk_forward(
     max_folds: int = 10,
     volume_ratio_threshold: float | None = None,
     max_missing_bars: int = 0,
+    leverage: float = 1.0,
+    funding_rate: float | None = None,
+    funding_interval_hours: float | None = None,
+    maintenance_margin_rate: float | None = None,
+    liquidation_fee_rate: float | None = None,
 ) -> dict:
-    """Run chronological paper-only walk-forward evaluation; never submits orders."""
+    """Run chronological paper-only evaluation with isolated Futures assumptions."""
     symbol = symbol.strip().upper()
     if not symbol or len(symbol) > 30 or "/" not in symbol:
         raise ValueError("Use a CCXT symbol such as BTC/USDT.")
@@ -266,7 +285,16 @@ async def run_walk_forward(
         "window_mode": window_mode,
         "max_folds": max_folds,
         "max_missing_bars": max_missing_bars,
+        "leverage": leverage,
     }
+    if funding_rate is not None:
+        params["funding_rate"] = funding_rate
+    if funding_interval_hours is not None:
+        params["funding_interval_hours"] = funding_interval_hours
+    if maintenance_margin_rate is not None:
+        params["maintenance_margin_rate"] = maintenance_margin_rate
+    if liquidation_fee_rate is not None:
+        params["liquidation_fee_rate"] = liquidation_fee_rate
     if embargo_bars is not None:
         params["embargo_bars"] = embargo_bars
     if volume_ratio_threshold is not None:
@@ -309,11 +337,16 @@ async def open_paper_trade(
     entry: float,
     stop: float,
     target: float | None = None,
+    leverage: float = 1.0,
+    funding_rate: float | None = None,
+    funding_interval_hours: float | None = None,
+    maintenance_margin_rate: float | None = None,
+    liquidation_fee_rate: float | None = None,
 ) -> dict:
     """Open a simulated paper position only; no exchange order is submitted.
 
-    Spot SHORT positions are rejected. Futures mode is a simplified simulation,
-    not a full contract, funding, margin or liquidation model.
+    Spot SHORT positions are rejected. Futures use an isolated-margin model
+    with assumed funding rates and an estimated liquidation trigger.
     """
     symbol = symbol.strip().upper()
     if not symbol or len(symbol) > 30 or "/" not in symbol:
@@ -322,10 +355,31 @@ async def open_paper_trade(
         raise ValueError("Spot SHORT is not supported; choose Futures paper mode.")
     if not all(math.isfinite(value) and value > 0 for value in (entry, stop)) or (target is not None and (not math.isfinite(target) or target <= 0)):
         raise ValueError("Entry, stop and target must be positive.")
-    return await _api("POST", "/api/paper/open", payload={
+    if not math.isfinite(leverage) or leverage < 1:
+        raise ValueError("leverage must be finite and at least 1.")
+    if market_type == "spot" and leverage != 1:
+        raise ValueError("Spot paper positions do not support leverage.")
+    optional_futures = {
+        "funding_rate": funding_rate,
+        "funding_interval_hours": funding_interval_hours,
+        "maintenance_margin_rate": maintenance_margin_rate,
+        "liquidation_fee_rate": liquidation_fee_rate,
+    }
+    if any(
+        value is not None and not math.isfinite(value)
+        for value in optional_futures.values()
+    ):
+        raise ValueError("Futures funding and margin inputs must be finite.")
+    payload = {
         "exchange": exchange, "symbol": symbol, "market_type": market_type,
         "side": side, "entry": entry, "stop": stop, "target": target,
+        "leverage": leverage,
+    }
+    payload.update({
+        key: value for key, value in optional_futures.items()
+        if value is not None
     })
+    return await _api("POST", "/api/paper/open", payload=payload)
 
 
 @mcp.tool()

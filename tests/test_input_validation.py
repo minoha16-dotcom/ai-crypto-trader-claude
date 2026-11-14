@@ -43,6 +43,18 @@ def test_paper_open_rejects_short_spot():
         PaperOpen(**valid_trade(side="SHORT", stop=61000, target=58000))
 
 
+def test_paper_open_rejects_leverage_for_spot():
+    with pytest.raises(ValidationError, match="Spot paper positions do not support leverage"):
+        PaperOpen(**valid_trade(leverage=2))
+
+
+def test_paper_open_rejects_futures_leverage_above_configured_max():
+    with pytest.raises(ValidationError, match="Requested leverage exceeds"):
+        PaperOpen(**valid_trade(
+            market_type="futures", leverage=settings.max_futures_leverage + 1
+        ))
+
+
 def test_paper_open_rejects_invalid_stop_direction():
     with pytest.raises(ValidationError, match="LONG stop must be below entry"):
         PaperOpen(**valid_trade(stop=61000))
@@ -186,7 +198,11 @@ def test_backtest_api_loads_real_spot_instrument_precision(monkeypatch):
             "gaps": [], "continuity": "continuous",
         }
 
-    def fake_backtest(candles, starting_balance=10000.0, instrument=None, volume_ratio_threshold=None):
+    def fake_backtest(
+        candles, starting_balance=10000.0, instrument=None,
+        volume_ratio_threshold=None, **futures_params,
+    ):
+        observed["futures_params"] = futures_params
         observed["starting_balance"] = starting_balance
         observed["instrument"] = instrument
         observed["candle_count"] = len(candles)
@@ -213,6 +229,8 @@ def test_backtest_api_loads_real_spot_instrument_precision(monkeypatch):
     assert observed["instrument"]["amount_precision"] == 3
     assert observed["candle_count"] == 52
     assert observed["volume_ratio_threshold"] is None
+    assert observed["futures_params"]["leverage"] == 1.0
+    assert observed["futures_params"]["funding_rate"] is None
 
 
 def test_backtest_reports_shortfall_when_exchange_returns_too_few_candles(monkeypatch):
@@ -334,3 +352,55 @@ def test_walk_forward_endpoint_rejects_incomplete_exchange_history(monkeypatch):
     assert response.status_code == 422
     payload = json.loads(response.body)
     assert "fewer candles than requested" in payload["detail"]
+
+
+
+def test_backtest_endpoint_forwards_isolated_futures_configuration(monkeypatch):
+    observed = {}
+
+    async def fake_resolve_symbol(exchange, symbol, market_type):
+        return "BTC/USDT:USDT"
+
+    async def fake_market_spec(exchange, symbol, market_type):
+        return {
+            "symbol": "BTC/USDT:USDT",
+            "market_type": "futures",
+            "contract_size": 0.001,
+            "contract_type": "linear",
+            "amount_precision": 3,
+            "precision_mode": 2,
+        }
+
+    async def fake_ohlcv(exchange, symbol, timeframe, limit, market_type):
+        candles = [[i, 100, 101, 99, 100, 1000] for i in range(limit)]
+        return candles, {
+            "requested": limit, "received": limit, "shortfall": 0,
+            "request_count": 1, "request_limit": 53,
+            "gaps": [], "continuity": "continuous",
+        }
+
+    def fake_backtest(candles, *args, **kwargs):
+        observed.update(kwargs)
+        return {"trade_count": 0}
+
+    monkeypatch.setattr(main.registry, "resolve_symbol", fake_resolve_symbol)
+    monkeypatch.setattr(main.registry, "market_spec", fake_market_spec)
+    monkeypatch.setattr(main.registry, "ohlcv_with_metadata", fake_ohlcv)
+    monkeypatch.setattr(main, "run_backtest", fake_backtest)
+
+    result = asyncio.run(main.backtest(
+        exchange="bybit",
+        market_type="futures",
+        limit=53,
+        leverage=3,
+        funding_rate=0.0002,
+        funding_interval_hours=4,
+        maintenance_margin_rate=0.006,
+        liquidation_fee_rate=0.004,
+    ))
+    assert result["trade_count"] == 0
+    assert observed["leverage"] == 3
+    assert observed["funding_rate"] == pytest.approx(0.0002)
+    assert observed["funding_interval_hours"] == 4
+    assert observed["maintenance_margin_rate"] == pytest.approx(0.006)
+    assert observed["liquidation_fee_rate"] == pytest.approx(0.004)
