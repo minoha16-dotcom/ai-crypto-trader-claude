@@ -160,8 +160,8 @@ canvas#chart{width:100%;height:150px}
     </div>
     <p id="scanmsg">A scan may take several seconds. Signals are research prompts, not recommendations.</p>
     <div class="scroll"><table><thead><tr><th>Pair</th><th>Signal</th><th>Trend</th><th>Price</th><th>RSI</th><th>ATR</th><th>Score</th><th>Action</th></tr></thead><tbody id="scanrows"><tr><td colspan="8">No scan yet.</td></tr></tbody></table></div>
-    <p id="advisor-status" class="helper-note">The advisor does not place trades. It needs at least 10 closed paper trades linked to scanner setups before it can rank by learned outcomes.</p>
-    <div class="scroll"><table><thead><tr><th>Rank</th><th>Pair</th><th>Signal</th><th>Advisor estimate</th><th>Similar outcomes</th><th></th></tr></thead><tbody id="advisor-rows"><tr><td colspan="6">Select “AI choose best” to scan and rank candidates.</td></tr></tbody></table></div>
+    <p id="advisor-status" class="helper-note">The advisor only ranks candidates. Historical scores use unique closed signal-linked paper trades; they are not calibrated profit probabilities.</p>
+    <div class="scroll"><table><thead><tr><th>Rank</th><th>Pair</th><th>Signal</th><th>Historical score</th><th>Similar outcomes</th><th></th></tr></thead><tbody id="advisor-rows"><tr><td colspan="6">Select “AI choose best” to scan and rank candidates.</td></tr></tbody></table></div>
    </section>
    <section class="panel anchor-section" id="opportunities-panel">
     <div class="panel-head"><div><h2>Top Opportunities</h2><p class="panel-subtitle">Ranked from the latest scanner results</p></div><span class="panel-status" id="opportunities-updated">Waiting for scan</span></div>
