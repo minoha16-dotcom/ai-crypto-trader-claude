@@ -1,6 +1,6 @@
 # Strategy validation design
 
-Status: the v1 chronological walk-forward runner is implemented in the backend API and private MCP bridge. Historical experiment reports still require explicit data runs and review.
+Status: the v1 chronological walk-forward runner and the pre-registered research CLI are implemented. A run produces an evidence report, but results are not approved until dataset coverage, trade counts, all out-of-sample folds, and ablations are independently reviewed.
 
 
 ## 0. Implemented Walk-Forward Runner (v1)
@@ -159,7 +159,54 @@ Do not add MACD or EMA 200 to engine-driven claims until they are implemented,
 tested, and exposed in the backend feature payload. Skills may discuss them as
 optional external chart indicators only when the source data is supplied.
 
-## 5. Skill, MCP, and backend responsibilities
+## 5. Executable research runner and feature ablations
+
+Run the pre-registered public-data experiment from the repository root:
+
+```powershell
+$env:STRATEGY_VALIDATION_EXCHANGES = "kucoin,okx"
+$env:STRATEGY_VALIDATION_LIMIT = "1800"
+python scripts/run_strategy_validation.py
+```
+
+The default universe is Spot BTC/USDT and ETH/USDT plus Futures BTC/USDT
+for each selected exchange. The run uses 1h candles, requires at least 600
+closed candles, removes the still-forming candle, and rejects timestamps with
+missing bars rather than filling them. The default exchanges are KuCoin and
+OKX; Bybit is intentionally not included in the default research run while its
+public connectivity is unverified from the target network.
+
+Pre-registered comparisons:
+- Volume Ratio thresholds 0.8, 1.0, and 1.2 with the baseline signal votes.
+- Baseline directional votes.
+- Ablation without the EMA20/EMA50 alignment vote.
+- Ablation without the close/EMA20 vote.
+- A single composite trend vote replacing the two correlated trend votes.
+
+The report includes all per-fold results, total out-of-sample trade count,
+positive-fold share, expectancy in R, profit factor, worst fold drawdown, and a
+long-only buy-and-hold reference net of estimated round-trip fees/slippage.
+Spot and Futures datasets are reported separately. Futures use the existing
+simplified 2x isolated paper model and its fixed funding/maintenance/liquidation
+assumptions; do not interpret those Futures results as venue-matched execution.
+
+The report's `evidence_status` is deliberately conservative:
+- `INCONCLUSIVE_INSUFFICIENT_COVERAGE_OR_TRADES` when the report lacks
+  four complete datasets, twelve baseline test folds, or 100 baseline
+  out-of-sample trades.
+- `POSITIVE_OUT_OF_SAMPLE_SIGNAL_REQUIRES_INDEPENDENT_REVIEW` only when the
+  minimum evidence is present, the average baseline fold return is positive,
+  at least 55% of baseline test folds are positive, and mean return exceeds
+  the buy-and-hold reference.
+- `NO_ROBUST_POSITIVE_EDGE_DEMONSTRATED` otherwise.
+
+These labels are research triage, not proof of profitability. The report is
+not a fully risk-matched benchmark, does not apply multiple-testing correction,
+and does not claim independent samples across overlapping training windows.
+Any strategy change after reading the report requires a new untouched test
+period. GitHub Actions stores JSON and Markdown outputs as a workflow artifact.
+
+## 6. Skill, MCP, and backend responsibilities
 
 - **Backend** is authoritative for exchange market data, indicator calculations,
   risk checks, paper-trade state, and the implemented single-window backtest.
@@ -179,7 +226,7 @@ product requirement or persisted profile schema defines its fields, consent,
 or effect on the risk engine. It should be added only after a product decision
 defines these behaviors. It must never silently override central risk limits.
 
-## 6. Report and acceptance criteria
+## 7. Report and acceptance criteria
 
 Each research report should record code version, data source, exchange, symbol,
 market type, timeframe, date range, candle count, gap/shortfall metadata,
