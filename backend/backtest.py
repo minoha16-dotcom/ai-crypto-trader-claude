@@ -56,7 +56,7 @@ def _validate_candles(candles):
             raise ValueError(f"Candle {index} has inconsistent high/low values")
 
 
-def run_backtest(candles, starting_balance=10000.0, instrument=None, volume_ratio_threshold=None):
+def run_backtest(candles, starting_balance=10000.0, instrument=None, volume_ratio_threshold=None, start_index=49):
     if len(candles) < 52:
         raise ValueError("At least 52 candles are required for next-open backtesting")
     if volume_ratio_threshold is not None:
@@ -64,6 +64,10 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None, volume_rati
         if not math.isfinite(volume_ratio_threshold) or volume_ratio_threshold < 0:
             raise ValueError("volume_ratio_threshold must be finite and non-negative")
     _validate_candles(candles)
+    if isinstance(start_index, bool) or not isinstance(start_index, int):
+        raise ValueError("start_index must be an integer")
+    if start_index < 49 or start_index >= len(candles) - 1:
+        raise ValueError("start_index must be at least 49 and leave a next candle for entry")
     starting_balance = float(starting_balance)
     if not math.isfinite(starting_balance) or starting_balance <= 0:
         raise ValueError("starting_balance must be finite and positive")
@@ -101,7 +105,7 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None, volume_rati
     peak_equity = equity
     max_drawdown = 0.0
     open_position = None
-    i = 49
+    i = start_index
 
     while i < len(candles) - 1:
         metrics = (
@@ -447,5 +451,7 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None, volume_rati
                 if contract_type != "spot" else "base-asset units"
             ),
             "profit_factor": "null when there are no losing trades",
+            "evaluation_start_index": start_index,
+            "warmup_candles_excluded_from_scoring": start_index,
         },
     }
