@@ -167,3 +167,18 @@ def test_backtest_passes_experimental_volume_threshold_and_reports_it(monkeypatc
 def test_backtest_rejects_invalid_volume_ratio_threshold():
     with pytest.raises(ValueError, match="volume_ratio_threshold"):
         run_backtest(rising_candles(60), volume_ratio_threshold=float("nan"))
+
+
+
+def test_backtest_target_uses_configured_reward_risk_ratio(monkeypatch):
+    monkeypatch.setattr(settings, "reward_risk_ratio", 3.0)
+    monkeypatch.setattr(backtest, "analyze", one_long_then_wait(rising_candles()))
+    candles = [
+        [i * 3600000, 100.0, 101.0, 99.0, 100.0, 100.0]
+        for i in range(60)
+    ]
+
+    result = run_backtest(candles)
+
+    assert result["open_position"]["target"] == pytest.approx(112.0)
+    assert result["assumptions"]["reward_risk_ratio"] == pytest.approx(3.0)
