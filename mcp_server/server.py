@@ -337,11 +337,16 @@ async def open_paper_trade(
     entry: float,
     stop: float,
     target: float | None = None,
+    leverage: float = 1.0,
+    funding_rate: float | None = None,
+    funding_interval_hours: float | None = None,
+    maintenance_margin_rate: float | None = None,
+    liquidation_fee_rate: float | None = None,
 ) -> dict:
     """Open a simulated paper position only; no exchange order is submitted.
 
-    Spot SHORT positions are rejected. Futures mode is a simplified simulation,
-    not a full contract, funding, margin or liquidation model.
+    Spot SHORT positions are rejected. Futures use an isolated-margin model
+    with assumed funding rates and an estimated liquidation trigger.
     """
     symbol = symbol.strip().upper()
     if not symbol or len(symbol) > 30 or "/" not in symbol:
@@ -350,10 +355,31 @@ async def open_paper_trade(
         raise ValueError("Spot SHORT is not supported; choose Futures paper mode.")
     if not all(math.isfinite(value) and value > 0 for value in (entry, stop)) or (target is not None and (not math.isfinite(target) or target <= 0)):
         raise ValueError("Entry, stop and target must be positive.")
-    return await _api("POST", "/api/paper/open", payload={
+    if not math.isfinite(leverage) or leverage < 1:
+        raise ValueError("leverage must be finite and at least 1.")
+    if market_type == "spot" and leverage != 1:
+        raise ValueError("Spot paper positions do not support leverage.")
+    optional_futures = {
+        "funding_rate": funding_rate,
+        "funding_interval_hours": funding_interval_hours,
+        "maintenance_margin_rate": maintenance_margin_rate,
+        "liquidation_fee_rate": liquidation_fee_rate,
+    }
+    if any(
+        value is not None and not math.isfinite(value)
+        for value in optional_futures.values()
+    ):
+        raise ValueError("Futures funding and margin inputs must be finite.")
+    payload = {
         "exchange": exchange, "symbol": symbol, "market_type": market_type,
         "side": side, "entry": entry, "stop": stop, "target": target,
+        "leverage": leverage,
+    }
+    payload.update({
+        key: value for key, value in optional_futures.items()
+        if value is not None
     })
+    return await _api("POST", "/api/paper/open", payload=payload)
 
 
 @mcp.tool()
