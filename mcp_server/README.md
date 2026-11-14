@@ -50,7 +50,7 @@ http://127.0.0.1:8001/mcp
 
 ### Use the authenticated Render API as the backend
 
-The MCP process can remain local/private while calling the deployed FastAPI service:
+The MCP process can remain local/private while calling the deployed FastAPI service. When `scan_opportunities` or `get_ai_recommendations` is called without an exchange argument, the bridge reads `default_exchange` from `/api/exchanges`; explicit exchange arguments continue to take precedence:
 
 ```powershell
 $env:TRADER_API_URL = "https://ai-crypto-trader-claude.onrender.com"
@@ -113,7 +113,8 @@ stop and optional target before asking ChatGPT to call the write tool.
 
 This MCP bridge is an integration layer, not a new trading engine. The project
 release is read from the root VERSION file and checked against the Claude plugin
-manifests in CI. The bridge calls the same-version FastAPI endpoints for market data, instrument metadata, scanning,
-backtesting, opportunities, open positions, risk and the paper journal. It uses
+manifests and README in CI. The bridge calls the FastAPI endpoints for market data,
+instrument metadata, scanning, backtesting, opportunities, open positions, risk
+and the paper journal. It uses
 the same configured backend database and does not place exchange orders.
 
