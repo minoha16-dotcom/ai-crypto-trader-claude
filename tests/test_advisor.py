@@ -171,3 +171,40 @@ def test_advisor_uses_only_latest_closed_trade_for_duplicate_signal_link(
     assert examples[0][1] == 1.0
     assert counts["duplicate_signal_trades_excluded"] == 1
     assert counts["outcome_scope"].startswith("one latest closed trade")
+
+
+
+def test_advisor_reports_breakeven_outcomes_separately(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        settings, "database_url", f"sqlite:///{tmp_path / 'advisor-breakeven.db'}"
+    )
+    init_db()
+    setup = {
+        "exchange": "kucoin", "symbol": "BTC/USDT", "market_type": "spot",
+        "timeframe": "1h", "signal": "LONG", "score": 3,
+        "price": 100.0, "rsi14": 65.0, "adx14": 35.0,
+        "volume_ratio": 1.4, "atr_pct": 0.8, "trend": "bullish",
+    }
+    with connect() as db:
+        cursor = db.execute(
+            "INSERT INTO signals(exchange,symbol,market_type,timeframe,signal,score,price,rsi,trend,payload) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?) RETURNING id",
+            ("kucoin", "BTC/USDT", "spot", "1h", "LONG", 3, 100.0, 65.0, "bullish", json.dumps(setup)),
+        )
+        signal_id = cursor.fetchone()["id"]
+
+    opened = open_trade(
+        "kucoin", "BTC/USDT", "spot", "LONG", 100.0, 95.0, 110.0,
+        signal_id=signal_id,
+    )
+    close_trade(opened["id"], 110.0)
+    with connect() as db:
+        db.execute("UPDATE trades SET pnl=0 WHERE id=?", (opened["id"],))
+
+    examples, counts = load_training_examples("spot", "1h")
+    assert examples == []
+    assert counts["closed_paper_trades"] == 1
+    assert counts["signal_linked_closed_trades"] == 1
+    assert counts["breakeven_closed_trades"] == 1
+    assert counts["examples_for_market_timeframe"] == 0
+    assert counts["overall_historical_win_rate"] == pytest.approx(0.5)
