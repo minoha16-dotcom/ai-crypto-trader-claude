@@ -181,3 +181,24 @@ def test_open_position_limit_uses_settings(isolated_db, monkeypatch):
     open_trade("binance", "ETH/USDT", "spot", "LONG", 100, 95)
     with pytest.raises(ValueError, match=r"\(2\)"):
         open_trade("binance", "SOL/USDT", "spot", "LONG", 100, 95)
+
+
+
+def test_paper_open_schema_uses_configured_default_exchange():
+    from backend.main import PaperOpen
+
+    payload = PaperOpen(
+        symbol="BTC/USDT",
+        side="LONG",
+        entry=100,
+        stop=95,
+    )
+    assert payload.exchange == settings.default_exchange
+
+
+def test_exchange_metadata_exposes_configured_default():
+    from backend.main import exchanges
+
+    payload = exchanges()
+    assert payload["exchanges"] == ["kucoin", "bybit", "okx"]
+    assert payload["default_exchange"] == settings.default_exchange
