@@ -153,7 +153,7 @@ async def dashboard_auth_and_security_headers(request: Request, call_next):
 
 
 class PaperOpen(BaseModel):
-    exchange: str = "kucoin"
+    exchange: str = settings.default_exchange
     symbol: str = Field(min_length=3, max_length=30)
     market_type: str = "spot"
     side: str
@@ -212,7 +212,11 @@ def readiness():
 
 @app.get("/api/exchanges")
 def exchanges():
-    return {"exchanges": list(EXCHANGE_IDS), "connection": "public market data only"}
+    return {
+        "exchanges": list(EXCHANGE_IDS),
+        "default_exchange": settings.default_exchange,
+        "connection": "public market data only",
+    }
 
 
 @app.get("/api/instruments/{exchange}/{symbol:path}")
@@ -320,7 +324,7 @@ async def market_candles(
 
 
 @app.get("/api/backtest")
-async def backtest(exchange="kucoin", symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000, volume_ratio_threshold: float | None = None):
+async def backtest(exchange=settings.default_exchange, symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000, volume_ratio_threshold: float | None = None):
     if exchange not in EXCHANGE_IDS:
         raise HTTPException(400, "Unsupported exchange")
     if market_type not in ("spot", "futures"):
@@ -377,7 +381,7 @@ async def backtest(exchange="kucoin", symbol="BTC/USDT", market_type="spot", tim
 
 
 @app.post("/api/scan")
-async def run_scan(exchange="kucoin", market_type="spot", symbols=None, timeframe="1h"):
+async def run_scan(exchange=settings.default_exchange, market_type="spot", symbols=None, timeframe="1h"):
     if exchange not in EXCHANGE_IDS:
         raise HTTPException(400, "Unsupported exchange")
     if market_type not in ("spot", "futures"):
@@ -396,7 +400,7 @@ async def run_scan(exchange="kucoin", market_type="spot", symbols=None, timefram
 
 
 @app.post("/api/ai/recommendations")
-async def ai_recommendations(exchange="kucoin", market_type="spot", symbols=None, timeframe="1h"):
+async def ai_recommendations(exchange=settings.default_exchange, market_type="spot", symbols=None, timeframe="1h"):
     """Scan public markets and rank candidates from local closed paper-trade outcomes."""
     scan_result = await run_scan(exchange, market_type, symbols, timeframe)
     try:
