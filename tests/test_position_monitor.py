@@ -102,7 +102,20 @@ def test_detailed_monitor_report_counts_rate_limited_position(isolated_db, monke
         "checked": 1,
         "closed": 0,
         "failed": 1,
+        "stale_prices": 0,
+        "timestamp_unavailable": 0,
         "remaining_open": 1,
+        "failures": [{
+            "trade_id": opened["id"],
+            "exchange": "kucoin",
+            "symbol": "BTC/USDT",
+            "market_type": "spot",
+            "error_type": "ExchangeRateLimitCooldown",
+            "message": "kucoin HTTP 429 rate-limit cooldown is active; retry after 60s",
+            "stale_price": False,
+            "upstream_status": 429,
+            "retry_after_seconds": 60,
+        }],
     }
 
     with connect() as db:
@@ -110,3 +123,60 @@ def test_detailed_monitor_report_counts_rate_limited_position(isolated_db, monke
             "SELECT status FROM trades WHERE id=?", (opened["id"],)
         ).fetchone()
     assert row["status"] == "OPEN"
+
+
+
+def test_monitor_rejects_stale_timestamped_prices_and_keeps_position_open(
+    isolated_db, monkeypatch
+):
+    import time
+    from backend import position_monitor
+
+    opened = open_trade("kucoin", "BTC/USDT", "spot", "LONG", 100, 95)
+    now_seconds = 2_000_000_000.0
+    monkeypatch.setattr(
+        settings, "position_monitor_max_price_age_seconds", 60.0
+    )
+    monkeypatch.setattr(position_monitor.time, "time", lambda: now_seconds)
+
+    async def stale_ticker(exchange, symbol, market_type):
+        return {
+            "last": 94.5,
+            "timestamp": (now_seconds - 600.0) * 1000.0,
+        }
+
+    monkeypatch.setattr(registry, "ticker", stale_ticker)
+    report = asyncio.run(monitor_open_positions_once(detailed=True))
+
+    assert report["checked"] == 1
+    assert report["closed"] == 0
+    assert report["failed"] == 1
+    assert report["stale_prices"] == 1
+    assert report["remaining_open"] == 1
+    assert report["failures"][0]["trade_id"] == opened["id"]
+    assert report["failures"][0]["error_type"] == "StaleMarketPrice"
+    assert report["failures"][0]["stale_price"] is True
+    assert "stale" in report["failures"][0]["message"].lower()
+
+    with connect() as db:
+        row = db.execute(
+            "SELECT status FROM trades WHERE id=?", (opened["id"],)
+        ).fetchone()
+    assert row["status"] == "OPEN"
+
+
+def test_monitor_reports_missing_exchange_timestamp_as_unverified(
+    isolated_db, monkeypatch
+):
+    open_trade("kucoin", "BTC/USDT", "spot", "LONG", 100, 95)
+
+    async def timestamp_missing_ticker(exchange, symbol, market_type):
+        return {"last": 100.0, "timestamp": None}
+
+    monkeypatch.setattr(registry, "ticker", timestamp_missing_ticker)
+    report = asyncio.run(monitor_open_positions_once(detailed=True))
+
+    assert report["checked"] == 1
+    assert report["failed"] == 0
+    assert report["timestamp_unavailable"] == 1
+    assert report["failures"] == []

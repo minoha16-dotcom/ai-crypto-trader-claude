@@ -139,6 +139,7 @@ The canonical example is .env.example. Values below are defaults; environment va
 | SIGNAL_MIN_ATR_PCT | 0.1 | Minimum ATR percent filter |
 | TAKER_FEE_RATE | 0.0006 | Estimated fee per side |
 | SLIPPAGE_BPS | 2.0 | Estimated slippage per side |
+| POSITION_MONITOR_MAX_PRICE_AGE_SECONDS | 120 | Reject timestamped ticker snapshots older than this age when auto-closing paper positions |
 
 The default open-position limit remains 3 and the default reward/risk ratio remains 2.0; these values are now centralized in Settings and are not hidden constants.
 

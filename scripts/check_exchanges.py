@@ -29,29 +29,72 @@ async def check(registry, exchange_id, market_type):
     if last is None or not math.isfinite(float(last)) or float(last) <= 0:
         raise RuntimeError("Ticker response did not contain a finite positive last price")
 
+    contract_type = spec.get("contract_type")
+    contract_size = spec.get("contract_size")
+    amount_precision = spec.get("amount_precision")
+    precision_mode = spec.get("precision_mode")
+
     if market_type == "futures":
-        contract_type = spec.get("contract_type")
-        contract_size = spec.get("contract_size")
-        amount_precision = spec.get("amount_precision")
         if contract_type not in ("linear", "inverse"):
             raise RuntimeError("Futures contract must be explicitly linear or inverse")
-        if contract_size is None or not math.isfinite(float(contract_size)) or float(contract_size) <= 0:
-            raise RuntimeError("Futures market has invalid contractSize")
-        if amount_precision is None:
-            raise RuntimeError("Futures market does not publish amount precision")
+    elif contract_type != "spot":
+        raise RuntimeError("Spot market metadata must identify a Spot instrument")
+
+    if contract_size is None or not math.isfinite(float(contract_size)) or float(contract_size) <= 0:
+        raise RuntimeError("Market has invalid contractSize")
+    if amount_precision is None:
+        raise RuntimeError("Market does not publish amount precision")
+    try:
+        precision = float(amount_precision)
+    except (TypeError, ValueError, OverflowError):
+        raise RuntimeError("Market amount precision is not numeric") from None
+    if not math.isfinite(precision) or precision < 0:
+        raise RuntimeError("Market amount precision must be finite and non-negative")
+    if precision_mode == 2:
+        if not precision.is_integer():
+            raise RuntimeError("Decimal-place precision must be an integer")
+    elif precision_mode == 3:
+        if not precision.is_integer() or precision <= 0:
+            raise RuntimeError("Significant-digit precision must be a positive integer")
+    elif precision_mode == 4:
+        if precision <= 0:
+            raise RuntimeError("Tick-size precision must be positive")
     else:
-        contract_type = "spot"
-        contract_size = 1.0
-        amount_precision = spec.get("amount_precision")
+        raise RuntimeError(f"Unsupported CCXT precision mode: {precision_mode}")
+
+    for field in ("min_amount", "max_amount", "min_cost", "max_cost"):
+        limit_value = spec.get(field)
+        if limit_value is not None:
+            try:
+                numeric_limit = float(limit_value)
+            except (TypeError, ValueError, OverflowError):
+                raise RuntimeError(f"Market {field} is not numeric") from None
+            if not math.isfinite(numeric_limit) or numeric_limit < 0:
+                raise RuntimeError(f"Market {field} must be finite and non-negative")
+
+    raw_timestamp = ticker.get("timestamp")
+    if raw_timestamp is not None:
+        try:
+            timestamp = float(raw_timestamp)
+        except (TypeError, ValueError, OverflowError):
+            raise RuntimeError("Ticker timestamp is not numeric") from None
+        if not math.isfinite(timestamp) or timestamp <= 0:
+            raise RuntimeError("Ticker timestamp must be finite and positive")
 
     return {
         "exchange": exchange_id,
         "market_type": market_type,
         "symbol": symbol,
         "last": float(last),
+        "ticker_timestamp": raw_timestamp,
         "contract_type": contract_type,
         "contract_size": float(contract_size),
-        "amount_precision": amount_precision,
+        "amount_precision": precision,
+        "precision_mode": precision_mode,
+        "min_amount": spec.get("min_amount"),
+        "max_amount": spec.get("max_amount"),
+        "min_cost": spec.get("min_cost"),
+        "max_cost": spec.get("max_cost"),
     }
 
 
@@ -138,8 +181,13 @@ async def main():
     if passed == 0 and failed == 0:
         print("INCONCLUSIVE: no exchange endpoint could be verified from this runner region.")
     if failed:
-        raise SystemExit(1)
+        return 1
+    if skipped or inconclusive:
+        # A green workflow must mean all six public market-data checks ran.
+        # Provider geo-blocks and cooldowns are neither code failures nor passes.
+        return 2
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    raise SystemExit(asyncio.run(main()))

@@ -90,8 +90,21 @@ jobs:
                           f"checked={report['checked']} "
                           f"closed={report['closed']} "
                           f"remaining_open={report['remaining_open']} "
-                          f"failed={report['failed']}"
+                          f"failed={report['failed']} "
+                          f"stale_prices={report['stale_prices']} "
+                          f"timestamp_unavailable={report['timestamp_unavailable']}"
                       )
+                      for failure in report["failures"]:
+                          print(
+                              "Position check failure: "
+                              f"trade_id={failure['trade_id']} "
+                              f"exchange={failure['exchange']} "
+                              f"symbol={failure['symbol']} "
+                              f"market_type={failure['market_type']} "
+                              f"error_type={failure['error_type']} "
+                              f"message={failure['message']} "
+                              f"retry_after_seconds={failure['retry_after_seconds']}"
+                          )
                       if report["failed"]:
                           raise SystemExit(
                               f"Monitor incomplete: {report['failed']} open position(s) "

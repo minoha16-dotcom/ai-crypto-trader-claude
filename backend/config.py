@@ -34,6 +34,9 @@ class Settings(BaseSettings):
 
     paper_starting_balance: float = Field(default=10000.0, gt=0, allow_inf_nan=False)
     paper_entry_max_deviation_pct: float = Field(default=5.0, gt=0, le=100, allow_inf_nan=False)
+    position_monitor_max_price_age_seconds: float = Field(
+        default=120.0, gt=0, le=3600, allow_inf_nan=False
+    )
     scan_symbols: str = "BTC/USDT,ETH/USDT,SOL/USDT"
     scan_timeframe: str = "1h"
 
