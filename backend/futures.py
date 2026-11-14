@@ -129,6 +129,11 @@ def liquidation_price(
         if side == "LONG":
             numerator = entry_notional - margin + entry_notional * fee + funding
             denominator = base_units * (1 - fee - maintenance - liquidation_fee)
+            # At 1x with zero entry/exit fees and no funding, the isolated
+            # long has no positive-price liquidation threshold. Preserve that
+            # as None instead of claiming a synthetic positive liquidation.
+            if numerator <= 0:
+                return None
         else:
             numerator = margin + entry_notional - entry_notional * fee - funding
             denominator = base_units * (1 + fee + maintenance + liquidation_fee)
@@ -145,6 +150,8 @@ def liquidation_price(
             factor = 1 - 1 / leverage + total_cost_fraction + funding_fraction
         else:
             factor = 1 + 1 / leverage - total_cost_fraction - funding_fraction
+        if factor <= 0:
+            return None
         price = entry * factor
 
     if not math.isfinite(price) or price <= 0:
@@ -172,6 +179,10 @@ def margin_snapshot(
     )
     maintenance = mark_notional * float(maintenance_margin_rate)
     margin_equity = float(initial_margin_value) + float(unrealized_pnl)
+    liq_value = (
+        float(liquidation_price_value)
+        if liquidation_price_value is not None else None
+    )
     return {
         "leverage": float(leverage),
         "initial_margin": float(initial_margin_value),
@@ -180,12 +191,14 @@ def margin_snapshot(
         "margin_ratio_pct": (
             margin_equity / maintenance * 100.0 if maintenance > 0 else None
         ),
-        "liquidation_price": float(liquidation_price_value),
+        "liquidation_price": liq_value,
         "liquidation_distance_pct": (
-            abs(float(mark) - float(liquidation_price_value)) / float(mark) * 100.0
+            abs(float(mark) - liq_value) / float(mark) * 100.0
+            if liq_value is not None else None
         ),
         "funding_paid": float(funding_paid),
-        "is_liquidated": liquidation_triggered(
-            side, mark, liquidation_price_value
+        "is_liquidated": (
+            liquidation_triggered(side, mark, liq_value)
+            if liq_value is not None else False
         ),
     }
