@@ -27,7 +27,7 @@ TIMEFRAME = "1h"
 TIMEFRAME_MS = 60 * 60 * 1000
 DEFAULT_EXCHANGES = ("kucoin", "okx")
 SPOT_SYMBOLS = ("BTC/USDT", "ETH/USDT")
-FUTURES_SYMBOLS = ("BTC/USDT",)
+FUTURES_SYMBOLS = ("BTC/USDT", "ETH/USDT")
 VOLUME_THRESHOLDS = (0.8, 1.0, 1.2)
 ABLATIONS = (
     "baseline",
@@ -35,7 +35,7 @@ ABLATIONS = (
     "without_price_vs_ema20",
     "single_composite_trend",
 )
-LIMIT = 1800
+LIMIT = 5000
 MINIMUM_CANDLES = 50 + 250 + 100 + 100 + 2 * 50
 STARTING_BALANCE = 10_000.0
 WALK_FORWARD = {
