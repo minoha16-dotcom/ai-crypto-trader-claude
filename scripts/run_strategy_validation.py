@@ -48,7 +48,7 @@ WALK_FORWARD = {
     "embargo_bars": 50,
     "max_holding_bars": 20,
     "window_mode": "rolling",
-    "max_folds": 10,
+    "max_folds": 45,
 }
 
 
