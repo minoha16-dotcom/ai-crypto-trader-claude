@@ -180,18 +180,24 @@ def load_training_examples(market_type, timeframe):
     seen_signal_ids = set()
     examples = []
     duplicate_rows = 0
+    unique_signal_trades = 0
+    breakeven_trades = 0
     for row in rows:
         signal_id = row["signal_id"]
         if signal_id in seen_signal_ids:
             duplicate_rows += 1
             continue
         seen_signal_ids.add(signal_id)
+        unique_signal_trades += 1
         try:
             item = json.loads(row["payload"])
             if not isinstance(item, dict):
                 continue
             pnl = float(row["pnl"] or 0)
             if not math.isfinite(pnl):
+                continue
+            if abs(pnl) <= 1e-12:
+                breakeven_trades += 1
                 continue
             examples.append((_features(item), 1.0 if pnl > 0 else 0.0))
         except (TypeError, ValueError, json.JSONDecodeError):
@@ -203,15 +209,22 @@ def load_training_examples(market_type, timeframe):
     examples.reverse()
     count = len(examples)
     wins = sum(1 for _, won in examples if won > 0.5)
+    losses = count - wins
     return examples, {
-        "closed_paper_trades": count,
+        "closed_paper_trades": unique_signal_trades,
         "winning_closed_trades": wins,
+        "losing_closed_trades": losses,
+        "breakeven_closed_trades": breakeven_trades,
         "overall_historical_win_rate": round(_baseline(examples), 4),
-        "signal_linked_closed_trades": count,
+        "signal_linked_closed_trades": unique_signal_trades,
         "examples_for_market_timeframe": count,
         "all_closed_paper_trades": int(all_closed or 0),
         "duplicate_signal_trades_excluded": duplicate_rows,
-        "outcome_scope": "one latest closed trade per distinct user-selected scanner signal for this market type and timeframe",
+        "outcome_scope": (
+            "one latest closed trade per distinct user-selected scanner signal for this "
+            "market type and timeframe; exact breakeven PnL is reported separately "
+            "and excluded from win/loss training"
+        ),
     }
 
 
