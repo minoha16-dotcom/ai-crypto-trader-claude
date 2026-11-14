@@ -18,6 +18,8 @@ def test_free_position_monitor_embedded_python_is_valid_and_reports_partial_fail
     compile(script, "free-position-monitor-inline.py", "exec")
     assert "monitor_open_positions_once(detailed=True)" in script
     assert 'if report["failed"]' in script
+    assert 'for failure in report["failures"]' in script
+    assert "stale_prices" in script
     assert "TRADER_DATABASE_URL" in script
 
 
