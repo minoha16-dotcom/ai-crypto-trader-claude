@@ -215,7 +215,7 @@ canvas#chart{width:100%;height:150px}
        <label>Funding rate / settlement<input id="futures-funding-rate" type="number" min="-0.02" max="0.02" step="0.0001" value="0.0001"></label>
        <label>Funding interval (hours)<select id="futures-funding-interval"><option value="8" selected>8 hours</option><option value="4">4 hours</option><option value="1">1 hour</option></select></label>
       </div>
-      <p class="helper-note">Paper assumptions only: fixed funding rate, isolated margin, 0.5% maintenance margin and 0.5% liquidation fee by default. These are not live exchange rates or venue tier data.</p>
+      <p id="futures-assumptions-note" class="helper-note">Paper assumptions only. These are not live exchange rates or venue tier data.</p>
      </div>
     </div>
     <div class="ticket-actions"><button type="button" class="secondary" onclick="enableAutoTarget()">Auto 2R</button><button onclick="openTrade()">Open paper trade</button></div>
@@ -240,7 +240,7 @@ canvas#chart{width:100%;height:150px}
 </div>
 <script>
 const $=id=>document.getElementById(id),escapeHtml=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])),money=n=>Number(n||0).toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:2}),formatQuantity=value=>{const n=Number(value);return Number.isFinite(n)?n.toLocaleString(undefined,{useGrouping:false,maximumSignificantDigits:15}):'—'};
- let targetAutoMode=true,journalOffset=0,selectedSetupContext=null,defaultRewardRiskRatio=2;
+ let targetAutoMode=true,journalOffset=0,selectedSetupContext=null,defaultRewardRiskRatio=2,futuresSettingsTouched=false;
 async function api(path,opts={}){let r=await fetch(path,{headers:{'Content-Type':'application/json'},...opts}),d=await r.json();if(!r.ok)throw Error(d.detail||'Request failed');return d}
 let watchRefreshBusy=false;
 function marketNumber(value){
@@ -403,7 +403,16 @@ async function refresh(){
   $('risk-open-count').textContent=risk.open_trades+' / '+risk.max_open_trades;
   $('daily-remaining').textContent=money(risk.remaining_daily_loss);
   $('risk-available').textContent=money(risk.available_open_risk);
-  $('risk-status').textContent=risk.status+' · '+(risk.prices_complete?'Live prices verified':'Missing live price: new trades blocked')+' · Daily cap '+risk.max_daily_loss_pct+'% · Open-risk cap '+risk.max_open_risk_pct+'%';
+  $('risk-status').textContent=risk.status+' · '+(risk.prices_complete?'Live prices verified':'Missing live price: new trades blocked')+' · Daily cap '+risk.max_daily_loss_pct+'% · Open-risk cap '+risk.max_open_risk_pct+'% · Futures margin cap '+risk.max_futures_margin_pct+'% · Max leverage '+risk.max_futures_leverage+'x';
+  $('futures-leverage').max=String(risk.max_futures_leverage);
+  if(!futuresSettingsTouched){
+   $('futures-funding-rate').value=String(risk.paper_futures_default_funding_rate);
+   const interval=String(risk.paper_futures_funding_interval_hours);
+   if([...$('futures-funding-interval').options].some(option=>option.value===interval)){
+    $('futures-funding-interval').value=interval;
+   }
+  }
+  $('futures-assumptions-note').textContent='Paper assumptions only: isolated margin, '+(Number(risk.paper_futures_maintenance_margin_rate)*100).toFixed(2)+'% maintenance margin and '+(Number(risk.paper_futures_liquidation_fee_rate)*100).toFixed(2)+'% liquidation fee. These are not live exchange rates, exchange tier data or live liquidation estimates.';
  }
  if(a){
   $('equity').textContent=money(a.equity);
@@ -439,6 +448,10 @@ $('positions').addEventListener('click',event=>{
  if(Number.isInteger(id)&&id>0)closeTrade(id,button.dataset.exitPrice);
 });
 $('market').addEventListener('change',syncFuturesControls);
+ ['futures-leverage','futures-funding-rate','futures-funding-interval'].forEach(id=>{
+  $(id).addEventListener('input',()=>{futuresSettingsTouched=true});
+  $(id).addEventListener('change',()=>{futuresSettingsTouched=true});
+ });
  $('scanrows').addEventListener('click',event=>{const button=event.target.closest('button[data-ticket-symbol]');if(button)ticket(button.dataset.ticketSymbol,Number(button.dataset.ticketPrice),Number(button.dataset.ticketDistance),button.dataset.ticketSignal,Number(button.dataset.ticketId))});
 $('advisor-rows').addEventListener('click',event=>{const button=event.target.closest('button[data-ticket-symbol]');if(button)ticket(button.dataset.ticketSymbol,Number(button.dataset.ticketPrice),Number(button.dataset.ticketDistance),button.dataset.ticketSignal,Number(button.dataset.ticketId))});
 $('journal-pagination').addEventListener('click',event=>{
