@@ -258,13 +258,13 @@ def run_walk_forward_backtest(
         )
         validation_result = _evaluate_period(
             candles, validation_start, validation_end, warmup_bars, starting_balance,
-            instrument, volume_ratio_threshold, max_holding_bars,
+            instrument, volume_ratio_threshold, feature_ablation, max_holding_bars,
             leverage, funding_rate, funding_interval_hours,
             maintenance_margin_rate, liquidation_fee_rate,
         )
         test_result = _evaluate_period(
             candles, test_start, test_end, warmup_bars, starting_balance,
-            instrument, volume_ratio_threshold, max_holding_bars,
+            instrument, volume_ratio_threshold, feature_ablation, max_holding_bars,
             leverage, funding_rate, funding_interval_hours,
             maintenance_margin_rate, liquidation_fee_rate,
         )
