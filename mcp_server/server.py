@@ -210,8 +210,9 @@ async def run_walk_forward(
     test_bars: int = 100,
     step_bars: int = 100,
     warmup_bars: int = 50,
-    purge_bars: int = 1,
-    embargo_bars: int = 1,
+    purge_bars: int = 20,
+    embargo_bars: int | None = None,
+    max_holding_bars: int = 20,
     window_mode: Literal["rolling", "expanding"] = "rolling",
     max_folds: int = 10,
     volume_ratio_threshold: float | None = None,
@@ -228,6 +229,17 @@ async def run_walk_forward(
         not math.isfinite(volume_ratio_threshold) or volume_ratio_threshold < 0
     ):
         raise ValueError("volume_ratio_threshold must be finite and non-negative.")
+    if isinstance(max_holding_bars, bool) or not isinstance(max_holding_bars, int) or max_holding_bars < 1:
+        raise ValueError("max_holding_bars must be a positive integer.")
+    if isinstance(purge_bars, bool) or not isinstance(purge_bars, int) or purge_bars < max_holding_bars:
+        raise ValueError("purge_bars must be at least max_holding_bars.")
+    required_embargo = max(warmup_bars, max_holding_bars)
+    if embargo_bars is not None and (
+        isinstance(embargo_bars, bool)
+        or not isinstance(embargo_bars, int)
+        or embargo_bars < required_embargo
+    ):
+        raise ValueError("embargo_bars must be at least max(warmup_bars, max_holding_bars).")
     params = {
         "exchange": exchange,
         "symbol": symbol,
@@ -240,11 +252,13 @@ async def run_walk_forward(
         "step_bars": step_bars,
         "warmup_bars": warmup_bars,
         "purge_bars": purge_bars,
-        "embargo_bars": embargo_bars,
+        "max_holding_bars": max_holding_bars,
         "window_mode": window_mode,
         "max_folds": max_folds,
         "max_missing_bars": max_missing_bars,
     }
+    if embargo_bars is not None:
+        params["embargo_bars"] = embargo_bars
     if volume_ratio_threshold is not None:
         params["volume_ratio_threshold"] = volume_ratio_threshold
     return await _api("GET", "/api/walk-forward", params=params)
