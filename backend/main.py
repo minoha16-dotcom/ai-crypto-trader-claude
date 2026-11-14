@@ -18,6 +18,7 @@ from .scanner import scan
 from .paper import open_trade, close_trade, journal, account
 from .risk import risk_manager
 from .backtest import run_backtest
+from .walk_forward import run_walk_forward_backtest
 from .position_monitor import run_position_monitor
 from .metrics import position_pnl, position_risk
 from .advisor import analyze_closed_trade_history
@@ -376,6 +377,99 @@ async def backtest(exchange=settings.default_exchange, symbol="BTC/USDT", market
         }
     except ExchangeRateLimitCooldown:
         raise
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
+
+
+_WALK_FORWARD_TIMEFRAME_MS = {
+    "5m": 300_000,
+    "15m": 900_000,
+    "30m": 1_800_000,
+    "1h": 3_600_000,
+    "2h": 7_200_000,
+    "4h": 14_400_000,
+    "1d": 86_400_000,
+}
+
+
+@app.get("/api/walk-forward")
+async def walk_forward(
+    exchange=settings.default_exchange,
+    symbol="BTC/USDT",
+    market_type="spot",
+    timeframe="1h",
+    limit: int = 1500,
+    train_bars: int = 250,
+    validation_bars: int = 100,
+    test_bars: int = 100,
+    step_bars: int = 100,
+    warmup_bars: int = 50,
+    purge_bars: int = 1,
+    embargo_bars: int = 1,
+    window_mode: str = "rolling",
+    max_folds: int = 10,
+    volume_ratio_threshold: float | None = None,
+    max_missing_bars: int = 0,
+):
+    """Run a chronological, paper-only walk-forward evaluation on public OHLCV."""
+    if exchange not in EXCHANGE_IDS:
+        raise HTTPException(400, "Unsupported exchange")
+    if market_type not in ("spot", "futures"):
+        raise HTTPException(400, "market_type must be spot or futures")
+    if timeframe not in _WALK_FORWARD_TIMEFRAME_MS:
+        raise HTTPException(400, "Unsupported timeframe")
+    if limit < 53 or limit > 5000:
+        raise HTTPException(400, "limit must be between 53 and 5000")
+    try:
+        resolved_symbol = await registry.resolve_symbol(exchange, symbol, market_type)
+        instrument = await registry.market_spec(exchange, resolved_symbol, market_type)
+        candles, candle_meta = await registry.ohlcv_with_metadata(
+            exchange, resolved_symbol, timeframe, limit, market_type
+        )
+        # The final exchange candle may still be forming; exclude it completely.
+        closed_candles = candles[:-1]
+        if candle_meta.get("shortfall", 0) > 0:
+            return JSONResponse(status_code=422, content={
+                "detail": "Exchange returned fewer candles than requested; "
+                          "walk-forward folds require the complete requested window.",
+                "exchange": exchange,
+                "symbol": resolved_symbol,
+                "timeframe": timeframe,
+                "candle_data": candle_meta,
+            })
+        result = await run_in_threadpool(
+            run_walk_forward_backtest,
+            closed_candles,
+            train_bars=train_bars,
+            validation_bars=validation_bars,
+            test_bars=test_bars,
+            step_bars=step_bars,
+            warmup_bars=warmup_bars,
+            purge_bars=purge_bars,
+            embargo_bars=embargo_bars,
+            window_mode=window_mode,
+            max_folds=max_folds,
+            starting_balance=settings.paper_starting_balance,
+            instrument=instrument,
+            volume_ratio_threshold=volume_ratio_threshold,
+            expected_candle_ms=_WALK_FORWARD_TIMEFRAME_MS[timeframe],
+            max_missing_bars=max_missing_bars,
+        )
+        return {
+            "exchange": exchange,
+            "symbol": resolved_symbol,
+            "market_type": market_type,
+            "timeframe": timeframe,
+            "candle_data": candle_meta,
+            "requested_candles": candle_meta["requested"],
+            "received_candles": candle_meta["received"],
+            "candle_shortfall": candle_meta["shortfall"],
+            **result,
+        }
+    except ExchangeRateLimitCooldown:
+        raise
+    except ValueError as exc:
+        raise HTTPException(422, str(exc))
     except Exception as exc:
         raise HTTPException(400, str(exc))
 
