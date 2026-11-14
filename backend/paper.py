@@ -1,6 +1,7 @@
 from .database import connect
 from .config import settings
 from .risk import risk_manager
+import math
 import time
 
 from .metrics import position_risk, position_pnl, trading_cost_rate
