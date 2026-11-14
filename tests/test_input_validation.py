@@ -307,6 +307,9 @@ def test_walk_forward_endpoint_uses_closed_candles_and_exchange_contract(monkeyp
     assert observed["expected_candle_ms"] == 3_600_000
     assert observed["starting_balance"] == pytest.approx(4321.0)
     assert observed["volume_ratio_threshold"] == 1.2
+    assert observed["max_holding_bars"] == 20
+    assert observed["purge_bars"] == 20
+    assert observed["embargo_bars"] is None
 
 
 def test_walk_forward_endpoint_rejects_incomplete_exchange_history(monkeypatch):
