@@ -59,7 +59,7 @@ def test_rolling_walk_forward_creates_chronological_non_overlapping_test_folds(m
     calls = []
     monkeypatch.setattr(walk_forward, "run_backtest", fake_backtest(calls))
     result = walk_forward.run_walk_forward_backtest(
-        candles(400),
+        candles(420),
         train_bars=100,
         validation_bars=40,
         test_bars=40,
