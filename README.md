@@ -122,7 +122,7 @@ The dashboard and API routes require HTTP Basic Authentication. Only health and 
 
 ## Configuration
 
-The canonical example is .env.example. Values below are defaults; environment variables or a local .env file can override them.
+The canonical example is .env.example. Values below are defaults; environment variables or a local .env file can override them. DEFAULT_EXCHANGE is validated against KuCoin, Bybit, and OKX and supplies the default for the dashboard, API scan/backtest/recommendation routes, and MCP scan/recommendation tools when no exchange is passed. An explicit supported exchange always takes precedence.
 
 | Setting | Default | Purpose |
 |---|---:|---|
@@ -233,7 +233,7 @@ The repository Blueprint is defined by render.yaml:
 
 Use the Supabase PostgreSQL Session Pooler URI for DATABASE_URL and keep it private. Set a unique dashboard username and password in Render. After a manual deploy, verify /api/health and /api/ready, authenticate to the dashboard, and confirm the journal remains available. Check the actual Render service's Auto-Deploy setting as well; a Blueprint file alone does not retroactively change an existing service setting.
 
-The Render Free web service may sleep while idle, and Supabase Free projects may pause. This setup is for testing and research, not guaranteed always-on monitoring. The server-side paper position monitor is best-effort and periodic, not real-time or guaranteed. It is not an exchange stop-loss service.
+The Render Free web service spins down after 15 consecutive minutes without inbound HTTP requests or WebSocket messages; the next request wakes it and may incur roughly a one-minute cold start. Its filesystem is ephemeral, so do not store the database on the service disk. Supabase Free projects can pause after a week with too little database activity. This setup is for testing and research, not guaranteed always-on monitoring. The server-side paper position monitor is best-effort and periodic, not real-time or guaranteed. It is not an exchange stop-loss service.
 
 ## Fine print
 
