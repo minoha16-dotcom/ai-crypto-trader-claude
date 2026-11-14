@@ -1,9 +1,9 @@
 name: Public exchange connectivity smoke test
 
 on:
+  # Public exchanges may rate-limit GitHub-hosted runner IPs.
+  # Run this diagnostic manually when verifying venue connectivity.
   workflow_dispatch:
-  pull_request:
-    branches: [deploy/render-supabase-postgres, feature/p1-futures-margin-funding-advisor]
 
 permissions:
   contents: read
