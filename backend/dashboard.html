@@ -87,6 +87,8 @@ tbody tr:hover{background:rgba(101,168,255,.045)}
 .risk-metric b{display:block;margin-top:6px;color:#eef5ff;font-size:16px;font-weight:850;font-variant-numeric:tabular-nums}
 .ticket-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 .ticket-grid .wide{grid-column:1/-1}
+.futures-only{display:none}
+.futures-only.is-visible{display:block}
 .ticket-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:11px}.ticket-actions button{flex:1}
 .helper-note{margin:9px 0 0;color:#8096b1;font-size:9px;line-height:1.5}
 #position-alerts p{color:#d7e4f5;font-size:10px}
@@ -207,9 +209,17 @@ canvas#chart{width:100%;height:150px}
      <label>Entry<input id="entry" type="number" step="any"></label>
      <label>Stop loss<input id="stop" type="number" step="any"></label>
      <label>Take profit<input id="target" type="number" step="any"><small id="target-mode" class="helper-note">Auto-calculated from Entry and Stop</small></label>
+     <div id="futures-controls" class="wide futures-only" aria-hidden="true">
+      <div class="ticket-grid">
+       <label>Leverage (isolated)<input id="futures-leverage" type="number" min="1" max="5" step="1" value="1"></label>
+       <label>Funding rate / settlement<input id="futures-funding-rate" type="number" min="-0.02" max="0.02" step="0.0001" value="0.0001"></label>
+       <label>Funding interval (hours)<select id="futures-funding-interval"><option value="8" selected>8 hours</option><option value="4">4 hours</option><option value="1">1 hour</option></select></label>
+      </div>
+      <p class="helper-note">Paper assumptions only: fixed funding rate, isolated margin, 0.5% maintenance margin and 0.5% liquidation fee by default. These are not live exchange rates or venue tier data.</p>
+     </div>
     </div>
     <div class="ticket-actions"><button type="button" class="secondary" onclick="enableAutoTarget()">Auto 2R</button><button onclick="openTrade()">Open paper trade</button></div>
-    <p class="helper-note">Entry must be within 5% of the selected market price. Automatic target uses 2R. Central risk sizing applies.</p>
+    <p class="helper-note">Entry must be within 5% of the selected market price. Automatic target uses 2R. Futures use a simplified isolated-margin paper model; no live orders are sent.</p>
    </section>
    <section class="panel anchor-section" id="risk-panel">
     <div class="panel-head"><div><span class="eyebrow">Capital protection</span><h2 style="margin-top:5px">Risk Controls</h2></div><span class="panel-status" id="risk-open-count">0 / — open</span></div>
@@ -420,7 +430,7 @@ function renderStats(trades){const closed=trades.filter(t=>t.status==='CLOSED'),
 function setupButton(x){return '<button class="secondary" data-ticket-symbol="'+escapeHtml(x.symbol)+'" data-ticket-price="'+Number(x.price)+'" data-ticket-distance="'+Number(x.stop_distance)+'" data-ticket-signal="'+escapeHtml(x.signal)+'" data-ticket-id="'+Number(x.signal_id||0)+'">Review setup</button>'}
 function scanRow(x){if(x.error)return '<tr><td>'+escapeHtml(x.symbol)+'</td><td colspan="7">'+escapeHtml(x.error)+'</td></tr>';const action=['LONG','SHORT'].includes(x.signal)?setupButton(x):'<span class="muted">Wait for a signal</span>';return '<tr><td>'+escapeHtml(x.symbol)+'</td><td class="'+escapeHtml(x.signal)+'">'+escapeHtml(x.signal)+'</td><td class="'+escapeHtml(x.trend)+'">'+escapeHtml(x.trend)+'</td><td>'+Number(x.price).toPrecision(7)+'</td><td>'+Number(x.rsi14).toFixed(1)+'</td><td>'+Number(x.atr14).toPrecision(5)+'</td><td>'+Number(x.score).toLocaleString(undefined,{maximumFractionDigits:0})+'</td><td>'+action+'</td></tr>'}
 async function scan(){let msg=$('scanmsg');msg.textContent='Scanning public exchange candles…';try{let q=new URLSearchParams({exchange:$('exchange').value,market_type:$('market').value,timeframe:$('timeframe').value,symbols:$('symbols').value}),d=await api('/api/scan?'+q,{method:'POST'});$('scanrows').innerHTML=d.results.map(scanRow).join('');msg.textContent='Scan complete. Signals are research prompts, not recommendations.';refresh()}catch(e){msg.textContent=e.message}}
-function renderAiAdvisor(data){const rows=$('advisor-rows');if(!data.ranked_opportunities?.length){rows.innerHTML='<tr><td colspan="6">No LONG or SHORT candidates passed the scanner filters.</td></tr>';$('advisor-status').textContent=data.note+' '+data.execution;return}rows.innerHTML=data.ranked_opportunities.map((x,i)=>{const hasEstimate=x.estimated_historical_win_rate!==undefined;const estimate=hasEstimate?(Number(x.estimated_historical_win_rate)*100).toFixed(1)+'% historical estimate':Number(x.technical_ranking_score).toFixed(1)+' technical points';const support=data.learning_ready?Number(x.similar_example_support).toFixed(1)+' similar examples':hasEstimate?'No similar-signal training':'Not trained';return '<tr><td>'+(i+1)+'</td><td>'+escapeHtml(x.symbol)+'</td><td class="'+escapeHtml(x.signal)+'">'+escapeHtml(x.signal)+'</td><td>'+estimate+'</td><td>'+support+'</td><td>'+setupButton(x)+'</td></tr>'}).join('');const training=data.training||{};$('advisor-status').textContent=data.note+' Closed trades: '+training.closed_paper_trades+'; signal-linked examples for this market/timeframe: '+training.examples_for_market_timeframe+' / '+data.minimum_examples+' needed for similarity learning. '+data.execution;}
+function renderAiAdvisor(data){const rows=$('advisor-rows');if(!data.ranked_opportunities?.length){rows.innerHTML='<tr><td colspan="6">No LONG or SHORT candidates passed the scanner filters.</td></tr>';$('advisor-status').textContent=data.note+' '+data.execution;return}rows.innerHTML=data.ranked_opportunities.map((x,i)=>{const hasScore=x.historical_win_rate_score!==undefined;const estimate=hasScore?(Number(x.historical_win_rate_score)*100).toFixed(1)+'% historical ranking score (not probability)':Number(x.technical_ranking_score).toFixed(1)+' technical points';const support=data.learning_ready?Number(x.similar_example_support).toFixed(1)+' effective similar outcomes · '+Number(x.historical_outcomes_used||0)+' total':'technical only';return '<tr><td>'+(i+1)+'</td><td>'+escapeHtml(x.symbol)+'</td><td class="'+escapeHtml(x.signal)+'">'+escapeHtml(x.signal)+'</td><td>'+estimate+'</td><td>'+support+'</td><td>'+setupButton(x)+'</td></tr>'}).join('');const training=data.training||{};const calibration=data.calibration||{};const diagnostic=calibration.out_of_sample_brier_score==null?'Chronological holdout: '+(calibration.status||'not available'):'Chronological Brier '+calibration.out_of_sample_brier_score+' vs baseline '+calibration.baseline_brier_score+' ('+calibration.status+')';$('advisor-status').textContent=data.note+' Unique signal-linked outcomes: '+training.examples_for_market_timeframe+' / '+data.minimum_examples+' needed. '+diagnostic+'. No calibrated profit probability is provided. '+data.execution;}
 async function runAiAdvisor(){const status=$('advisor-status');status.textContent='Scanning public candles and ranking paper-trade setups…';$('advisor-rows').innerHTML='<tr><td colspan="6">Analyzing…</td></tr>';try{const q=new URLSearchParams({exchange:$('exchange').value,market_type:$('market').value,timeframe:$('timeframe').value,symbols:$('symbols').value});const data=await api('/api/ai/recommendations?'+q,{method:'POST'});renderAiAdvisor(data);refresh()}catch(error){status.textContent='Advisor unavailable: '+error.message;$('advisor-rows').innerHTML='<tr><td colspan="6">No recommendation returned.</td></tr>'}}
 $('positions').addEventListener('click',event=>{
  const button=event.target.closest('button[data-close-trade]');
@@ -428,7 +438,8 @@ $('positions').addEventListener('click',event=>{
  const id=Number(button.dataset.closeTrade);
  if(Number.isInteger(id)&&id>0)closeTrade(id,button.dataset.exitPrice);
 });
-$('scanrows').addEventListener('click',event=>{const button=event.target.closest('button[data-ticket-symbol]');if(button)ticket(button.dataset.ticketSymbol,Number(button.dataset.ticketPrice),Number(button.dataset.ticketDistance),button.dataset.ticketSignal,Number(button.dataset.ticketId))});
+$('market').addEventListener('change',syncFuturesControls);
+ $('scanrows').addEventListener('click',event=>{const button=event.target.closest('button[data-ticket-symbol]');if(button)ticket(button.dataset.ticketSymbol,Number(button.dataset.ticketPrice),Number(button.dataset.ticketDistance),button.dataset.ticketSignal,Number(button.dataset.ticketId))});
 $('advisor-rows').addEventListener('click',event=>{const button=event.target.closest('button[data-ticket-symbol]');if(button)ticket(button.dataset.ticketSymbol,Number(button.dataset.ticketPrice),Number(button.dataset.ticketDistance),button.dataset.ticketSignal,Number(button.dataset.ticketId))});
 $('journal-pagination').addEventListener('click',event=>{
  const button=event.target.closest('button[data-journal-page]');
@@ -460,7 +471,8 @@ function ticket(pair,price,dist,signal,signalId){
  selectedSetupContext={signal_id:signalId,signal,symbol:pair.toUpperCase(),exchange:$('exchange').value,market_type:$('market').value,timeframe:$('timeframe').value};
  targetAutoMode=true;updateAutoTarget();
 }
-async function openTrade(){try{let body={exchange:$('exchange').value,symbol:$('pair').value,market_type:$('market').value,side:$('side').value,entry:Number($('entry').value),stop:Number($('stop').value),target:targetAutoMode?null:($('target').value?Number($('target').value):null)};const selected=selectedSetupContext;body.signal_id=selected&&selected.signal_id>0&&selected.symbol===body.symbol.trim().toUpperCase()&&selected.exchange===body.exchange&&selected.market_type===body.market_type&&selected.timeframe===$('timeframe').value&&selected.signal===body.side?selected.signal_id:null;let r=await api('/api/paper/open',{method:'POST',body:JSON.stringify(body)});$('target').value=Number(r.target).toPrecision(12);$('target-mode').textContent=targetAutoMode?'Auto · '+defaultRewardRiskRatio.toFixed(1)+'R from Stop':'Manual target';alert('Paper trade opened. Target '+Number(r.target).toLocaleString()+' ('+(Math.abs(Number(r.target)-body.entry)/Math.abs(body.entry-body.stop)).toFixed(1)+'R). '+(body.market_type==='futures'?'Contracts ':'Qty ')+formatQuantity(r.quantity)+'; contract size '+Number(r.contract_size||1).toLocaleString()+'; actual risk '+money(r.risk_amount)+' ('+Number(r.risk_pct_actual).toFixed(3)+'%); sizing: '+r.sizing_reason+'; estimated entry/stop costs '+money(r.fees_estimated));refresh()}catch(e){alert(e.message)}}
+function syncFuturesControls(){const visible=$('market').value==='futures';$('futures-controls').classList.toggle('is-visible',visible);$('futures-controls').setAttribute('aria-hidden',visible?'false':'true')}
+async function openTrade(){try{let body={exchange:$('exchange').value,symbol:$('pair').value,market_type:$('market').value,side:$('side').value,entry:Number($('entry').value),stop:Number($('stop').value),target:targetAutoMode?null:($('target').value?Number($('target').value):null)};if(body.market_type==='futures'){body.leverage=Number($('futures-leverage').value);body.funding_rate=Number($('futures-funding-rate').value);body.funding_interval_hours=Number($('futures-funding-interval').value)}const selected=selectedSetupContext;body.signal_id=selected&&selected.signal_id>0&&selected.symbol===body.symbol.trim().toUpperCase()&&selected.exchange===body.exchange&&selected.market_type===body.market_type&&selected.timeframe===$('timeframe').value&&selected.signal===body.side?selected.signal_id:null;let r=await api('/api/paper/open',{method:'POST',body:JSON.stringify(body)});$('target').value=Number(r.target).toPrecision(12);$('target-mode').textContent=targetAutoMode?'Auto · '+defaultRewardRiskRatio.toFixed(1)+'R from Stop':'Manual target';alert('Paper trade opened. Target '+Number(r.target).toLocaleString()+' ('+(Math.abs(Number(r.target)-body.entry)/Math.abs(body.entry-body.stop)).toFixed(1)+'R). '+(body.market_type==='futures'?'Contracts ':'Qty ')+formatQuantity(r.quantity)+'; contract size '+Number(r.contract_size||1).toLocaleString()+'; actual risk '+money(r.risk_amount)+' ('+Number(r.risk_pct_actual).toFixed(3)+'%); sizing: '+r.sizing_reason+'; estimated entry/stop costs '+money(r.fees_estimated));refresh()}catch(e){alert(e.message)}}
 async function closeTrade(id,suggestedPrice){
  const defaultPrice=Number.isFinite(Number(suggestedPrice))&&Number(suggestedPrice)>0?String(Number(suggestedPrice)):'';
  const px=prompt('Enter simulated exit price to close this paper position:',defaultPrice);
@@ -494,7 +506,7 @@ async function initializeDefaultExchange(){
  refreshWatchlist();
  loadMarketChart();
 }
-refresh();initializeDefaultExchange();setInterval(()=>{refresh();refreshWatchlist()},15000);setInterval(loadMarketChart,60000);
+syncFuturesControls();refresh();initializeDefaultExchange();setInterval(()=>{refresh();refreshWatchlist()},15000);setInterval(loadMarketChart,60000);
 </script>
 </body></html>
 
