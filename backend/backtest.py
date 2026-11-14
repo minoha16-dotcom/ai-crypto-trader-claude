@@ -56,7 +56,15 @@ def _validate_candles(candles):
             raise ValueError(f"Candle {index} has inconsistent high/low values")
 
 
-def run_backtest(candles, starting_balance=10000.0, instrument=None, volume_ratio_threshold=None, start_index=49):
+def run_backtest(
+    candles,
+    starting_balance=10000.0,
+    instrument=None,
+    volume_ratio_threshold=None,
+    start_index=49,
+    max_holding_bars=None,
+    close_open_at_end=False,
+):
     if len(candles) < 52:
         raise ValueError("At least 52 candles are required for next-open backtesting")
     if volume_ratio_threshold is not None:
@@ -68,6 +76,14 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None, volume_rati
         raise ValueError("start_index must be an integer")
     if start_index < 49 or start_index >= len(candles) - 1:
         raise ValueError("start_index must be at least 49 and leave a next candle for entry")
+    if max_holding_bars is not None and (
+        isinstance(max_holding_bars, bool)
+        or not isinstance(max_holding_bars, int)
+        or max_holding_bars < 1
+    ):
+        raise ValueError("max_holding_bars must be a positive integer or None")
+    if not isinstance(close_open_at_end, bool):
+        raise ValueError("close_open_at_end must be a boolean")
     starting_balance = float(starting_balance)
     if not math.isfinite(starting_balance) or starting_balance <= 0:
         raise ValueError("starting_balance must be finite and positive")
@@ -276,6 +292,11 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None, volume_rati
                 elif target_hit:
                     exit_reference, exit_reason = target, "TARGET"
 
+            if exit_reference is None and max_holding_bars is not None:
+                bars_held = j - position["entry_index"] + 1
+                if bars_held >= max_holding_bars:
+                    exit_reference, exit_reason = close, "TIME_EXIT"
+
             if exit_reference is not None:
                 exit_index = j
                 break
@@ -321,7 +342,7 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None, volume_rati
             })
             j += 1
 
-        if exit_reference is None:
+        if exit_reference is None and not close_open_at_end:
             final_close = float(candles[-1][4])
             mark = final_close * (
                 1 - slippage if side == "LONG" else 1 + slippage
@@ -343,6 +364,12 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None, volume_rati
             final_equity = equity + unrealized
             max_drawdown = max(max_drawdown, _drawdown(peak_equity, final_equity))
             break
+        if exit_reference is None:
+            # Walk-forward periods must not carry a trade into the next split.
+            # Close at the final observed candle, with the normal exit costs.
+            exit_reference = float(candles[-1][4])
+            exit_reason = "PERIOD_END"
+            exit_index = len(candles) - 1
 
         exit_price = exit_reference * (
             1 - slippage if side == "LONG" else 1 + slippage
@@ -435,7 +462,12 @@ def run_backtest(candles, starting_balance=10000.0, instrument=None, volume_rati
                 if volume_ratio_threshold is None else volume_ratio_threshold
             ),
             "drawdown": "mark-to-market with adverse intrabar OHLC extremes",
-            "open_at_end": "reported as unrealized; not added to realized balance",
+            "open_at_end": (
+                "forced close at final candle close"
+                if close_open_at_end
+                else "reported as unrealized; not added to realized balance"
+            ),
+            "max_holding_bars": max_holding_bars,
             "fee_rate_per_side": fee_rate,
             "slippage_bps_per_side": float(settings.slippage_bps),
             "funding": "not modeled",
