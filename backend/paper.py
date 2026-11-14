@@ -137,7 +137,7 @@ def open_trade(
             row["entry"], row["stop"], row["quantity"],
             row["contract_size"], row["contract_type"],
         ) for row in opened)
-        margin_used = sum(float(row.get("initial_margin") or 0) for row in opened)
+        margin_used = sum(float(row["initial_margin"] or 0) for row in opened)
         today_pnl = db.execute(
             "SELECT COALESCE(SUM(pnl), 0) AS total FROM trades "
             "WHERE status='CLOSED' AND date(closed_at)=date('now')"
