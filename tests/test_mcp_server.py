@@ -142,8 +142,9 @@ def test_mcp_walk_forward_tool_forwards_parameters_and_volume_threshold(monkeypa
         test_bars=100,
         step_bars=100,
         warmup_bars=50,
-        purge_bars=5,
-        embargo_bars=3,
+        purge_bars=20,
+        embargo_bars=50,
+        max_holding_bars=20,
         window_mode="expanding",
         max_folds=4,
         volume_ratio_threshold=0.8,
@@ -156,6 +157,9 @@ def test_mcp_walk_forward_tool_forwards_parameters_and_volume_threshold(monkeypa
     assert captured["params"]["exchange"] == "okx"
     assert captured["params"]["symbol"] == "BTC/USDT"
     assert captured["params"]["window_mode"] == "expanding"
+    assert captured["params"]["purge_bars"] == 20
+    assert captured["params"]["embargo_bars"] == 50
+    assert captured["params"]["max_holding_bars"] == 20
     assert captured["params"]["volume_ratio_threshold"] == 0.8
     assert captured["params"]["max_missing_bars"] == 1
 
@@ -176,3 +180,16 @@ def test_mcp_walk_forward_tool_uses_backend_default_when_exchange_is_omitted(mon
     assert calls[0] == ("GET", "/api/exchanges", None)
     assert calls[1][0:2] == ("GET", "/api/walk-forward")
     assert calls[1][2]["exchange"] == "bybit"
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"purge_bars": 19}, "purge_bars"),
+        ({"embargo_bars": 49}, "embargo_bars"),
+        ({"max_holding_bars": 0}, "max_holding_bars"),
+    ],
+)
+def test_mcp_walk_forward_rejects_unsafe_boundary_configuration(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        asyncio.run(server.run_walk_forward(**kwargs))
