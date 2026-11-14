@@ -246,7 +246,7 @@ def run_walk_forward_backtest(
     if not folds:
         minimum = (
             warmup_bars + train_bars + validation_bars + test_bars
-            + 2 * (purge_bars + embargo_bars)
+            + 2 * embargo_bars
         )
         raise ValueError(
             f"Insufficient candles for one walk-forward fold: need at least "
