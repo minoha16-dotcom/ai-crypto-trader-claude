@@ -190,10 +190,12 @@ Terminal 2 — start the local MCP bridge:
 
 ~~~powershell
 $env:TRADER_API_URL = "http://127.0.0.1:8000"
+$env:TRADER_API_USERNAME = "<same value as DASHBOARD_USERNAME in .env>"
+$env:TRADER_API_PASSWORD = "<same value as DASHBOARD_PASSWORD in .env>"
 python -m mcp_server.server
 ~~~
 
-The Streamable HTTP endpoint is http://127.0.0.1:8001/mcp. To call the Render backend instead, set TRADER_API_URL, TRADER_API_USERNAME, and TRADER_API_PASSWORD in the local MCP process environment. Do not commit credentials or expose an unauthenticated listener publicly.
+The Streamable HTTP endpoint is http://127.0.0.1:8001/mcp. The MCP process must pass the same dashboard credentials as the protected FastAPI backend. To call the Render backend instead, set TRADER_API_URL, TRADER_API_USERNAME, and TRADER_API_PASSWORD in the local MCP process environment. Do not commit credentials or expose an unauthenticated listener publicly.
 
 MCP write tools are paper-only: open_paper_trade creates a simulated row in the configured database and close_paper_trade records a user-supplied simulated exit price. Neither tool submits an exchange order.
 
