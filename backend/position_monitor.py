@@ -150,8 +150,9 @@ async def monitor_open_positions_once(*, detailed=False):
                     row.get("liquidation_fee_rate", settings.paper_futures_liquidation_fee_rate),
                     row.get("funding_paid", 0.0),
                 )
-                liquidation_hit = liquidation_triggered(
-                    side, last, current_liquidation
+                liquidation_hit = (
+                    liquidation_triggered(side, last, current_liquidation)
+                    if current_liquidation is not None else False
                 )
             stop_hit = (
                 (side == "LONG" and last <= stop)
