@@ -164,3 +164,41 @@ def test_api_assigns_and_persists_default_two_r_target(isolated_db, monkeypatch)
             "SELECT target FROM trades WHERE id=?", (payload["id"],)
         ).fetchone()
     assert row["target"] == pytest.approx(110)
+
+
+
+def test_default_target_uses_configured_reward_risk_ratio(isolated_db, monkeypatch):
+    monkeypatch.setattr(settings, "reward_risk_ratio", 3.0)
+    opened = open_trade("binance", "ADA/USDT", "spot", "LONG", 100, 95)
+    assert opened["target"] == pytest.approx(115)
+    assert opened["reward_risk_ratio"] == pytest.approx(3.0)
+    assert opened["default_reward_risk_ratio"] == pytest.approx(3.0)
+
+
+def test_open_position_limit_uses_settings(isolated_db, monkeypatch):
+    monkeypatch.setattr(settings, "max_open_trades", 2)
+    open_trade("binance", "BTC/USDT", "spot", "LONG", 100, 95)
+    open_trade("binance", "ETH/USDT", "spot", "LONG", 100, 95)
+    with pytest.raises(ValueError, match=r"\(2\)"):
+        open_trade("binance", "SOL/USDT", "spot", "LONG", 100, 95)
+
+
+
+def test_paper_open_schema_uses_configured_default_exchange():
+    from backend.main import PaperOpen
+
+    payload = PaperOpen(
+        symbol="BTC/USDT",
+        side="LONG",
+        entry=100,
+        stop=95,
+    )
+    assert payload.exchange == settings.default_exchange
+
+
+def test_exchange_metadata_exposes_configured_default():
+    from backend.main import exchanges
+
+    payload = exchanges()
+    assert payload["exchanges"] == ["kucoin", "bybit", "okx"]
+    assert payload["default_exchange"] == settings.default_exchange

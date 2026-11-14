@@ -1,5 +1,10 @@
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# Exchanges available for new market-data scans and paper trades. Binance remains
+# a legacy-only adapter so existing persisted paper positions can still be marked.
+SUPPORTED_EXCHANGES = ("kucoin", "bybit", "okx")
 
 
 class Settings(BaseSettings):
@@ -17,6 +22,8 @@ class Settings(BaseSettings):
     max_open_risk_pct: float = Field(default=2.0, gt=0, le=100, allow_inf_nan=False)
     max_daily_loss_pct: float = Field(default=3.0, gt=0, le=100, allow_inf_nan=False)
     max_position_notional_pct: float = Field(default=20.0, gt=0, le=100, allow_inf_nan=False)
+    max_open_trades: int = Field(default=3, ge=1, le=100)
+    reward_risk_ratio: float = Field(default=2.0, gt=0, le=20, allow_inf_nan=False)
 
     taker_fee_rate: float = Field(default=0.0006, ge=0, lt=1, allow_inf_nan=False)
     slippage_bps: float = Field(default=2.0, ge=0, lt=10000, allow_inf_nan=False)
@@ -29,6 +36,16 @@ class Settings(BaseSettings):
     paper_entry_max_deviation_pct: float = Field(default=5.0, gt=0, le=100, allow_inf_nan=False)
     scan_symbols: str = "BTC/USDT,ETH/USDT,SOL/USDT"
     scan_timeframe: str = "1h"
+
+    @field_validator("default_exchange")
+    @classmethod
+    def validate_default_exchange(cls, value):
+        normalized = str(value).strip().lower()
+        if normalized not in SUPPORTED_EXCHANGES:
+            raise ValueError(
+                "default_exchange must be one of: " + ", ".join(SUPPORTED_EXCHANGES)
+            )
+        return normalized
 
     @model_validator(mode="after")
     def validate_risk_relationships(self):

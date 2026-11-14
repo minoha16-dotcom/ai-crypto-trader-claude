@@ -25,7 +25,7 @@ From the repository root:
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-pip install -r requirements.txt
+pip install -r requirements-mcp.txt
 ```
 
 Terminal 1 — start the trader API:
@@ -38,6 +38,8 @@ Terminal 2 — start the MCP server:
 
 ```powershell
 $env:TRADER_API_URL = "http://127.0.0.1:8000"
+$env:TRADER_API_USERNAME = "<same value as DASHBOARD_USERNAME in .env>"
+$env:TRADER_API_PASSWORD = "<same value as DASHBOARD_PASSWORD in .env>"
 $env:MCP_PORT = "8001"
 python -m mcp_server.server
 ```
@@ -50,7 +52,7 @@ http://127.0.0.1:8001/mcp
 
 ### Use the authenticated Render API as the backend
 
-The MCP process can remain local/private while calling the deployed FastAPI service:
+The MCP process must pass the same HTTP Basic credentials as the FastAPI backend; set both `TRADER_API_USERNAME` and `TRADER_API_PASSWORD`, or neither only when the backend is configured without authentication. The MCP process can remain local/private while calling the deployed FastAPI service. When `scan_opportunities` or `get_ai_recommendations` is called without an exchange argument, the bridge reads `default_exchange` from `/api/exchanges`; explicit exchange arguments continue to take precedence:
 
 ```powershell
 $env:TRADER_API_URL = "https://ai-crypto-trader-claude.onrender.com"
@@ -102,7 +104,8 @@ private; do not publish it to a public directory.
 - "Show my paper account, risk limits, and open positions."
 - "Show the latest trading opportunities."
 - "Get KuCoin BTC/USDT Spot instrument precision and order limits."
-- "Backtest BTC/USDT Futures on OKX using 4h candles."
+- "Backtest BTC/USDT Futures on OKX using 4h candles with Volume Ratio thresholds 0.8, 1.0, and 1.2."
+- "Run a rolling walk-forward evaluation for BTC/USDT Spot on KuCoin with 250 training, 100 validation, and 100 test candles."
 - "Open a paper LONG on BTC/USDT with entry 60000 and stop 59000."
 - "Close paper trade 1 at exit price 61000."
 
@@ -111,8 +114,10 @@ stop and optional target before asking ChatGPT to call the write tool.
 
 ## Important version note
 
-This MCP bridge is an integration layer, not a new trading engine. It calls
-the V2.1 FastAPI endpoints for market data, instrument metadata, scanning,
-backtesting, opportunities, open positions, risk and the paper journal. It uses
+This MCP bridge is an integration layer, not a new trading engine. The project
+release is read from the root VERSION file and checked against the Claude plugin
+manifests and README in CI. The bridge calls the FastAPI endpoints for market data,
+instrument metadata, scanning, backtesting, opportunities, open positions, risk
+and the paper journal. It uses
 the same configured backend database and does not place exchange orders.
 

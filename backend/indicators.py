@@ -1,4 +1,7 @@
+import math
+
 from .config import settings
+
 
 def ema(values, period):
     if period <= 0:
@@ -82,10 +85,17 @@ def adx(candles, period=14):
     return value
 
 
-def analyze(candles):
+def analyze(candles, volume_ratio_threshold=None):
     closes = [float(candle[4]) for candle in candles]
     if len(closes) < 50:
         raise ValueError("At least 50 candles required")
+    threshold = (
+        float(settings.signal_min_volume_ratio)
+        if volume_ratio_threshold is None else float(volume_ratio_threshold)
+    )
+    if not math.isfinite(threshold) or threshold < 0:
+        raise ValueError("volume_ratio_threshold must be finite and non-negative")
+
     ema20, ema50 = ema(closes, 20), ema(closes, 50)
     strength, volatility, last = rsi(closes), atr(candles), closes[-1]
     trend = "bullish" if last > ema20 > ema50 else "bearish" if last < ema20 < ema50 else "sideways"
@@ -103,7 +113,7 @@ def analyze(candles):
     filter_reasons = []
     if trend_strength < float(settings.signal_min_adx):
         filter_reasons.append("ADX_BELOW_THRESHOLD")
-    if volume_ratio < float(settings.signal_min_volume_ratio):
+    if volume_ratio < threshold:
         filter_reasons.append("VOLUME_BELOW_AVERAGE")
     if atr_pct < float(settings.signal_min_atr_pct):
         filter_reasons.append("ATR_PERCENT_TOO_LOW")
@@ -112,7 +122,8 @@ def analyze(candles):
     return {
         "price": last, "ema20": ema20, "ema50": ema50, "rsi14": strength,
         "atr14": volatility, "atr_pct": atr_pct, "adx14": trend_strength,
-        "volume_ratio": volume_ratio, "filter_reasons": filter_reasons,
+        "volume_ratio": volume_ratio, "volume_ratio_threshold": threshold,
+        "filter_reasons": filter_reasons,
         "trend": trend, "score": score, "signal": signal,
         "stop_distance": max(volatility * 2, last * 0.005),
     }

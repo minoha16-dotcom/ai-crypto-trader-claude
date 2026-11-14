@@ -3,8 +3,6 @@ from .config import settings
 from .risk import risk_manager
 from .metrics import position_risk, position_pnl
 
-MAX_OPEN_TRADES = 3
-REWARD_RISK_RATIO = 2.0
 
 
 def account():
@@ -33,7 +31,7 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None,
     if (side == "LONG" and stop >= entry) or (side == "SHORT" and stop <= entry):
         raise ValueError("Stop must be below entry for LONG and above entry for SHORT")
     if target is None:
-        reward = abs(float(entry) - float(stop)) * REWARD_RISK_RATIO
+        reward = abs(float(entry) - float(stop)) * float(settings.reward_risk_ratio)
         target = float(entry) + reward if side == "LONG" else float(entry) - reward
     if (side == "LONG" and target <= entry) or (side == "SHORT" and target >= entry):
         raise ValueError("Target must be above entry for LONG and below entry for SHORT")
@@ -72,8 +70,10 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None,
             "SELECT exchange, symbol, market_type, quantity, entry, stop, contract_size, contract_type "
             "FROM trades WHERE status='OPEN'"
         ).fetchall()
-        if len(opened) >= MAX_OPEN_TRADES:
-            raise ValueError(f"Maximum open paper positions reached ({MAX_OPEN_TRADES}).")
+        if len(opened) >= settings.max_open_trades:
+            raise ValueError(
+                f"Maximum open paper positions reached ({settings.max_open_trades})."
+            )
         duplicate = any(
             str(row["exchange"]).lower() == str(exchange).lower()
             and str(row["symbol"]).upper() == str(symbol).upper()
@@ -124,7 +124,9 @@ def open_trade(exchange, symbol, market_type, side, entry, stop, target=None,
         "id": trade_id, "quantity": decision.quantity, "contracts": decision.quantity if market_type == "futures" else None,
         "contract_size": float(spec["contract_size"]), "contract_type": spec["contract_type"],
         "notional": decision.notional, "risk_amount": decision.risk_amount,
-        "target": target, "reward_risk_ratio": REWARD_RISK_RATIO,
+        "target": target,
+        "reward_risk_ratio": abs(float(target) - float(entry)) / abs(float(entry) - float(stop)),
+        "default_reward_risk_ratio": float(settings.reward_risk_ratio),
         "risk_pct_actual": decision.risk_amount / equity * 100,
         "sizing_reason": decision.sizing_reason,
         "fees_estimated": position_pnl(
