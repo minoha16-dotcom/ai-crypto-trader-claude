@@ -219,7 +219,6 @@ async def run_walk_forward(
     max_missing_bars: int = 0,
 ) -> dict:
     """Run chronological paper-only walk-forward evaluation; never submits orders."""
-    exchange = await _configured_exchange(exchange)
     symbol = symbol.strip().upper()
     if not symbol or len(symbol) > 30 or "/" not in symbol:
         raise ValueError("Use a CCXT symbol such as BTC/USDT.")
@@ -229,9 +228,19 @@ async def run_walk_forward(
         not math.isfinite(volume_ratio_threshold) or volume_ratio_threshold < 0
     ):
         raise ValueError("volume_ratio_threshold must be finite and non-negative.")
-    if isinstance(max_holding_bars, bool) or not isinstance(max_holding_bars, int) or max_holding_bars < 1:
+    if isinstance(warmup_bars, bool) or not isinstance(warmup_bars, int) or warmup_bars < 50:
+        raise ValueError("warmup_bars must be an integer of at least 50.")
+    if (
+        isinstance(max_holding_bars, bool)
+        or not isinstance(max_holding_bars, int)
+        or max_holding_bars < 1
+    ):
         raise ValueError("max_holding_bars must be a positive integer.")
-    if isinstance(purge_bars, bool) or not isinstance(purge_bars, int) or purge_bars < max_holding_bars:
+    if (
+        isinstance(purge_bars, bool)
+        or not isinstance(purge_bars, int)
+        or purge_bars < max_holding_bars
+    ):
         raise ValueError("purge_bars must be at least max_holding_bars.")
     required_embargo = max(warmup_bars, max_holding_bars)
     if embargo_bars is not None and (
@@ -240,6 +249,7 @@ async def run_walk_forward(
         or embargo_bars < required_embargo
     ):
         raise ValueError("embargo_bars must be at least max(warmup_bars, max_holding_bars).")
+    exchange = await _configured_exchange(exchange)
     params = {
         "exchange": exchange,
         "symbol": symbol,
