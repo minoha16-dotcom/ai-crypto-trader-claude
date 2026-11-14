@@ -38,6 +38,8 @@ Terminal 2 — start the MCP server:
 
 ```powershell
 $env:TRADER_API_URL = "http://127.0.0.1:8000"
+$env:TRADER_API_USERNAME = "<same value as DASHBOARD_USERNAME in .env>"
+$env:TRADER_API_PASSWORD = "<same value as DASHBOARD_PASSWORD in .env>"
 $env:MCP_PORT = "8001"
 python -m mcp_server.server
 ```
@@ -50,7 +52,7 @@ http://127.0.0.1:8001/mcp
 
 ### Use the authenticated Render API as the backend
 
-The MCP process can remain local/private while calling the deployed FastAPI service. When `scan_opportunities` or `get_ai_recommendations` is called without an exchange argument, the bridge reads `default_exchange` from `/api/exchanges`; explicit exchange arguments continue to take precedence:
+The MCP process must pass the same HTTP Basic credentials as the FastAPI backend; set both `TRADER_API_USERNAME` and `TRADER_API_PASSWORD`, or neither only when the backend is configured without authentication. The MCP process can remain local/private while calling the deployed FastAPI service. When `scan_opportunities` or `get_ai_recommendations` is called without an exchange argument, the bridge reads `default_exchange` from `/api/exchanges`; explicit exchange arguments continue to take precedence:
 
 ```powershell
 $env:TRADER_API_URL = "https://ai-crypto-trader-claude.onrender.com"
