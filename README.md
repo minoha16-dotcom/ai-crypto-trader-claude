@@ -127,6 +127,7 @@ The canonical example is .env.example. Values below are defaults; environment va
 | Setting | Default | Purpose |
 |---|---:|---|
 | DEFAULT_EXCHANGE | kucoin | Must be kucoin, bybit, or okx |
+| BYBIT_API_HOSTNAME | bybit.com | Official Bybit global API host: bybit.com or api.bytick.com (set the hostname as bytick.com) |
 | DEFAULT_MARKET_TYPE | spot | Default market type |
 | MAX_OPEN_TRADES | 3 | Maximum number of simultaneous simulated positions |
 | REWARD_RISK_RATIO | 2.0 | Default target distance relative to stop distance |
@@ -210,6 +211,27 @@ Example request:
 GET /api/walk-forward?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1500&train_bars=250&validation_bars=100&test_bars=100&step_bars=100&warmup_bars=50&purge_bars=20&embargo_bars=50&max_holding_bars=20&window_mode=rolling&max_folds=10
 ~~~
 
+For a repeatable multi-market research report, run the pre-registered runner
+against public KuCoin and OKX data:
+
+~~~powershell
+$env:STRATEGY_VALIDATION_EXCHANGES = "kucoin,okx"
+$env:STRATEGY_VALIDATION_LIMIT = "1800"
+python scripts/run_strategy_validation.py
+~~~
+
+It evaluates Spot BTC/USDT and ETH/USDT plus Futures BTC/USDT, where available,
+using chronological 1h folds. It compares Volume Ratio thresholds 0.8, 1.0,
+and 1.2 and runs three pre-registered directional-vote ablations at threshold
+1.0: remove EMA20/EMA50 alignment, remove close/EMA20, and collapse the two
+correlated trend votes into one composite vote. The report includes per-fold
+out-of-sample trades, net return, expectancy, profit factor, drawdown, a
+long-only buy-and-hold reference, dataset coverage, and explicit limitations.
+The JSON and Markdown reports are written to `artifacts/`; GitHub Actions
+uploads them as a workflow artifact. The research workflow completing does not
+mean the strategy passed: inspect `evidence_status` and all per-market folds.
+A small or incomplete sample is marked inconclusive.
+
 The holding limit and forced boundary exit are walk-forward evaluation
 assumptions; the ordinary `/api/backtest` default is unchanged. These controls
 bound the configured feature lookback and trade horizon, but do not constitute
@@ -270,7 +292,21 @@ Public exchange smoke checks:
 python scripts/check_exchanges.py
 ~~~
 
-They use public market-data endpoints only. Geographic restrictions and HTTP 429 cooldowns are reported as inconclusive, not as successful connectivity.
+For a focused local Bybit check (Spot and Futures only), you can use the
+official alternate global REST host when the default host is rate-limited:
+
+~~~powershell
+$env:BYBIT_API_HOSTNAME = "bytick.com"
+$env:SMOKE_REQUEST_PAUSE_SECONDS = "15"
+python scripts/check_bybit.py
+~~~
+
+The supported host values are `bybit.com` and `bytick.com`. These scripts use
+public market-data endpoints only; no API keys or orders are involved.
+HTTP 429, regional blocks, and cooldowns remain inconclusive, not successful
+connectivity checks. Run the focused check from the network that will use
+Bybit; GitHub-hosted runner results do not prove connectivity from a local
+machine.
 
 ## Render deployment
 
