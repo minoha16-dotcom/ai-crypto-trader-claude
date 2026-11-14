@@ -204,3 +204,46 @@ def test_backtest_can_start_scoring_after_warmup(monkeypatch):
 def test_backtest_rejects_invalid_evaluation_start_index(start_index):
     with pytest.raises(ValueError, match="start_index"):
         run_backtest(rising_candles(70), start_index=start_index)
+
+
+def test_backtest_enforces_maximum_holding_horizon(monkeypatch):
+    monkeypatch.setattr(settings, "taker_fee_rate", 0.0)
+    monkeypatch.setattr(settings, "slippage_bps", 0.0)
+    monkeypatch.setattr(backtest, "analyze", one_long_then_wait(rising_candles()))
+    candles = [
+        [i * 3600000, 100.0, 101.0, 99.0, 100.0, 100.0]
+        for i in range(60)
+    ]
+
+    result = run_backtest(candles, max_holding_bars=2)
+
+    assert result["trade_count"] == 1
+    assert result["trades"][0]["exit_reason"] == "TIME_EXIT"
+    assert result["trades"][0]["exit_index"] == 51
+    assert result["open_positions"] == []
+    assert result["assumptions"]["max_holding_bars"] == 2
+
+
+def test_backtest_can_force_close_remaining_position_at_period_end(monkeypatch):
+    monkeypatch.setattr(settings, "taker_fee_rate", 0.0)
+    monkeypatch.setattr(settings, "slippage_bps", 0.0)
+    monkeypatch.setattr(backtest, "analyze", one_long_then_wait(rising_candles()))
+    candles = [
+        [i * 3600000, 100.0, 101.0, 99.0, 100.0, 100.0]
+        for i in range(60)
+    ]
+
+    result = run_backtest(candles, close_open_at_end=True)
+
+    assert result["trade_count"] == 1
+    assert result["trades"][0]["exit_reason"] == "PERIOD_END"
+    assert result["trades"][0]["exit_index"] == 59
+    assert result["open_positions"] == []
+    assert result["unrealized_pnl"] == pytest.approx(0.0)
+    assert result["assumptions"]["open_at_end"] == "forced close at final candle close"
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5])
+def test_backtest_rejects_invalid_maximum_holding_horizon(value):
+    with pytest.raises(ValueError, match="max_holding_bars"):
+        run_backtest(rising_candles(60), max_holding_bars=value)
