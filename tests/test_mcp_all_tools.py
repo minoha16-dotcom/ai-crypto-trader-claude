@@ -47,7 +47,7 @@ def test_all_mcp_tools_route_to_paper_backend_endpoints(monkeypatch):
         ("GET", "/api/opportunities", {"limit": 4}, None),
         ("GET", "/api/backtest", {
             "exchange": "okx", "symbol": "BTC/USDT", "market_type": "spot",
-            "timeframe": "4h", "limit": 300,
+            "timeframe": "4h", "limit": 300, "leverage": 1.0,
         }, None),
         ("GET", "/api/signals", {"limit": 5}, None),
         ("GET", "/api/account", None, None),
@@ -57,6 +57,7 @@ def test_all_mcp_tools_route_to_paper_backend_endpoints(monkeypatch):
             "exchange": "kucoin", "symbol": "BTC/USDT",
             "market_type": "spot", "side": "LONG",
             "entry": 100.0, "stop": 95.0, "target": 110.0,
+            "leverage": 1.0,
         }),
         ("POST", "/api/paper/7/close", None, {"exit_price": 105.0}),
     ]
