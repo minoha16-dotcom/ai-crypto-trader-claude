@@ -214,7 +214,13 @@ def test_registry_shares_rate_limiter_across_spot_and_futures(monkeypatch):
         assert binance_spot.throttler is not bybit_spot.throttler
         assert binance_spot.options["defaultType"] == "spot"
         assert binance_futures.options["defaultType"] == "swap"
+        assert bybit_spot.hostname == "bybit.com"
         await registry.close()
+
+        alternate = ExchangeRegistry(bybit_api_hostname="bytick.com")
+        alternate_client = await alternate.get("bybit", "spot")
+        assert alternate_client.hostname == "bytick.com"
+        await alternate.close()
 
     asyncio.run(run())
 
