@@ -158,6 +158,7 @@ async def run_backtest(
     market_type: Literal["spot", "futures"] = "spot",
     timeframe: Literal["5m", "15m", "30m", "1h", "2h", "4h", "1d"] = "1h",
     limit: int = 1000,
+    volume_ratio_threshold: float | None = None,
 ) -> dict:
     """Run the backend's historical OHLCV paper backtest; does not submit orders."""
     symbol = symbol.strip().upper()
@@ -165,16 +166,20 @@ async def run_backtest(
         raise ValueError("Use a CCXT symbol such as BTC/USDT.")
     if not 53 <= limit <= 5000:
         raise ValueError("limit must be between 53 and 5000.")
-    return await _api(
-        "GET", "/api/backtest",
-        params={
-            "exchange": exchange,
-            "symbol": symbol,
-            "market_type": market_type,
-            "timeframe": timeframe,
-            "limit": limit,
-        },
-    )
+    if volume_ratio_threshold is not None and (
+        not math.isfinite(volume_ratio_threshold) or volume_ratio_threshold < 0
+    ):
+        raise ValueError("volume_ratio_threshold must be finite and non-negative.")
+    params = {
+        "exchange": exchange,
+        "symbol": symbol,
+        "market_type": market_type,
+        "timeframe": timeframe,
+        "limit": limit,
+    }
+    if volume_ratio_threshold is not None:
+        params["volume_ratio_threshold"] = volume_ratio_threshold
+    return await _api("GET", "/api/backtest", params=params)
 
 
 @mcp.tool()
