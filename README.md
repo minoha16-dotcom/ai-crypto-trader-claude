@@ -131,7 +131,7 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Copy `.env.example` to `.env` and review the risk limits before starting the application.
+Copy `.env.example` to `.env`, set non-empty `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` values for your dashboard login, and review the risk limits before starting the application. These are dashboard credentials only; public exchange market data does not require exchange API keys.
 
 ### Run the dashboard
 
@@ -216,7 +216,7 @@ The backtest resolves the exchange's canonical Futures symbol and loads its cont
 ## Fine print
 
 - **Paper trading only:** the project does not place real orders or connect to private account endpoints.
-- **No credentials required:** market adapters use public data. Do not add exchange secrets to the repository.
+- **No exchange credentials required:** market adapters use public data only. Never add exchange API keys or secrets to the repository. The dashboard itself is password-protected and requires the local dashboard login described above.
 - **Futures limitations:** Futures mode selects swap markets through CCXT; symbols, contract availability, and venue behavior vary.
 - **Simulation limitations:** the server-side monitor checks public last-traded prices periodically on a best-effort basis and closes simulated positions using the last-traded price observed on that poll. That price may differ from the stop/target level, especially after a gap. Intrabar wicks can cross a level between polls and reverse before the next check. Monitoring is not real-time or guaranteed, the host can sleep or be unavailable, and no exchange stop/target orders are created. Dashboard closes are manual. Backtests apply per-trade risk, aggregate open-risk, UTC daily realized-loss, and notional caps. They still model one position at a time and do not model funding, margin, liquidation, order-book depth, or real fills.
 - **Dashboard authentication:** set both `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD` before startup. The app refuses to start without both. Only `/api/health` and `/api/ready` are public; all other routes require HTTP Basic Auth in every environment.
