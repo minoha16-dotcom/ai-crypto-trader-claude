@@ -182,11 +182,23 @@ def run_backtest(
     i = start_index
 
     while i < len(candles) - 1:
-        metrics = analyze(
-            candles[: i + 1],
-            volume_ratio_threshold=volume_ratio_threshold,
-            feature_ablation=feature_ablation,
-        )
+        if feature_ablation == "baseline":
+            # Preserve the exact legacy call shape for the unchanged baseline.
+            # This also keeps existing integrations that wrap analyze() compatible.
+            metrics = (
+                analyze(candles[: i + 1])
+                if volume_ratio_threshold is None
+                else analyze(
+                    candles[: i + 1],
+                    volume_ratio_threshold=volume_ratio_threshold,
+                )
+            )
+        else:
+            metrics = analyze(
+                candles[: i + 1],
+                volume_ratio_threshold=volume_ratio_threshold,
+                feature_ablation=feature_ablation,
+            )
         side = metrics["signal"]
         if side not in ("LONG", "SHORT"):
             i += 1
