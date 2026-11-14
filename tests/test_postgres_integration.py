@@ -113,14 +113,25 @@ def test_postgres_futures_contract_metadata_persists(postgres_db):
     )
     with connect() as db:
         row = db.execute(
-            "SELECT market_type, quantity, contract_size, contract_type "
-            "FROM trades WHERE id=?",
+            "SELECT market_type, quantity, contract_size, contract_type, "
+            "leverage, initial_margin, maintenance_margin_rate, liquidation_price, "
+            "funding_rate, funding_interval_hours, funding_paid, funding_events, "
+            "next_funding_at FROM trades WHERE id=?",
             (opened["id"],),
         ).fetchone()
     assert row["market_type"] == "futures"
     assert row["quantity"] == pytest.approx(opened["quantity"])
     assert row["contract_size"] == pytest.approx(0.001)
     assert row["contract_type"] == "linear"
+    assert row["leverage"] == pytest.approx(1.0)
+    assert row["initial_margin"] > 0
+    assert row["maintenance_margin_rate"] == pytest.approx(0.005)
+    assert row["liquidation_price"] is not None
+    assert row["funding_rate"] == pytest.approx(0.0001)
+    assert row["funding_interval_hours"] == pytest.approx(8.0)
+    assert row["funding_paid"] == pytest.approx(0.0)
+    assert row["funding_events"] == 0
+    assert row["next_funding_at"] is not None
 
 
 def test_postgres_monitor_advisory_lock_has_one_leader(postgres_db):

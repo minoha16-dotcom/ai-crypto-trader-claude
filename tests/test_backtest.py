@@ -51,7 +51,7 @@ def test_backtest_enters_next_bar_and_reports_cost_assumptions(monkeypatch):
     assert result["trade_count"] > 0
     assert result["assumptions"]["entry"] == "next candle open"
     assert result["assumptions"]["same_candle_stop_and_target"] == "stop first"
-    assert result["assumptions"]["funding"] == "not modeled"
+    assert result["assumptions"]["funding"] == "not applicable for Spot"
     assert all("r_multiple" in trade and "costs" in trade for trade in result["trades"])
     assert result["profit_factor"] is None
     json.dumps(result, allow_nan=False)
@@ -247,3 +247,72 @@ def test_backtest_can_force_close_remaining_position_at_period_end(monkeypatch):
 def test_backtest_rejects_invalid_maximum_holding_horizon(value):
     with pytest.raises(ValueError, match="max_holding_bars"):
         run_backtest(rising_candles(60), max_holding_bars=value)
+
+
+
+def _linear_futures_instrument():
+    return {
+        "contract_type": "linear",
+        "contract_size": 0.001,
+        "amount_precision": 3,
+        "precision_mode": 2,
+        "min_amount": 0.001,
+        "max_amount": 100000,
+        "market_type": "futures",
+    }
+
+
+def test_futures_backtest_applies_scheduled_funding_to_net_pnl(monkeypatch):
+    monkeypatch.setattr(settings, "taker_fee_rate", 0.0)
+    monkeypatch.setattr(settings, "slippage_bps", 0.0)
+    monkeypatch.setattr(backtest, "analyze", one_long_then_wait(rising_candles()))
+
+    result = run_backtest(
+        exit_on_target_candles(),
+        instrument=_linear_futures_instrument(),
+        leverage=5,
+        funding_rate=0.001,
+        funding_interval_hours=1,
+        maintenance_margin_rate=0.005,
+        liquidation_fee_rate=0.005,
+    )
+
+    assert result["trade_count"] == 1
+    trade = result["trades"][0]
+    assert trade["leverage"] == pytest.approx(5)
+    assert trade["initial_margin"] == pytest.approx(trade["notional"] / 5)
+    assert trade["funding_events"] == 1
+    assert trade["funding_paid"] == pytest.approx(trade["notional"] * 0.001)
+    assert trade["pnl"] == pytest.approx(
+        trade["gross_pnl"] - trade["costs"] - trade["funding_paid"]
+    )
+    assert result["assumptions"]["futures_margin_mode"] == "isolated"
+    assert result["assumptions"]["futures_funding_rate_per_interval"] == pytest.approx(0.001)
+
+
+def test_futures_backtest_liquidates_before_stop_or_target(monkeypatch):
+    monkeypatch.setattr(settings, "taker_fee_rate", 0.0)
+    monkeypatch.setattr(settings, "slippage_bps", 0.0)
+    monkeypatch.setattr(backtest, "analyze", one_long_then_wait(rising_candles()))
+    candles = exit_on_target_candles()
+    candles[51] = [51 * 3600000, 100.0, 110.0, 70.0, 90.0, 100.0]
+
+    result = run_backtest(
+        candles,
+        instrument=_linear_futures_instrument(),
+        leverage=5,
+        funding_rate=0.0,
+        maintenance_margin_rate=0.005,
+        liquidation_fee_rate=0.005,
+    )
+
+    trade = result["trades"][0]
+    assert trade["exit_reason"] == "LIQUIDATION"
+    assert trade["exit"] == pytest.approx(trade["liquidation_price"])
+    assert trade["liquidation_fee"] > 0
+    assert trade["pnl"] < 0
+
+
+def test_spot_backtest_rejects_leverage():
+    with pytest.raises(ValueError, match="Spot backtests do not support leverage"):
+        run_backtest(rising_candles(60), leverage=2)

@@ -202,3 +202,136 @@ def test_exchange_metadata_exposes_configured_default():
     payload = exchanges()
     assert payload["exchanges"] == ["kucoin", "bybit", "okx"]
     assert payload["default_exchange"] == settings.default_exchange
+
+
+def _linear_futures_spec():
+    return {
+        "contract_size": 0.001,
+        "contract_type": "linear",
+        "amount_precision": 3,
+        "precision_mode": 2,
+        "min_amount": 0.001,
+        "max_amount": 100000,
+        "market_type": "futures",
+    }
+
+
+def test_futures_open_persists_isolated_margin_liquidation_and_funding_state(isolated_db):
+    opened = open_trade(
+        "bybit", "BTC/USDT:USDT", "futures", "LONG", 100, 95, 120,
+        instrument=_linear_futures_spec(),
+        leverage=5,
+        funding_rate=0.001,
+        funding_interval_hours=8,
+        maintenance_margin_rate=0.005,
+        liquidation_fee_rate=0.005,
+    )
+
+    assert opened["status"] == "OPEN"
+    assert opened["leverage"] == pytest.approx(5)
+    assert opened["initial_margin"] == pytest.approx(opened["notional"] / 5)
+    assert 0 < opened["liquidation_price"] < 100
+    assert opened["funding_rate"] == pytest.approx(0.001)
+    assert opened["funding_interval_hours"] == pytest.approx(8)
+
+    with connect() as db:
+        row = db.execute(
+            "SELECT leverage, initial_margin, maintenance_margin_rate, "
+            "liquidation_fee_rate, liquidation_price, funding_rate, "
+            "funding_interval_hours, funding_paid, funding_events, next_funding_at "
+            "FROM trades WHERE id=?",
+            (opened["id"],),
+        ).fetchone()
+    assert row["leverage"] == pytest.approx(5)
+    assert row["initial_margin"] == pytest.approx(opened["initial_margin"])
+    assert row["liquidation_price"] == pytest.approx(opened["liquidation_price"])
+    assert row["funding_paid"] == pytest.approx(0)
+    assert row["funding_events"] == 0
+    assert row["next_funding_at"] is not None
+
+
+def test_due_futures_funding_is_persisted_once_and_included_in_close_pnl(isolated_db):
+    from backend.paper import apply_due_funding
+    from backend.metrics import position_pnl
+
+    opened = open_trade(
+        "bybit", "BTC/USDT:USDT", "futures", "LONG", 100, 95, 120,
+        instrument=_linear_futures_spec(), leverage=5,
+        funding_rate=0.001, funding_interval_hours=8,
+    )
+    notional = opened["notional"]
+    due_at = opened["next_funding_at"] + 1
+    updated = apply_due_funding(opened["id"], 100, now=due_at)
+    assert updated["funding_events"] == 1
+    assert updated["funding_paid"] == pytest.approx(notional * 0.001)
+
+    repeated = apply_due_funding(opened["id"], 100, now=due_at)
+    assert repeated["funding_events"] == 1
+    assert repeated["funding_paid"] == pytest.approx(notional * 0.001)
+
+    expected = position_pnl(
+        100, opened["quantity"], "LONG", 101,
+        0.001, "linear", funding_paid=notional * 0.001,
+    )
+    closed = close_trade(opened["id"], 101, observed_at=due_at)
+    assert closed["funding_events"] == 1
+    assert closed["funding_paid"] == pytest.approx(notional * 0.001)
+    assert closed["pnl"] == pytest.approx(expected["unrealized_pnl"])
+
+
+def test_futures_close_records_liquidation_instead_of_manual_exit_when_threshold_crossed(isolated_db):
+    opened = open_trade(
+        "okx", "BTC/USDT:USDT", "futures", "LONG", 100, 95, 120,
+        instrument=_linear_futures_spec(), leverage=5,
+        funding_rate=0.0,
+    )
+    exit_price = opened["liquidation_price"] - 1.0
+    closed = close_trade(opened["id"], exit_price)
+
+    assert closed["exit_reason"] == "LIQUIDATION"
+    assert closed["liquidation_fee"] > 0
+    assert closed["pnl"] < 0
+    with connect() as db:
+        row = db.execute(
+            "SELECT status, exit_reason, exit_price FROM trades WHERE id=?",
+            (opened["id"],),
+        ).fetchone()
+    assert row["status"] == "CLOSED"
+    assert row["exit_reason"] == "LIQUIDATION"
+    assert row["exit_price"] == pytest.approx(exit_price)
+
+
+def test_futures_margin_cap_rejects_leverage_above_configured_max(isolated_db):
+    with pytest.raises(ValueError, match="leverage must be between"):
+        open_trade(
+            "bybit", "BTC/USDT:USDT", "futures", "LONG", 100, 95,
+            instrument=_linear_futures_spec(), leverage=6,
+        )
+
+
+
+def test_legacy_futures_position_can_still_be_closed_without_new_liquidation_fields(
+    isolated_db,
+):
+    opened = open_trade(
+        "bybit", "BTC/USDT:USDT", "futures", "SHORT", 100, 105, 90,
+        instrument={
+            "contract_size": 0.001,
+            "contract_type": "linear",
+            "amount_precision": 3,
+            "precision_mode": 2,
+            "min_amount": 0.001,
+            "market_type": "futures",
+        },
+    )
+    with connect() as db:
+        db.execute(
+            "UPDATE trades SET contract_type='legacy_base', leverage=1, "
+            "initial_margin=0, liquidation_price=NULL, funding_rate=0, "
+            "funding_paid=0, funding_events=0, next_funding_at=NULL WHERE id=?",
+            (opened["id"],),
+        )
+
+    closed = close_trade(opened["id"], 101.0)
+    assert closed["status"] == "CLOSED"
+    assert closed["exit_reason"] == "MANUAL"

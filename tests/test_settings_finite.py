@@ -19,6 +19,12 @@ FLOAT_SETTINGS = (
     "paper_starting_balance",
     "paper_entry_max_deviation_pct",
     "position_monitor_max_price_age_seconds",
+    "max_futures_leverage",
+    "max_futures_margin_pct",
+    "paper_futures_default_funding_rate",
+    "paper_futures_funding_interval_hours",
+    "paper_futures_maintenance_margin_rate",
+    "paper_futures_liquidation_fee_rate",
     "reward_risk_ratio",
 )
 
@@ -58,3 +64,14 @@ def test_configuration_keeps_existing_paper_limits_as_defaults():
     config = Settings(_env_file=None)
     assert config.max_open_trades == 3
     assert config.reward_risk_ratio == 2.0
+
+
+
+def test_isolated_futures_defaults_are_conservative_and_bounded():
+    config = Settings(_env_file=None)
+    assert config.max_futures_leverage == 5.0
+    assert config.max_futures_margin_pct == 50.0
+    assert config.paper_futures_default_funding_rate == pytest.approx(0.0001)
+    assert config.paper_futures_funding_interval_hours == 8.0
+    assert config.paper_futures_maintenance_margin_rate == pytest.approx(0.005)
+    assert config.paper_futures_liquidation_fee_rate == pytest.approx(0.005)

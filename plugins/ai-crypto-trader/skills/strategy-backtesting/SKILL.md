@@ -21,8 +21,18 @@ the next segment. The ordinary single-window backtest keeps its existing
 unbounded-position default. These guards are not a formal guarantee against
 every possible source of leakage. It uses closed candles, next-open entries,
 configured fees and slippage, and assumes the stop occurs first when stop and
-target both fall inside one bar. It does not model funding, margin, liquidation,
-order-book depth, or real fills.
+target both fall inside one bar.
+
+For Futures, the engine uses isolated initial margin (notional / leverage), a
+fixed configurable funding rate settled at the first candle at/after each
+interval using that candle's open, and a fixed maintenance-margin ratio plus
+liquidation fee. Liquidation is checked before stop/target; adverse OHLC
+extremes can trigger the estimated threshold. This is not an exchange-matched
+liquidation engine: venue-specific tiers, mark price, bankruptcy price, actual
+historical funding, inverse coin collateral, order-book depth and real fills
+are not modeled. The configured Futures rates are research assumptions, not
+current rates published by KuCoin, Bybit or OKX. Spot does not accrue funding
+or use leverage.
 
 The optional Volume Ratio threshold can be tested at 0.8, 1.0, and 1.2 by
 running the same dataset with only that threshold changed. Omitting the

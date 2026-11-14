@@ -31,7 +31,7 @@ class RiskManager:
 
     def size(
         self, equity, entry, stop, open_risk=0, daily_pnl=0,
-        daily_start_equity=None, instrument=None,
+        daily_start_equity=None, instrument=None, leverage=1.0, margin_used=0.0,
     ):
         configuration = self._validate_configuration()
         if isinstance(configuration, str):
@@ -43,13 +43,16 @@ class RiskManager:
         self.max_daily_loss_pct = configuration["max_daily_loss_pct"]
         self.max_notional_pct = configuration["max_notional_pct"]
 
-        values = (equity, entry, stop, open_risk, daily_pnl)
+        values = (equity, entry, stop, open_risk, daily_pnl, leverage, margin_used)
         if any(not isinstance(value, (int, float)) for value in values):
             return RiskDecision(False, 0, 0, 0, "Risk inputs must be numeric")
         if any(not math.isfinite(value) for value in values):
             return RiskDecision(False, 0, 0, 0, "Risk inputs must be finite")
-        if equity <= 0 or entry <= 0 or stop <= 0 or entry == stop or open_risk < 0:
-            return RiskDecision(False, 0, 0, 0, "Invalid equity, entry, stop, or open risk")
+        if (
+            equity <= 0 or entry <= 0 or stop <= 0 or entry == stop
+            or open_risk < 0 or leverage < 1 or margin_used < 0
+        ):
+            return RiskDecision(False, 0, 0, 0, "Invalid equity, entry, stop, leverage, or open risk")
         if daily_start_equity is not None:
             if not math.isfinite(daily_start_equity) or daily_start_equity <= 0:
                 return RiskDecision(False, 0, 0, 0, "Invalid daily starting equity")
@@ -91,6 +94,13 @@ class RiskManager:
             "position_notional_cap"
             if quantity < raw_quantity else "risk_target"
         )
+        if contract_type in ("linear", "inverse"):
+            max_margin = equity * float(settings.max_futures_margin_pct) / 100.0
+            available_margin = max(0.0, max_margin - float(margin_used))
+            max_quantity_by_margin = available_margin * float(leverage) / per_unit_notional
+            if max_quantity_by_margin < quantity:
+                quantity = max_quantity_by_margin
+                sizing_reason = "futures_margin_cap"
         if (
             spec.get("max_amount") is not None
             and float(spec["max_amount"]) > 0
@@ -123,6 +133,11 @@ class RiskManager:
             )
 
         risk_amount = quantity * per_unit_risk
+        if contract_type in ("linear", "inverse"):
+            required_margin = notional / float(leverage)
+            allowed_margin = equity * float(settings.max_futures_margin_pct) / 100.0
+            if margin_used + required_margin > allowed_margin * (1 + 1e-12):
+                return RiskDecision(False, 0, 0, risk_amount, "Maximum Futures initial margin would be exceeded")
         if risk_amount > risk_target * (1 + 1e-12):
             return RiskDecision(
                 False, 0, 0, risk_amount,

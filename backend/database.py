@@ -93,6 +93,17 @@ def init_db():
             entry DOUBLE PRECISION NOT NULL, stop DOUBLE PRECISION NOT NULL, target DOUBLE PRECISION,
             exit_price DOUBLE PRECISION, pnl DOUBLE PRECISION DEFAULT 0,
             contract_size DOUBLE PRECISION NOT NULL DEFAULT 1, contract_type TEXT NOT NULL DEFAULT 'spot',
+            leverage DOUBLE PRECISION NOT NULL DEFAULT 1,
+            initial_margin DOUBLE PRECISION NOT NULL DEFAULT 0,
+            maintenance_margin_rate DOUBLE PRECISION NOT NULL DEFAULT 0.005,
+            liquidation_fee_rate DOUBLE PRECISION NOT NULL DEFAULT 0.005,
+            liquidation_price DOUBLE PRECISION,
+            funding_rate DOUBLE PRECISION NOT NULL DEFAULT 0,
+            funding_interval_hours DOUBLE PRECISION NOT NULL DEFAULT 8,
+            funding_paid DOUBLE PRECISION NOT NULL DEFAULT 0,
+            funding_events INTEGER NOT NULL DEFAULT 0,
+            next_funding_at DOUBLE PRECISION,
+            exit_reason TEXT,
             status TEXT DEFAULT 'OPEN', signal_id BIGINT, notes TEXT DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS daily_equity_snapshots(
@@ -114,8 +125,16 @@ def init_db():
             closed_at TEXT, exchange TEXT NOT NULL, symbol TEXT NOT NULL,
             market_type TEXT NOT NULL, side TEXT NOT NULL, quantity REAL NOT NULL,
             entry REAL NOT NULL, stop REAL NOT NULL, target REAL, exit_price REAL,
-            pnl REAL DEFAULT 0, status TEXT DEFAULT 'OPEN', signal_id INTEGER,
-            notes TEXT DEFAULT ''
+            pnl REAL DEFAULT 0, leverage REAL NOT NULL DEFAULT 1,
+            initial_margin REAL NOT NULL DEFAULT 0,
+            maintenance_margin_rate REAL NOT NULL DEFAULT 0.005,
+            liquidation_fee_rate REAL NOT NULL DEFAULT 0.005,
+            liquidation_price REAL, funding_rate REAL NOT NULL DEFAULT 0,
+            funding_interval_hours REAL NOT NULL DEFAULT 8,
+            funding_paid REAL NOT NULL DEFAULT 0,
+            funding_events INTEGER NOT NULL DEFAULT 0,
+            next_funding_at REAL, exit_reason TEXT,
+            status TEXT DEFAULT 'OPEN', signal_id INTEGER, notes TEXT DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS daily_equity_snapshots(
             trading_date TEXT PRIMARY KEY, starting_equity REAL NOT NULL,
@@ -128,6 +147,17 @@ def init_db():
             db.execute("ALTER TABLE signals ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ")
             db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS contract_size DOUBLE PRECISION NOT NULL DEFAULT 1")
             db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS contract_type TEXT NOT NULL DEFAULT 'spot'")
+            db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS leverage DOUBLE PRECISION NOT NULL DEFAULT 1")
+            db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS initial_margin DOUBLE PRECISION NOT NULL DEFAULT 0")
+            db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS maintenance_margin_rate DOUBLE PRECISION NOT NULL DEFAULT 0.005")
+            db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS liquidation_fee_rate DOUBLE PRECISION NOT NULL DEFAULT 0.005")
+            db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS liquidation_price DOUBLE PRECISION")
+            db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS funding_rate DOUBLE PRECISION NOT NULL DEFAULT 0")
+            db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS funding_interval_hours DOUBLE PRECISION NOT NULL DEFAULT 8")
+            db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS funding_paid DOUBLE PRECISION NOT NULL DEFAULT 0")
+            db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS funding_events INTEGER NOT NULL DEFAULT 0")
+            db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS next_funding_at DOUBLE PRECISION")
+            db.execute("ALTER TABLE trades ADD COLUMN IF NOT EXISTS exit_reason TEXT")
             db.execute("UPDATE trades SET contract_type = 'legacy_base' WHERE market_type = 'futures' AND contract_type = 'spot'")
         else:
             signal_columns = {row["name"] for row in db.execute("PRAGMA table_info(signals)").fetchall()}
@@ -138,6 +168,22 @@ def init_db():
                 db.execute("ALTER TABLE trades ADD COLUMN contract_size REAL NOT NULL DEFAULT 1")
             if "contract_type" not in columns:
                 db.execute("ALTER TABLE trades ADD COLUMN contract_type TEXT NOT NULL DEFAULT 'spot'")
+            futures_columns = {
+                "leverage": "REAL NOT NULL DEFAULT 1",
+                "initial_margin": "REAL NOT NULL DEFAULT 0",
+                "maintenance_margin_rate": "REAL NOT NULL DEFAULT 0.005",
+                "liquidation_fee_rate": "REAL NOT NULL DEFAULT 0.005",
+                "liquidation_price": "REAL",
+                "funding_rate": "REAL NOT NULL DEFAULT 0",
+                "funding_interval_hours": "REAL NOT NULL DEFAULT 8",
+                "funding_paid": "REAL NOT NULL DEFAULT 0",
+                "funding_events": "INTEGER NOT NULL DEFAULT 0",
+                "next_funding_at": "REAL",
+                "exit_reason": "TEXT",
+            }
+            for column, definition in futures_columns.items():
+                if column not in columns:
+                    db.execute(f"ALTER TABLE trades ADD COLUMN {column} {definition}")
             db.execute("UPDATE trades SET contract_type = 'legacy_base' WHERE market_type = 'futures' AND contract_type = 'spot'")
         # Support the monitor, account, journal and latest-signal read paths.
         db.execute("CREATE INDEX IF NOT EXISTS idx_trades_status_id ON trades(status, id)")

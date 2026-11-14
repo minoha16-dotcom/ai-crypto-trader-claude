@@ -37,6 +37,23 @@ class Settings(BaseSettings):
     position_monitor_max_price_age_seconds: float = Field(
         default=120.0, gt=0, le=3600, allow_inf_nan=False
     )
+
+    # Paper Futures model: isolated margin, bounded leverage and explicit
+    # funding assumptions. Rates are simulation inputs, not live venue rates.
+    max_futures_leverage: float = Field(default=5.0, ge=1, le=50, allow_inf_nan=False)
+    max_futures_margin_pct: float = Field(default=50.0, gt=0, le=100, allow_inf_nan=False)
+    paper_futures_default_funding_rate: float = Field(
+        default=0.0001, ge=-0.02, le=0.02, allow_inf_nan=False
+    )
+    paper_futures_funding_interval_hours: float = Field(
+        default=8.0, gt=0, le=24, allow_inf_nan=False
+    )
+    paper_futures_maintenance_margin_rate: float = Field(
+        default=0.005, gt=0, lt=0.2, allow_inf_nan=False
+    )
+    paper_futures_liquidation_fee_rate: float = Field(
+        default=0.005, ge=0, lt=0.05, allow_inf_nan=False
+    )
     scan_symbols: str = "BTC/USDT,ETH/USDT,SOL/USDT"
     scan_timeframe: str = "1h"
 
