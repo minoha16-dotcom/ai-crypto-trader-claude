@@ -14,7 +14,8 @@ from starlette.concurrency import run_in_threadpool
 from .config import settings
 from .database import connect
 from .exchanges import registry
-from .paper import close_trade
+from .paper import close_trade, apply_due_funding
+from .futures import liquidation_price, liquidation_triggered
 
 logger = logging.getLogger(__name__)
 MONITOR_LOCK_ID = 721904222
@@ -130,9 +131,28 @@ async def monitor_open_positions_once(*, detailed=False):
             if price_timestamp is None:
                 timestamp_unavailable += 1
 
+            if row["market_type"] == "futures":
+                row = await run_in_threadpool(apply_due_funding, row["id"], last)
             side = row["side"]
             stop = float(row["stop"])
             target = float(row["target"]) if row.get("target") is not None else None
+            liquidation_hit = False
+            if (
+                row["market_type"] == "futures"
+                and row.get("contract_type") in ("linear", "inverse")
+                and row.get("liquidation_price") is not None
+            ):
+                current_liquidation = liquidation_price(
+                    row["entry"], row["quantity"], row["contract_size"],
+                    row["contract_type"], side, row.get("leverage", 1.0),
+                    row.get("maintenance_margin_rate", settings.paper_futures_maintenance_margin_rate),
+                    settings.taker_fee_rate + settings.slippage_bps / 10000.0,
+                    row.get("liquidation_fee_rate", settings.paper_futures_liquidation_fee_rate),
+                    row.get("funding_paid", 0.0),
+                )
+                liquidation_hit = liquidation_triggered(
+                    side, last, current_liquidation
+                )
             stop_hit = (
                 (side == "LONG" and last <= stop)
                 or (side == "SHORT" and last >= stop)
@@ -141,12 +161,17 @@ async def monitor_open_positions_once(*, detailed=False):
                 (side == "LONG" and last >= target)
                 or (side == "SHORT" and last <= target)
             )
-            if not stop_hit and not target_hit:
+            if not liquidation_hit and not stop_hit and not target_hit:
                 continue
 
-            reason = "STOP" if stop_hit else "TARGET"
+            reason = (
+                "LIQUIDATION" if liquidation_hit else
+                "STOP" if stop_hit else "TARGET"
+            )
             try:
-                result = await run_in_threadpool(close_trade, row["id"], last)
+                result = await run_in_threadpool(
+                    close_trade, row["id"], last, reason
+                )
             except ValueError:
                 # A dashboard/manual close may have won the race.
                 logger.info(
@@ -158,11 +183,12 @@ async def monitor_open_positions_once(*, detailed=False):
             closed += 1
             logger.info(
                 "Paper position auto-closed trade_id=%s exchange=%s symbol=%s "
-                "market_type=%s reason=%s price=%.12g price_age_seconds=%s net_pnl=%.8g",
+                "market_type=%s reason=%s price=%.12g price_age_seconds=%s "
+                "funding_paid=%.8g net_pnl=%.8g",
                 row["id"], row["exchange"], row["symbol"], row["market_type"],
                 reason, last,
                 "unknown" if price_age_seconds is None else f"{price_age_seconds:.1f}",
-                result["pnl"],
+                result.get("funding_paid", 0.0), result["pnl"],
             )
         except Exception as exc:
             failed += 1
