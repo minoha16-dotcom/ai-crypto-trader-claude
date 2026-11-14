@@ -84,3 +84,40 @@ def test_mcp_backtest_tool_forwards_volume_ratio_threshold(monkeypatch):
 def test_mcp_backtest_rejects_invalid_volume_ratio_threshold(value):
     with pytest.raises(ValueError, match="volume_ratio_threshold"):
         asyncio.run(server.run_backtest("okx", "BTC/USDT", volume_ratio_threshold=value))
+
+
+
+def test_mcp_scan_uses_backend_default_exchange_when_omitted(monkeypatch):
+    calls = []
+
+    async def fake_api(method, path, *, params=None, payload=None):
+        calls.append((method, path, params))
+        if path == "/api/exchanges":
+            return {
+                "exchanges": ["kucoin", "bybit", "okx"],
+                "default_exchange": "bybit",
+            }
+        return {"results": []}
+
+    monkeypatch.setattr(server, "_api", fake_api)
+    result = asyncio.run(server.scan_opportunities(symbols="BTC/USDT"))
+
+    assert result == {"results": []}
+    assert calls == [
+        ("GET", "/api/exchanges", None),
+        ("POST", "/api/scan", {
+            "exchange": "bybit",
+            "market_type": "spot",
+            "symbols": "BTC/USDT",
+            "timeframe": "1h",
+        }),
+    ]
+
+
+def test_mcp_scan_rejects_unsupported_backend_default(monkeypatch):
+    async def fake_api(method, path, *, params=None, payload=None):
+        return {"exchanges": ["kucoin", "bybit", "okx"], "default_exchange": "binance"}
+
+    monkeypatch.setattr(server, "_api", fake_api)
+    with pytest.raises(ValueError, match="supported default exchange"):
+        asyncio.run(server.scan_opportunities())
