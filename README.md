@@ -216,7 +216,7 @@ against public KuCoin and OKX data:
 
 ~~~powershell
 $env:STRATEGY_VALIDATION_EXCHANGES = "kucoin,okx"
-$env:STRATEGY_VALIDATION_LIMIT = "1800"
+$env:STRATEGY_VALIDATION_LIMIT = "5000"
 python scripts/run_strategy_validation.py
 ~~~
 
