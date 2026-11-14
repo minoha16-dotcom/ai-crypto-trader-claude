@@ -75,3 +75,15 @@ def test_isolated_futures_defaults_are_conservative_and_bounded():
     assert config.paper_futures_funding_interval_hours == 8.0
     assert config.paper_futures_maintenance_margin_rate == pytest.approx(0.005)
     assert config.paper_futures_liquidation_fee_rate == pytest.approx(0.005)
+
+
+@pytest.mark.parametrize("hostname", ["bybit.com", "BYBIT.COM", "bytick.com"])
+def test_bybit_api_hostname_accepts_only_official_global_hosts(hostname):
+    config = Settings(_env_file=None, bybit_api_hostname=hostname)
+    assert config.bybit_api_hostname == hostname.strip().lower()
+
+
+@pytest.mark.parametrize("hostname", ["localhost", "example.com", "api.bybit.com", ""])
+def test_bybit_api_hostname_rejects_unapproved_hosts(hostname):
+    with pytest.raises(ValidationError, match="bybit_api_hostname"):
+        Settings(_env_file=None, bybit_api_hostname=hostname)
