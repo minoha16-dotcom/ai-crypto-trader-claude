@@ -212,6 +212,7 @@ def test_backtest_api_loads_real_spot_instrument_precision(monkeypatch):
     assert observed["starting_balance"] == pytest.approx(12345.0)
     assert observed["instrument"]["amount_precision"] == 3
     assert observed["candle_count"] == 52
+    assert observed["volume_ratio_threshold"] is None
 
 
 def test_backtest_reports_shortfall_when_exchange_returns_too_few_candles(monkeypatch):
