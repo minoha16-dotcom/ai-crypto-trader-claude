@@ -78,6 +78,10 @@ def _period_summary(result, starting_balance, candle_count):
         "period_end_closures": sum(
             1 for trade in trades if trade.get("exit_reason") == "PERIOD_END"
         ),
+        "liquidations": sum(
+            1 for trade in trades if str(trade.get("exit_reason", "")).startswith("LIQUIDATION")
+        ),
+        "funding_paid": sum(float(trade.get("funding_paid", 0) or 0) for trade in trades),
         "open_positions_at_end": len(result.get("open_positions", [])),
         "skipped_signals": len(result.get("skipped_signals", [])),
         "starting_balance": float(starting_balance),
@@ -113,6 +117,8 @@ def _range(candles, start, end):
 def _evaluate_period(
     candles, start, end, warmup_bars, starting_balance,
     instrument, volume_ratio_threshold, max_holding_bars,
+    leverage, funding_rate, funding_interval_hours,
+    maintenance_margin_rate, liquidation_fee_rate,
 ):
     history_start = start - warmup_bars
     period_candles = candles[history_start:end]
@@ -126,6 +132,11 @@ def _evaluate_period(
         start_index=warmup_bars,
         max_holding_bars=max_holding_bars,
         close_open_at_end=True,
+        leverage=leverage,
+        funding_rate=funding_rate,
+        funding_interval_hours=funding_interval_hours,
+        maintenance_margin_rate=maintenance_margin_rate,
+        liquidation_fee_rate=liquidation_fee_rate,
     )
     return _period_summary(result, starting_balance, end - start)
 
@@ -148,6 +159,11 @@ def run_walk_forward_backtest(
     volume_ratio_threshold=None,
     expected_candle_ms=None,
     max_missing_bars=0,
+    leverage=1.0,
+    funding_rate=None,
+    funding_interval_hours=None,
+    maintenance_margin_rate=None,
+    liquidation_fee_rate=None,
 ):
     """Evaluate a fixed strategy in non-overlapping chronological test folds.
 
@@ -230,14 +246,20 @@ def run_walk_forward_backtest(
         train_result = _evaluate_period(
             candles, train_start, train_end, warmup_bars, starting_balance,
             instrument, volume_ratio_threshold, max_holding_bars,
+            leverage, funding_rate, funding_interval_hours,
+            maintenance_margin_rate, liquidation_fee_rate,
         )
         validation_result = _evaluate_period(
             candles, validation_start, validation_end, warmup_bars, starting_balance,
             instrument, volume_ratio_threshold, max_holding_bars,
+            leverage, funding_rate, funding_interval_hours,
+            maintenance_margin_rate, liquidation_fee_rate,
         )
         test_result = _evaluate_period(
             candles, test_start, test_end, warmup_bars, starting_balance,
             instrument, volume_ratio_threshold, max_holding_bars,
+            leverage, funding_rate, funding_interval_hours,
+            maintenance_margin_rate, liquidation_fee_rate,
         )
 
         folds.append({
@@ -311,6 +333,12 @@ def run_walk_forward_backtest(
             "purge_bars": purge_bars,
             "embargo_bars": embargo_bars,
             "max_holding_bars": max_holding_bars,
+            "futures_leverage": leverage,
+            "futures_funding_rate": funding_rate,
+            "futures_funding_interval_hours": funding_interval_hours,
+            "futures_maintenance_margin_rate": maintenance_margin_rate,
+            "futures_liquidation_fee_rate": liquidation_fee_rate,
+            "futures_margin_mode": "isolated",
             "boundary_gaps": {
                 "purge_minimum": "max_holding_bars",
                 "embargo_minimum": "max(warmup_bars, max_holding_bars)",
@@ -357,7 +385,8 @@ def run_walk_forward_backtest(
             "Each period starts with an independent balance; fold P&L is not a continuous portfolio equity curve.",
             "The walk-forward runner applies a configured maximum holding period and force-closes remaining positions at each period end; this differs from the unbounded single-window backtest.",
             "Purge and embargo constraints bound the configured feature lookback and trade horizon but are safeguards, not a formal proof against every possible source of leakage.",
-            "The OHLCV engine does not model funding, margin, liquidation, order-book depth, or real fills.",
+            "Futures funding is a fixed assumed rate settled on the first candle at/after each interval; missed events use that candle's open.",
+            "Futures use isolated margin with a fixed maintenance-margin rate; exchange tier tables, mark-price feeds, bankruptcy prices, order-book depth and real fills are not modeled.",
             "A strategy is not validated until pre-registered folds, sensitivity checks, and out-of-sample results are independently reviewed.",
         ],
     }
