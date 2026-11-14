@@ -307,3 +307,31 @@ def test_futures_margin_cap_rejects_leverage_above_configured_max(isolated_db):
             "bybit", "BTC/USDT:USDT", "futures", "LONG", 100, 95,
             instrument=_linear_futures_spec(), leverage=6,
         )
+
+
+
+def test_legacy_futures_position_can_still_be_closed_without_new_liquidation_fields(
+    isolated_db,
+):
+    opened = open_trade(
+        "bybit", "BTC/USDT:USDT", "futures", "SHORT", 100, 105, 90,
+        instrument={
+            "contract_size": 0.001,
+            "contract_type": "linear",
+            "amount_precision": 3,
+            "precision_mode": 2,
+            "min_amount": 0.001,
+            "market_type": "futures",
+        },
+    )
+    with connect() as db:
+        db.execute(
+            "UPDATE trades SET contract_type='legacy_base', leverage=1, "
+            "initial_margin=0, liquidation_price=NULL, funding_rate=0, "
+            "funding_paid=0, funding_events=0, next_funding_at=NULL WHERE id=?",
+            (opened["id"],),
+        )
+
+    closed = close_trade(opened["id"], 101.0)
+    assert closed["status"] == "CLOSED"
+    assert closed["exit_reason"] == "MANUAL"
