@@ -25,6 +25,7 @@ def test_mcp_backtest_tool_routes_to_backtest_api(monkeypatch):
         "market_type": "futures",
         "timeframe": "4h",
         "limit": 500,
+        "leverage": 1.0,
     }
 
 
@@ -149,6 +150,11 @@ def test_mcp_walk_forward_tool_forwards_parameters_and_volume_threshold(monkeypa
         max_folds=4,
         volume_ratio_threshold=0.8,
         max_missing_bars=1,
+        leverage=4,
+        funding_rate=0.0003,
+        funding_interval_hours=4,
+        maintenance_margin_rate=0.006,
+        liquidation_fee_rate=0.004,
     ))
 
     assert result["fold_count"] == 2
@@ -162,6 +168,11 @@ def test_mcp_walk_forward_tool_forwards_parameters_and_volume_threshold(monkeypa
     assert captured["params"]["max_holding_bars"] == 20
     assert captured["params"]["volume_ratio_threshold"] == 0.8
     assert captured["params"]["max_missing_bars"] == 1
+    assert captured["params"]["leverage"] == 4
+    assert captured["params"]["funding_rate"] == pytest.approx(0.0003)
+    assert captured["params"]["funding_interval_hours"] == 4
+    assert captured["params"]["maintenance_margin_rate"] == pytest.approx(0.006)
+    assert captured["params"]["liquidation_fee_rate"] == pytest.approx(0.004)
 
 
 def test_mcp_walk_forward_tool_uses_backend_default_when_exchange_is_omitted(monkeypatch):
@@ -193,3 +204,27 @@ def test_mcp_walk_forward_tool_uses_backend_default_when_exchange_is_omitted(mon
 def test_mcp_walk_forward_rejects_unsafe_boundary_configuration(kwargs, message):
     with pytest.raises(ValueError, match=message):
         asyncio.run(server.run_walk_forward(**kwargs))
+
+
+
+def test_mcp_backtest_forwards_futures_margin_and_funding_options(monkeypatch):
+    captured = {}
+
+    async def fake_api(method, path, *, params=None, payload=None):
+        captured.update(method=method, path=path, params=params)
+        return {"trade_count": 0}
+
+    monkeypatch.setattr(server, "_api", fake_api)
+    asyncio.run(server.run_backtest(
+        "okx", "BTC/USDT", "futures", "1h", 300,
+        leverage=3,
+        funding_rate=0.0002,
+        funding_interval_hours=4,
+        maintenance_margin_rate=0.006,
+        liquidation_fee_rate=0.004,
+    ))
+    assert captured["params"]["leverage"] == 3
+    assert captured["params"]["funding_rate"] == pytest.approx(0.0002)
+    assert captured["params"]["funding_interval_hours"] == 4
+    assert captured["params"]["maintenance_margin_rate"] == pytest.approx(0.006)
+    assert captured["params"]["liquidation_fee_rate"] == pytest.approx(0.004)
