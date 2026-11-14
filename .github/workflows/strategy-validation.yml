@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 35
     env:
       STRATEGY_VALIDATION_EXCHANGES: kucoin,okx
-      STRATEGY_VALIDATION_LIMIT: "1800"
+      STRATEGY_VALIDATION_LIMIT: "5000"
       STRATEGY_VALIDATION_OUT_DIR: artifacts
     steps:
       - name: Check out repository
