@@ -182,3 +182,25 @@ def test_backtest_target_uses_configured_reward_risk_ratio(monkeypatch):
 
     assert result["open_position"]["target"] == pytest.approx(112.0)
     assert result["assumptions"]["reward_risk_ratio"] == pytest.approx(3.0)
+
+
+def test_backtest_can_start_scoring_after_warmup(monkeypatch):
+    observed_lengths = []
+
+    def fake_analyze(history, volume_ratio_threshold=None):
+        observed_lengths.append(len(history))
+        return {"signal": "WAIT", "price": 100.0, "atr14": 2.0}
+
+    monkeypatch.setattr(backtest, "analyze", fake_analyze)
+    result = run_backtest(rising_candles(70), start_index=55)
+
+    assert observed_lengths
+    assert observed_lengths[0] == 56
+    assert result["assumptions"]["evaluation_start_index"] == 55
+    assert result["assumptions"]["warmup_candles_excluded_from_scoring"] == 55
+
+
+@pytest.mark.parametrize("start_index", [48, 69])
+def test_backtest_rejects_invalid_evaluation_start_index(start_index):
+    with pytest.raises(ValueError, match="start_index"):
+        run_backtest(rising_candles(70), start_index=start_index)
