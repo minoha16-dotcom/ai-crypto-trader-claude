@@ -18,6 +18,7 @@ FLOAT_SETTINGS = (
     "signal_min_atr_pct",
     "paper_starting_balance",
     "paper_entry_max_deviation_pct",
+    "position_monitor_max_price_age_seconds",
     "reward_risk_ratio",
 )
 
