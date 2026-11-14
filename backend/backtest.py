@@ -17,17 +17,28 @@ from .contracts import (
 )
 from .indicators import analyze
 from .metrics import validate_trading_configuration
+from .futures import (
+    due_funding,
+    initial_margin,
+    liquidation_price,
+    liquidation_triggered,
+    margin_snapshot,
+    validate_futures_parameters,
+)
 
 
-def _costed_pnl(entry, mark, quantity, side, contract_size, contract_type, fee_rate):
+def _costed_pnl(
+    entry, mark, quantity, side, contract_size, contract_type, fee_rate,
+    funding_paid=0.0, additional_exit_fee=0.0,
+):
     gross = contract_gross_pnl(
         entry, mark, quantity, side, contract_size, contract_type
     )
     costs = (
         contract_notional(entry, quantity, contract_size, contract_type)
         + contract_notional(mark, quantity, contract_size, contract_type)
-    ) * fee_rate
-    return gross - costs, gross, costs
+    ) * fee_rate + float(additional_exit_fee)
+    return gross - costs - float(funding_paid), gross, costs
 
 
 def _drawdown(peak, value):
@@ -64,6 +75,11 @@ def run_backtest(
     start_index=49,
     max_holding_bars=None,
     close_open_at_end=False,
+    leverage=1.0,
+    funding_rate=None,
+    funding_interval_hours=None,
+    maintenance_margin_rate=None,
+    liquidation_fee_rate=None,
 ):
     if len(candles) < 52:
         raise ValueError("At least 52 candles are required for next-open backtesting")
@@ -98,7 +114,9 @@ def run_backtest(
         raise ValueError("Unsupported backtest instrument contract type")
     if not math.isfinite(contract_size) or contract_size <= 0:
         raise ValueError("Backtest contract size must be finite and positive")
-    if contract_type == "spot" and instrument and instrument.get("market_type") == "futures":
+    market_type = (instrument or {}).get("market_type", "spot")
+    is_futures = market_type == "futures" or contract_type in ("linear", "inverse")
+    if market_type == "futures" and contract_type not in ("linear", "inverse"):
         raise ValueError("Futures backtests require linear or inverse contract metadata")
 
     configuration = validate_trading_configuration()
@@ -108,6 +126,41 @@ def run_backtest(
     max_notional_pct = configuration["max_notional_pct"]
     max_open_risk_pct = configuration["max_open_risk_pct"]
     max_daily_loss_pct = configuration["max_daily_loss_pct"]
+
+    if is_futures:
+        futures = validate_futures_parameters(
+            leverage=leverage,
+            funding_rate=(
+                settings.paper_futures_default_funding_rate
+                if funding_rate is None else funding_rate
+            ),
+            funding_interval_hours=(
+                settings.paper_futures_funding_interval_hours
+                if funding_interval_hours is None else funding_interval_hours
+            ),
+            maintenance_margin_rate=(
+                settings.paper_futures_maintenance_margin_rate
+                if maintenance_margin_rate is None else maintenance_margin_rate
+            ),
+            liquidation_fee_rate=(
+                settings.paper_futures_liquidation_fee_rate
+                if liquidation_fee_rate is None else liquidation_fee_rate
+            ),
+            max_leverage=settings.max_futures_leverage,
+        )
+        leverage = futures["leverage"]
+        funding_rate = futures["funding_rate"]
+        funding_interval_hours = futures["funding_interval_hours"]
+        maintenance_margin_rate = futures["maintenance_margin_rate"]
+        liquidation_fee_rate = futures["liquidation_fee_rate"]
+    else:
+        if float(leverage) != 1.0:
+            raise ValueError("Spot backtests do not support leverage")
+        leverage = 1.0
+        funding_rate = 0.0
+        funding_interval_hours = settings.paper_futures_funding_interval_hours
+        maintenance_margin_rate = settings.paper_futures_maintenance_margin_rate
+        liquidation_fee_rate = settings.paper_futures_liquidation_fee_rate
 
     # A daily starting-equity snapshot and realized P&L ledger mirror the live
     # risk engine's UTC-date accounting. One backtest position is open at once.
