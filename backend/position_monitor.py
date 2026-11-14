@@ -140,7 +140,6 @@ async def monitor_open_positions_once(*, detailed=False):
             if (
                 row["market_type"] == "futures"
                 and row.get("contract_type") in ("linear", "inverse")
-                and row.get("liquidation_price") is not None
             ):
                 current_liquidation = liquidation_price(
                     row["entry"], row["quantity"], row["contract_size"],
