@@ -125,21 +125,22 @@ def _evaluate_period(
     period_candles = candles[history_start:end]
     # run_backtest starts scoring at this index; all earlier rows are indicator
     # context only and cannot generate a trade in the evaluated period.
-    result = run_backtest(
-        period_candles,
-        starting_balance=starting_balance,
-        instrument=instrument,
-        volume_ratio_threshold=volume_ratio_threshold,
-        feature_ablation=feature_ablation,
-        start_index=warmup_bars,
-        max_holding_bars=max_holding_bars,
-        close_open_at_end=True,
-        leverage=leverage,
-        funding_rate=funding_rate,
-        funding_interval_hours=funding_interval_hours,
-        maintenance_margin_rate=maintenance_margin_rate,
-        liquidation_fee_rate=liquidation_fee_rate,
-    )
+    backtest_options = {
+        "starting_balance": starting_balance,
+        "instrument": instrument,
+        "volume_ratio_threshold": volume_ratio_threshold,
+        "start_index": warmup_bars,
+        "max_holding_bars": max_holding_bars,
+        "close_open_at_end": True,
+        "leverage": leverage,
+        "funding_rate": funding_rate,
+        "funding_interval_hours": funding_interval_hours,
+        "maintenance_margin_rate": maintenance_margin_rate,
+        "liquidation_fee_rate": liquidation_fee_rate,
+    }
+    if feature_ablation != "baseline":
+        backtest_options["feature_ablation"] = feature_ablation
+    result = run_backtest(period_candles, **backtest_options)
     return _period_summary(result, starting_balance, end - start)
 
 
