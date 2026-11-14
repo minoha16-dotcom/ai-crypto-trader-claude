@@ -21,6 +21,7 @@ from .backtest import run_backtest
 from .position_monitor import run_position_monitor
 from .metrics import position_pnl, position_risk
 from .advisor import analyze_closed_trade_history
+from .version import APP_VERSION
 
 
 @asynccontextmanager
@@ -46,7 +47,7 @@ async def lifespan(app):
 
 app = FastAPI(
     title=settings.app_name,
-    version="2.1.0",
+    version=APP_VERSION,
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,
@@ -190,7 +191,7 @@ class PaperClose(BaseModel):
 @app.get("/api/health")
 def health():
     """Liveness only: confirms the web process can answer HTTP requests."""
-    return {"status": "ok", "version": "2.1.0", "mode": "paper-only"}
+    return {"status": "ok", "version": APP_VERSION, "mode": "paper-only"}
 
 
 @app.get("/api/ready")
@@ -206,7 +207,7 @@ def readiness():
             {"status": "not_ready", "database": "unavailable"},
             status_code=503,
         )
-    return {"status": "ready", "database": "ok", "version": "2.1.0"}
+    return {"status": "ready", "database": "ok", "version": APP_VERSION}
 
 
 @app.get("/api/exchanges")
@@ -319,13 +320,17 @@ async def market_candles(
 
 
 @app.get("/api/backtest")
-async def backtest(exchange="kucoin", symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000):
+async def backtest(exchange="kucoin", symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000, volume_ratio_threshold: float | None = None):
     if exchange not in EXCHANGE_IDS:
         raise HTTPException(400, "Unsupported exchange")
     if market_type not in ("spot", "futures"):
         raise HTTPException(400, "market_type must be spot or futures")
     if limit < 53 or limit > 5000:
         raise HTTPException(400, "limit must be between 53 and 5000 so 52 closed candles remain after excluding the forming candle")
+    if volume_ratio_threshold is not None and (
+        not math.isfinite(volume_ratio_threshold) or volume_ratio_threshold < 0
+    ):
+        raise HTTPException(400, "volume_ratio_threshold must be finite and non-negative")
     try:
         resolved_symbol = await registry.resolve_symbol(exchange, symbol, market_type)
         # Both Spot and Futures sizing must use the selected venue's real amount
@@ -361,7 +366,8 @@ async def backtest(exchange="kucoin", symbol="BTC/USDT", market_type="spot", tim
             "received_candles": candle_meta["received"],
             "candle_shortfall": candle_meta["shortfall"],
             **await run_in_threadpool(
-                run_backtest, closed_candles, settings.paper_starting_balance, instrument
+                run_backtest, closed_candles, settings.paper_starting_balance, instrument,
+                volume_ratio_threshold
             ),
         }
     except ExchangeRateLimitCooldown:
@@ -588,7 +594,7 @@ async def risk():
         "max_open_risk_pct": risk_manager.max_open_risk_pct,
         "max_daily_loss_pct": risk_manager.max_daily_loss_pct,
         "max_position_notional_pct": risk_manager.max_notional_pct,
-        "max_open_trades": 3,
+        "max_open_trades": settings.max_open_trades,
         "open_trades": len(positions),
         "open_risk": open_risk,
         "realized_pnl": realized_all,
@@ -598,8 +604,8 @@ async def risk():
         "daily_pnl": daily_pnl,
         "remaining_daily_loss": remaining_daily_loss,
         "prices_complete": prices_complete,
-        "status": "BLOCKED" if not prices_complete or remaining_daily_loss <= 0 or len(positions) >= 3 else "ACTIVE",
-        "reward_risk_ratio": 2.0,
+        "status": "BLOCKED" if not prices_complete or remaining_daily_loss <= 0 or len(positions) >= settings.max_open_trades else "ACTIVE",
+        "reward_risk_ratio": settings.reward_risk_ratio,
     }
 
 
