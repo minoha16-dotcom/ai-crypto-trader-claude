@@ -290,7 +290,10 @@ def close_trade(trade_id, exit_price, exit_reason="MANUAL", observed_at=None):
 
         funding_paid = float(row["funding_paid"] or 0)
         extra_exit_fee = 0.0
-        if row["market_type"] == "futures":
+        if (
+            row["market_type"] == "futures"
+            and row["contract_type"] in ("linear", "inverse")
+        ):
             current_liquidation = liquidation_price(
                 row["entry"], row["quantity"], row["contract_size"],
                 row["contract_type"], row["side"], row["leverage"],
