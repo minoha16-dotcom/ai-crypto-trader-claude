@@ -162,7 +162,7 @@ class PaperOpen(BaseModel):
     entry: float = Field(gt=0, allow_inf_nan=False)
     stop: float = Field(gt=0, allow_inf_nan=False)
     target: float | None = Field(default=None, gt=0, allow_inf_nan=False)
-    leverage: float = Field(default=1.0, ge=1, le=settings.max_futures_leverage, allow_inf_nan=False)
+    leverage: float = Field(default=1.0, ge=1, allow_inf_nan=False)
     funding_rate: float | None = Field(default=None, ge=-0.02, le=0.02, allow_inf_nan=False)
     funding_interval_hours: float | None = Field(default=None, gt=0, le=24, allow_inf_nan=False)
     maintenance_margin_rate: float | None = Field(default=None, gt=0, lt=0.2, allow_inf_nan=False)
