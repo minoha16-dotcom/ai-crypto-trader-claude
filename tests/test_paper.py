@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -335,3 +337,100 @@ def test_legacy_futures_position_can_still_be_closed_without_new_liquidation_fie
     closed = close_trade(opened["id"], 101.0)
     assert closed["status"] == "CLOSED"
     assert closed["exit_reason"] == "MANUAL"
+
+
+def test_api_rebases_entry_stop_and_manual_target_to_submit_time_quote(isolated_db, monkeypatch):
+    from backend.exchanges import registry
+
+    async def fake_market_spec(exchange, symbol, market_type):
+        return {
+            "symbol": symbol,
+            "contract_size": 1.0,
+            "contract_type": "spot",
+            "amount_precision": 8,
+            "precision_mode": 2,
+            "min_amount": 0.00000001,
+        }
+
+    async def fake_ticker(exchange, symbol, market_type):
+        return {"last": 100.1}
+
+    async def fake_positions():
+        return {"positions": []}
+
+    monkeypatch.setattr(registry, "market_spec", fake_market_spec)
+    monkeypatch.setattr(registry, "ticker", fake_ticker)
+    monkeypatch.setattr("backend.main.get_positions", fake_positions)
+    monkeypatch.setattr(settings, "paper_entry_max_deviation_pct", 0.25)
+
+    with TestClient(app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"}) as client:
+        response = client.post("/api/paper/open", json={
+            "exchange": "kucoin", "symbol": "BTC/USDT", "market_type": "spot",
+            "side": "LONG", "entry": 100.0, "stop": 95.0, "target": 110.0,
+        })
+
+    assert response.status_code == 200
+    trade_id = response.json()["id"]
+    with connect() as db:
+        row = db.execute(
+            "SELECT entry, stop, target FROM trades WHERE id=?", (trade_id,)
+        ).fetchone()
+    assert row["entry"] == pytest.approx(100.1)
+    assert row["stop"] == pytest.approx(95.1)
+    assert row["target"] == pytest.approx(110.1)
+
+
+def test_api_rejects_material_price_drift_since_review(isolated_db, monkeypatch):
+    from backend.exchanges import registry
+
+    async def fake_market_spec(exchange, symbol, market_type):
+        return {
+            "symbol": symbol, "contract_size": 1.0, "contract_type": "spot",
+            "amount_precision": 8, "precision_mode": 2, "min_amount": 0.00000001,
+        }
+
+    async def fake_ticker(exchange, symbol, market_type):
+        return {"last": 100.5}
+
+    async def fake_positions():
+        return {"positions": []}
+
+    monkeypatch.setattr(registry, "market_spec", fake_market_spec)
+    monkeypatch.setattr(registry, "ticker", fake_ticker)
+    monkeypatch.setattr("backend.main.get_positions", fake_positions)
+    monkeypatch.setattr(settings, "paper_entry_max_deviation_pct", 0.25)
+
+    with TestClient(app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"}) as client:
+        response = client.post("/api/paper/open", json={
+            "exchange": "kucoin", "symbol": "BTC/USDT", "market_type": "spot",
+            "side": "LONG", "entry": 100.0, "stop": 95.0,
+        })
+
+    assert response.status_code == 409
+    assert "Review setup again" in response.json()["detail"]
+    with connect() as db:
+        total = db.execute("SELECT COUNT(*) AS total FROM trades").fetchone()["total"]
+    assert total == 0
+
+
+def test_open_trade_rejects_expired_scanner_signal(isolated_db):
+    created_at = (
+        datetime.now(timezone.utc)
+        - timedelta(seconds=settings.paper_signal_max_age_seconds + 5)
+    ).strftime("%Y-%m-%d %H:%M:%S")
+    with connect() as db:
+        cursor = db.execute(
+            "INSERT INTO signals(created_at,exchange,symbol,market_type,timeframe,signal,score,price,rsi,trend,payload) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?) RETURNING id",
+            (
+                created_at, "kucoin", "BTC/USDT", "spot", "15m", "LONG",
+                3, 100.0, 40.0, "bullish", "{}",
+            ),
+        )
+        signal_id = cursor.fetchone()["id"]
+
+    with pytest.raises(ValueError, match="scanner setup is stale"):
+        open_trade(
+            "kucoin", "BTC/USDT", "spot", "LONG", 100.0, 95.0,
+            signal_id=signal_id,
+        )
