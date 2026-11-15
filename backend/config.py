@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     dashboard_username: str = Field(default="", repr=False)
     dashboard_password: str = Field(default="", repr=False)
 
+    # In-memory failed-login limit; use a shared store before scaling instances.
+    auth_rate_limit_max_attempts: int = Field(default=10, ge=3, le=100)
+    auth_rate_limit_window_seconds: float = Field(default=300.0, gt=0, le=3600, allow_inf_nan=False)
+
     risk_per_trade_pct: float = Field(default=0.5, gt=0, le=100, allow_inf_nan=False)
     max_open_risk_pct: float = Field(default=2.0, gt=0, le=100, allow_inf_nan=False)
     max_daily_loss_pct: float = Field(default=3.0, gt=0, le=100, allow_inf_nan=False)
