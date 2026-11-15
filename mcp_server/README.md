@@ -11,11 +11,16 @@ intended for one user's private development setup.
 - `close_paper_trade` closes a simulated position at the exit price supplied by the user.
 - `get_ai_recommendations` ranks scanner setups against local closed paper-trade outcomes. It returns suggestions only and never opens a trade.
 - Spot SHORT is rejected by the backend.
-- Futures paper positions use an isolated-margin approximation with a bounded
-  leverage setting, assumed funding rate/interval, fixed maintenance-margin
-  ratio, and an estimated liquidation trigger. It does not reproduce exchange
-  maintenance tiers, mark-price feeds, bankruptcy prices, inverse collateral
-  accounting, or venue liquidation rules.
+- Futures paper positions model the exchange-reported contract size and
+  normalized contract quantity, bounded leverage, isolated initial margin,
+  assumed funding rate/settlement interval, fixed maintenance-margin and
+  liquidation-fee assumptions, estimated liquidation threshold, taker fees,
+  and configured slippage. This is a research approximation: it does not
+  reproduce exchange maintenance tiers, mark-price feeds, bankruptcy prices,
+  inverse-coin collateral settlement, funding timestamps/rates from the venue,
+  order-book depth, or venue-specific liquidation rules.
+- Spot and Futures P&L includes the paper engine's configured fee and slippage
+  estimates. It is not a prediction of the exact fill or fee on an exchange.
 - Advisor scores are historical ranking scores from user-selected, closed,
   signal-linked paper trades, not calibrated profit probabilities; unselected
   signals are not represented and selection bias is possible.
@@ -68,6 +73,17 @@ python -m mcp_server.server
 ```
 
 Supply the credentials through your local environment or a secret manager; do not commit them. Set both variables or neither. Keep the MCP listener bound to loopback and use the private tunnel for ChatGPT.
+
+## Backend authentication and rate limits
+
+The FastAPI backend requires Basic Auth for every dashboard and API route
+except `/api/health` and `/api/ready`. Failed credentials are rate-limited per
+client IP: 10 attempts in a rolling five-minute window by default. Render's
+Cloudflare client-IP header is used only when the Cloudflare Ray header is
+present; untrusted `X-Forwarded-For` values are not used. The current limiter
+is process-local and suitable for this single-instance deployment. Before
+running multiple backend instances, move the counters to a shared Redis/Key
+Value store so attempts cannot be split across instances.
 
 ## ChatGPT availability and deployment status
 
