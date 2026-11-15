@@ -543,7 +543,38 @@ async function ticket(pair,signalPrice,dist,signal,signalId,exchange,market,time
  }
 }
 function syncFuturesControls(){const visible=$('market').value==='futures';$('futures-controls').classList.toggle('is-visible',visible);$('futures-controls').setAttribute('aria-hidden',visible?'false':'true')}
-async function openTrade(){try{let body={exchange:$('exchange').value,symbol:$('pair').value,market_type:$('market').value,side:$('side').value,entry:Number($('entry').value),stop:Number($('stop').value),target:targetAutoMode?null:($('target').value?Number($('target').value):null)};if(body.market_type==='futures'){body.leverage=Number($('futures-leverage').value);body.funding_rate=Number($('futures-funding-rate').value);body.funding_interval_hours=Number($('futures-funding-interval').value)}const selected=selectedSetupContext;body.signal_id=selected&&selected.signal_id>0&&selected.symbol===body.symbol.trim().toUpperCase()&&selected.exchange===body.exchange&&selected.market_type===body.market_type&&selected.timeframe===$('timeframe').value&&selected.signal===body.side?selected.signal_id:null;let r=await api('/api/paper/open',{method:'POST',body:JSON.stringify(body)});$('target').value=Number(r.target).toPrecision(12);$('target-mode').textContent=targetAutoMode?'Auto · '+defaultRewardRiskRatio.toFixed(1)+'R from Stop':'Manual target';alert('Paper trade opened. Target '+Number(r.target).toLocaleString()+' ('+(Math.abs(Number(r.target)-body.entry)/Math.abs(body.entry-body.stop)).toFixed(1)+'R). '+(body.market_type==='futures'?'Contracts ':'Qty ')+formatQuantity(r.quantity)+'; contract size '+Number(r.contract_size||1).toLocaleString()+'; actual risk '+money(r.risk_amount)+' ('+Number(r.risk_pct_actual).toFixed(3)+'%); sizing: '+r.sizing_reason+'; estimated entry/stop costs '+money(r.fees_estimated));refresh()}catch(e){alert(e.message)}}
+async function openTrade(){
+ try{
+  let body={
+   exchange:$('exchange').value,symbol:$('pair').value,market_type:$('market').value,
+   side:$('side').value,entry:Number($('entry').value),stop:Number($('stop').value),
+   target:targetAutoMode?null:($('target').value?Number($('target').value):null)
+  };
+  if(body.market_type==='futures'){
+   body.leverage=Number($('futures-leverage').value);
+   body.funding_rate=Number($('futures-funding-rate').value);
+   body.funding_interval_hours=Number($('futures-funding-interval').value);
+  }
+  const selected=selectedSetupContext;
+  body.signal_id=selected&&selected.signal_id>0&&selected.symbol===body.symbol.trim().toUpperCase()
+   &&selected.exchange===body.exchange&&selected.market_type===body.market_type
+   &&selected.timeframe===$('timeframe').value&&selected.signal===body.side
+   ?selected.signal_id:null;
+  const r=await api('/api/paper/open',{method:'POST',body:JSON.stringify(body)});
+  const actualEntry=Number(r.entry??body.entry);
+  const actualStop=Number(r.stop??body.stop);
+  const actualTarget=Number(r.target);
+  $('entry').value=Number(actualEntry.toPrecision(12)).toString();
+  $('stop').value=Number(actualStop.toPrecision(12)).toString();
+  $('target').value=Number(actualTarget.toPrecision(12)).toString();
+  $('target-mode').textContent=targetAutoMode?'Auto · '+defaultRewardRiskRatio.toFixed(1)+'R from Stop':'Manual target';
+  selectedSetupContext=null;
+  $('setup-quote-status').textContent='Opened at server-validated market price '+marketNumber(actualEntry)+'. Entry, Stop and Target now show the values saved in the paper journal.';
+  const actualR=Math.abs(actualTarget-actualEntry)/Math.abs(actualEntry-actualStop);
+  alert('Paper trade opened at '+actualEntry.toLocaleString()+'. Stop '+actualStop.toLocaleString()+', Target '+actualTarget.toLocaleString()+' ('+actualR.toFixed(1)+'R). '+(body.market_type==='futures'?'Contracts ':'Qty ')+formatQuantity(r.quantity)+'; contract size '+Number(r.contract_size||1).toLocaleString()+'; actual risk '+money(r.risk_amount)+' ('+Number(r.risk_pct_actual).toFixed(3)+'%); sizing: '+r.sizing_reason+'; estimated entry/stop costs '+money(r.fees_estimated));
+  await refresh();
+ }catch(e){alert(e.message)}
+}
 async function closeTrade(id,suggestedPrice){
  const defaultPrice=Number.isFinite(Number(suggestedPrice))&&Number(suggestedPrice)>0?String(Number(suggestedPrice)):'';
  const px=prompt('Enter simulated exit price to close this paper position:',defaultPrice);
