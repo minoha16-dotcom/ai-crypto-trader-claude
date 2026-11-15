@@ -434,3 +434,39 @@ def test_open_trade_rejects_expired_scanner_signal(isolated_db):
             "kucoin", "BTC/USDT", "spot", "LONG", 100.0, 95.0,
             signal_id=signal_id,
         )
+
+
+def test_api_rejects_stale_exchange_quote(isolated_db, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from backend.exchanges import registry
+
+    async def fake_market_spec(exchange, symbol, market_type):
+        return {
+            "symbol": symbol, "contract_size": 1.0, "contract_type": "spot",
+            "amount_precision": 8, "precision_mode": 2, "min_amount": 0.00000001,
+        }
+
+    async def fake_ticker(exchange, symbol, market_type):
+        stale_timestamp = int(
+            (datetime.now(timezone.utc) - timedelta(seconds=180)).timestamp() * 1000
+        )
+        return {"last": 100.0, "timestamp": stale_timestamp}
+
+    async def fake_positions():
+        return {"positions": []}
+
+    monkeypatch.setattr(registry, "market_spec", fake_market_spec)
+    monkeypatch.setattr(registry, "ticker", fake_ticker)
+    monkeypatch.setattr("backend.main.get_positions", fake_positions)
+
+    with TestClient(app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"}) as client:
+        response = client.post("/api/paper/open", json={
+            "exchange": "kucoin", "symbol": "BTC/USDT", "market_type": "spot",
+            "side": "LONG", "entry": 100.0, "stop": 95.0,
+        })
+
+    assert response.status_code == 503
+    assert "quote is stale" in response.json()["detail"]
+    with connect() as db:
+        total = db.execute("SELECT COUNT(*) AS total FROM trades").fetchone()["total"]
+    assert total == 0
