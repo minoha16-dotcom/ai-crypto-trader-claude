@@ -285,6 +285,7 @@ async def market(exchange, symbol, market_type="spot"):
             "timestamp": ticker.get("timestamp"),
             "quote_age_seconds": quote_age,
             "maximum_accepted_ticker_age_seconds": max_quote_age,
+            "maximum_entry_deviation_pct": settings.paper_entry_max_deviation_pct,
         }
     except ExchangeRateLimitCooldown:
         raise
