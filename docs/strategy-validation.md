@@ -166,15 +166,19 @@ Run the pre-registered public-data experiment from the repository root:
 ```powershell
 $env:STRATEGY_VALIDATION_EXCHANGES = "kucoin,okx"
 $env:STRATEGY_VALIDATION_LIMIT = "5000"
+$env:STRATEGY_VALIDATION_TIMEFRAMES = "1h,4h"
 python scripts/run_strategy_validation.py
 ```
 
 The default universe is Spot BTC/USDT and ETH/USDT plus Futures BTC/USDT
-for each selected exchange. The run uses 1h candles, requires at least 600
-closed candles, removes the still-forming candle, and rejects timestamps with
-missing bars rather than filling them. The default exchanges are KuCoin and
-OKX; Bybit is intentionally not included in the default research run while its
-public connectivity is unverified from the target network.
+for each selected exchange. The run defaults to 1h and 4h candles (override with
+`STRATEGY_VALIDATION_TIMEFRAMES`, for example `15m,1h,4h`), requires at
+least 600 closed candles per dataset, removes the still-forming candle, and
+rejects timestamps with missing bars rather than filling them. The default
+exchanges are KuCoin and OKX; Bybit is intentionally not included in the
+default research run while its public connectivity is unverified from the
+target network. Every exchange × timeframe × market × symbol combination is
+reported as a separate dataset.
 
 Pre-registered comparisons:
 - Volume Ratio thresholds 0.8, 1.0, and 1.2 with the baseline signal votes.
