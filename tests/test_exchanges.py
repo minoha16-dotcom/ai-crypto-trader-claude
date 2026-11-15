@@ -634,3 +634,17 @@ def test_bybit_403_invalid_request_is_not_misclassified_as_ip_ban():
     assert not ExchangeRegistry._is_bybit_ip_rate_limit_error(
         FakeClient(), Forbidden("403 Forbidden: invalid request")
     )
+
+
+def test_bybit_ip_rate_limit_regex_requires_standalone_403_code():
+    from backend.exchanges import ExchangeRegistry
+
+    class FakeClient:
+        last_http_response = '{"retMsg":"1403 access too frequent"}'
+
+    class MessageOnlyError(Exception):
+        pass
+
+    assert not ExchangeRegistry._is_bybit_ip_rate_limit_error(
+        FakeClient(), MessageOnlyError("retCode 1403: access too frequent")
+    )
