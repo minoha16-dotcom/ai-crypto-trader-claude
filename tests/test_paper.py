@@ -470,3 +470,34 @@ def test_api_rejects_stale_exchange_quote(isolated_db, monkeypatch):
     with connect() as db:
         total = db.execute("SELECT COUNT(*) AS total FROM trades").fetchone()["total"]
     assert total == 0
+
+
+def test_paper_close_maps_missing_trade_to_404(isolated_db, monkeypatch):
+    def missing_trade(*args, **kwargs):
+        raise ValueError("Open paper trade not found")
+
+    monkeypatch.setattr("backend.main.close_trade", missing_trade)
+    with TestClient(app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"}) as client:
+        response = client.post("/api/paper/999/close", json={"exit_price": 100.0})
+    assert response.status_code == 404
+
+
+def test_paper_close_maps_validation_errors_to_422(isolated_db, monkeypatch):
+    def invalid_close(*args, **kwargs):
+        raise ValueError("Paper exit price violates a validation rule")
+
+    monkeypatch.setattr("backend.main.close_trade", invalid_close)
+    with TestClient(app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"}) as client:
+        response = client.post("/api/paper/1/close", json={"exit_price": 100.0})
+    assert response.status_code == 422
+
+
+def test_paper_close_maps_unexpected_errors_to_500_not_404(isolated_db, monkeypatch):
+    def internal_failure(*args, **kwargs):
+        raise RuntimeError("database details must not be leaked")
+
+    monkeypatch.setattr("backend.main.close_trade", internal_failure)
+    with TestClient(app, headers={"Authorization": "Basic dGVzdC10cmFkZXI6dGVzdC1vbmx5LXBhc3N3b3Jk"}) as client:
+        response = client.post("/api/paper/1/close", json={"exit_price": 100.0})
+    assert response.status_code == 500
+    assert "database details" not in response.text
