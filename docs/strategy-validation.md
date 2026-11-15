@@ -63,11 +63,14 @@ generalizes to unseen time periods. This is a research process, not a forecast,
 trade recommendation, or proof of profitability. It must not place exchange
 orders or use private account endpoints.
 
-The evaluation must preserve the current engine's conservative assumptions:
+The evaluation preserves the current engine's conservative assumptions:
 signals use closed candles, entries occur at the next candle open, stop gaps
 fill at the adverse open, same-candle stop/target ambiguity resolves to the
-stop first, and costs are included. Funding, margin, liquidation, order-book
-depth, and realistic execution remain limitations until explicitly modeled.
+stop first, and costs are included. Futures funding, leverage, isolated initial
+margin, fixed maintenance margin, liquidation fees and an estimated liquidation
+threshold are modeled as paper assumptions. Venue-specific funding history,
+mark-price feeds, maintenance tiers, bankruptcy rules, order-book depth, and
+realistic execution remain limitations.
 
 ## 2. Walk-forward evaluation protocol
 
