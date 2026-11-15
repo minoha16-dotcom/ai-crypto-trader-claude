@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from .database import connect
 from .config import settings
 from .risk import risk_manager
@@ -29,6 +31,26 @@ def account():
         "open_trades": opened,
         "unrealized_pnl_note": "Not marked to market: paper positions require a live price feed.",
     }
+
+
+def _signal_age_seconds(created_at):
+    if isinstance(created_at, datetime):
+        timestamp = created_at
+    else:
+        try:
+            timestamp = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Selected scanner setup has an invalid timestamp. Run a new scan."
+            ) from exc
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - timestamp.astimezone(timezone.utc)).total_seconds()
+    if age < -30:
+        raise ValueError(
+            "Selected scanner setup timestamp is in the future. Check server time and run a new scan."
+        )
+    return age
 
 
 def open_trade(
@@ -102,7 +124,7 @@ def open_trade(
         db.execute("BEGIN IMMEDIATE")
         if signal_id is not None:
             source_signal = db.execute(
-                "SELECT exchange, symbol, market_type, signal FROM signals WHERE id=?",
+                "SELECT exchange, symbol, market_type, signal, created_at FROM signals WHERE id=?",
                 (signal_id,),
             ).fetchone()
             if not source_signal:
@@ -114,6 +136,13 @@ def open_trade(
                 or source_signal["signal"] != side
             ):
                 raise ValueError("Selected scanner setup does not match this paper trade")
+            signal_age = _signal_age_seconds(source_signal["created_at"])
+            max_signal_age = float(settings.paper_signal_max_age_seconds)
+            if signal_age > max_signal_age:
+                raise ValueError(
+                    f"Selected scanner setup is stale ({signal_age:.0f}s old; "
+                    f"maximum age is {max_signal_age:.0f}s). Run a new scan and review the setup again."
+                )
         opened = db.execute(
             "SELECT exchange, symbol, market_type, quantity, entry, stop, contract_size, contract_type, initial_margin "
             "FROM trades WHERE status='OPEN'"
@@ -192,7 +221,8 @@ def open_trade(
         )
         trade_id = cursor.fetchone()["id"]
     return {
-        "id": trade_id, "quantity": decision.quantity, "contracts": decision.quantity if market_type == "futures" else None,
+        "id": trade_id, "entry": float(entry), "stop": float(stop),
+        "quantity": decision.quantity, "contracts": decision.quantity if market_type == "futures" else None,
         "contract_size": float(spec["contract_size"]), "contract_type": spec["contract_type"],
         "notional": decision.notional, "risk_amount": decision.risk_amount,
         "target": target,

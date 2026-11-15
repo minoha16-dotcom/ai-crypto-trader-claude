@@ -90,18 +90,30 @@ def stub_open_dependencies(monkeypatch, ticker):
     monkeypatch.setattr(main, "open_trade", lambda **kwargs: {"status": "OPEN", **kwargs})
 
 
-def test_paper_open_endpoint_accepts_price_within_tolerance(monkeypatch):
+def test_paper_open_endpoint_accepts_small_drift_and_rebases_prices(monkeypatch):
+    observed = {}
     stub_open_dependencies(monkeypatch, 60000)
-    response = make_client(monkeypatch).post("/api/paper/open", json=valid_trade(entry=62900, target=65000))
+    monkeypatch.setattr(main, "open_trade", lambda **kwargs: observed.update(kwargs) or {"status": "OPEN", **kwargs})
+    response = make_client(monkeypatch).post(
+        "/api/paper/open",
+        json=valid_trade(entry=59950, stop=58950, target=61950),
+    )
     assert response.status_code == 200
     assert response.json()["status"] == "OPEN"
+    assert observed["entry"] == pytest.approx(60000)
+    assert observed["stop"] == pytest.approx(59000)
+    assert observed["target"] == pytest.approx(62000)
 
 
-def test_paper_open_endpoint_rejects_price_outside_tolerance(monkeypatch):
+def test_paper_open_endpoint_rejects_price_outside_tight_drift_limit(monkeypatch):
     stub_open_dependencies(monkeypatch, 60000)
-    response = make_client(monkeypatch).post("/api/paper/open", json=valid_trade(entry=64000, target=65000))
-    assert response.status_code == 400
-    assert "maximum allowed deviation is 5.00%" in response.json()["detail"]
+    response = make_client(monkeypatch).post(
+        "/api/paper/open",
+        json=valid_trade(entry=59700, stop=58700, target=61700),
+    )
+    assert response.status_code == 409
+    assert "maximum allowed drift 0.250%" in response.json()["detail"]
+    assert "Review setup again" in response.json()["detail"]
 
 
 def test_paper_open_endpoint_rejects_missing_ticker_price(monkeypatch):

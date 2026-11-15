@@ -3,6 +3,7 @@ import base64
 import hmac
 import math
 import os
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -244,6 +245,23 @@ async def instrument(exchange, symbol, market_type="spot"):
         raise HTTPException(400, f"Unable to resolve exchange instrument: {exc}")
 
 
+def _ticker_age_seconds(ticker):
+    """Return the exchange quote age when the venue supplied a timestamp."""
+    raw_timestamp = ticker.get("timestamp")
+    if raw_timestamp is None:
+        return None
+    try:
+        timestamp = float(raw_timestamp)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Exchange returned an invalid ticker timestamp") from exc
+    if not math.isfinite(timestamp) or timestamp <= 0:
+        raise ValueError("Exchange returned an invalid ticker timestamp")
+    # CCXT timestamps are normally milliseconds, but accept epoch seconds too.
+    if timestamp > 100_000_000_000:
+        timestamp /= 1000.0
+    return max(0.0, time.time() - timestamp)
+
+
 @app.get("/api/markets/{exchange}/{symbol:path}")
 async def market(exchange, symbol, market_type="spot"):
     if exchange not in EXCHANGE_IDS:
@@ -253,11 +271,21 @@ async def market(exchange, symbol, market_type="spot"):
     try:
         resolved_symbol = await registry.resolve_symbol(exchange, symbol, market_type)
         ticker = await registry.ticker(exchange, resolved_symbol, market_type)
+        quote_age = _ticker_age_seconds(ticker)
+        max_quote_age = float(settings.position_monitor_max_price_age_seconds)
+        if quote_age is not None and quote_age > max_quote_age:
+            raise ValueError(
+                f"Exchange quote is stale ({quote_age:.1f}s old; maximum accepted age is "
+                f"{max_quote_age:.0f}s). Refresh the market data and review the setup again."
+            )
         return {
             "exchange": exchange, "symbol": resolved_symbol, "market_type": market_type,
             "last": ticker.get("last"), "bid": ticker.get("bid"),
             "ask": ticker.get("ask"), "base_volume": ticker.get("baseVolume"),
             "timestamp": ticker.get("timestamp"),
+            "quote_age_seconds": quote_age,
+            "maximum_accepted_ticker_age_seconds": max_quote_age,
+            "maximum_entry_deviation_pct": settings.paper_entry_max_deviation_pct,
         }
     except ExchangeRateLimitCooldown:
         raise
@@ -776,6 +804,8 @@ async def risk():
         "paper_futures_funding_interval_hours": settings.paper_futures_funding_interval_hours,
         "paper_futures_maintenance_margin_rate": settings.paper_futures_maintenance_margin_rate,
         "paper_futures_liquidation_fee_rate": settings.paper_futures_liquidation_fee_rate,
+        "paper_entry_max_deviation_pct": settings.paper_entry_max_deviation_pct,
+        "paper_signal_max_age_seconds": settings.paper_signal_max_age_seconds,
         "reward_risk_ratio": settings.reward_risk_ratio,
     }
 
@@ -783,9 +813,8 @@ async def risk():
 @app.post("/api/paper/open")
 async def paper_open(body: PaperOpen):
     try:
-        # Resolve the symbol against the selected exchange/market before accepting
-        # a manually entered paper position. This prevents arbitrary symbols and
-        # spot/futures market mismatches from entering the journal.
+        # Resolve the exact venue instrument and obtain a fresh public quote again
+        # at submit time; the quote used when reviewing a setup may already have moved.
         instrument = await registry.market_spec(body.exchange, body.symbol, body.market_type)
         resolved_symbol = instrument.get("symbol", body.symbol)
         ticker = await registry.ticker(body.exchange, resolved_symbol, body.market_type)
@@ -793,19 +822,61 @@ async def paper_open(body: PaperOpen):
         if last is None or not math.isfinite(float(last)) or float(last) <= 0:
             raise ValueError("Exchange returned an invalid market price")
         last = float(last)
-        deviation_pct = abs(float(body.entry) - last) / last * 100
+        quote_age = _ticker_age_seconds(ticker)
+        max_quote_age = float(settings.position_monitor_max_price_age_seconds)
+        if quote_age is not None and quote_age > max_quote_age:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"Exchange quote is stale ({quote_age:.1f}s old; maximum accepted age is "
+                    f"{max_quote_age:.0f}s). Wait for a fresh quote and review the setup again."
+                ),
+            )
+
+        # The ticket's Entry is the reviewed reference quote. Reject material drift
+        # rather than silently opening at a stale signal price.
+        reviewed_entry = float(body.entry)
+        deviation_pct = abs(reviewed_entry - last) / last * 100
         max_deviation_pct = float(settings.paper_entry_max_deviation_pct)
         if deviation_pct > max_deviation_pct:
-            raise ValueError(
-                f"Entry price is {deviation_pct:.2f}% away from live market price; "
-                f"maximum allowed deviation is {max_deviation_pct:.2f}%"
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Market price moved {deviation_pct:.3f}% since the setup was reviewed "
+                    f"(maximum allowed drift {max_deviation_pct:.3f}%). No trade was opened. "
+                    "Click Review setup again to refresh Entry, Stop Loss and Take Profit."
+                ),
             )
+
+        # If the market moved slightly within the allowed drift, shift Entry, Stop
+        # and any manual Target together so the original risk/reward distances remain intact.
+        stop_distance = abs(reviewed_entry - float(body.stop))
+        target_distance = (
+            None if body.target is None else abs(float(body.target) - reviewed_entry)
+        )
+        if body.side == "LONG":
+            current_stop = last - stop_distance
+            current_target = None if target_distance is None else last + target_distance
+        else:
+            current_stop = last + stop_distance
+            current_target = None if target_distance is None else last - target_distance
+        if current_stop <= 0 or (current_target is not None and current_target <= 0):
+            raise HTTPException(
+                status_code=422,
+                detail="The refreshed market quote makes the reviewed Stop or Target invalid. Review the setup again.",
+            )
+
         marked = await get_positions()
         positions = marked["positions"]
         prices_complete = all(p.get("unrealized_pnl") is not None for p in positions)
         floating_pnl = sum(float(p["unrealized_pnl"]) for p in positions if p.get("unrealized_pnl") is not None)
         trade_data = body.model_dump()
-        trade_data["symbol"] = resolved_symbol
+        trade_data.update({
+            "symbol": resolved_symbol,
+            "entry": last,
+            "stop": current_stop,
+            "target": current_target,
+        })
         return await run_in_threadpool(
             open_trade,
             **trade_data,
@@ -814,6 +885,8 @@ async def paper_open(body: PaperOpen):
             instrument=instrument,
         )
     except ExchangeRateLimitCooldown:
+        raise
+    except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(400, f"Unable to validate/open paper trade: {exc}")

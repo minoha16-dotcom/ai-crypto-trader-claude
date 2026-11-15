@@ -35,7 +35,9 @@ class Settings(BaseSettings):
     signal_min_atr_pct: float = Field(default=0.1, gt=0, allow_inf_nan=False)
 
     paper_starting_balance: float = Field(default=10000.0, gt=0, allow_inf_nan=False)
-    paper_entry_max_deviation_pct: float = Field(default=5.0, gt=0, le=100, allow_inf_nan=False)
+    # New entries must be close to the quote shown at review/open time.
+    paper_entry_max_deviation_pct: float = Field(default=0.25, gt=0, le=100, allow_inf_nan=False)
+    paper_signal_max_age_seconds: float = Field(default=600.0, gt=0, le=86400, allow_inf_nan=False)
     position_monitor_max_price_age_seconds: float = Field(
         default=120.0, gt=0, le=3600, allow_inf_nan=False
     )
