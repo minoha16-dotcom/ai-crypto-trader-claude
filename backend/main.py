@@ -1,9 +1,11 @@
 import asyncio
 import base64
 import hmac
+import ipaddress
 import math
 import os
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -119,6 +121,59 @@ async def exchange_rate_limit_handler(request: Request, exc: ExchangeRateLimitCo
     )
 
 
+# Process-local rolling-window counters. Render currently runs one service
+# instance for this deployment. Use a shared Redis/Key Value store before
+# increasing the instance count so every instance enforces the same limit.
+_AUTH_FAILURES: dict[str, deque[float]] = {}
+_AUTH_FAILURE_BUCKET_LIMIT = 4096
+
+
+def _auth_client_ip(request: Request) -> str:
+    # Render is fronted by Cloudflare. Only trust Cloudflare's client-IP header
+    # when its per-request Ray header is also present; ignore raw X-Forwarded-For
+    # because clients can supply that header themselves.
+    forwarded_ip = request.headers.get("cf-connecting-ip", "").strip()
+    if request.headers.get("cf-ray") and forwarded_ip:
+        try:
+            return ipaddress.ip_address(forwarded_ip).compressed
+        except ValueError:
+            pass
+    return request.client.host if request.client else "unknown"
+
+
+def _prune_auth_failures(now: float) -> None:
+    cutoff = now - float(settings.auth_rate_limit_window_seconds)
+    for client_ip, attempts in list(_AUTH_FAILURES.items()):
+        while attempts and attempts[0] <= cutoff:
+            attempts.popleft()
+        if not attempts:
+            _AUTH_FAILURES.pop(client_ip, None)
+    if len(_AUTH_FAILURES) > _AUTH_FAILURE_BUCKET_LIMIT:
+        oldest = sorted(
+            _AUTH_FAILURES.items(),
+            key=lambda item: item[1][0] if item[1] else now,
+        )
+        for client_ip, _ in oldest[:len(_AUTH_FAILURES) - _AUTH_FAILURE_BUCKET_LIMIT]:
+            _AUTH_FAILURES.pop(client_ip, None)
+
+
+def _auth_retry_after(client_ip: str, now: float) -> int:
+    _prune_auth_failures(now)
+    attempts = _AUTH_FAILURES.get(client_ip)
+    maximum = int(settings.auth_rate_limit_max_attempts)
+    if not attempts or len(attempts) < maximum:
+        return 0
+    remaining = float(settings.auth_rate_limit_window_seconds) - (now - attempts[0])
+    return max(1, int(math.ceil(remaining)))
+
+
+def _record_auth_failure(client_ip: str, now: float) -> int:
+    _prune_auth_failures(now)
+    attempts = _AUTH_FAILURES.setdefault(client_ip, deque())
+    attempts.append(now)
+    return _auth_retry_after(client_ip, now)
+
+
 @app.middleware("http")
 async def dashboard_auth_and_security_headers(request: Request, call_next):
     # Render health checks stay public; every dashboard/API route requires Basic Auth.
@@ -129,23 +184,45 @@ async def dashboard_auth_and_security_headers(request: Request, call_next):
                 {"detail": "Dashboard credentials are not configured."},
                 status_code=503,
             )
-        else:
-            header = request.headers.get("authorization", "")
-            supplied_user = supplied_password = ""
-            if header.startswith("Basic "):
-                try:
-                    decoded = base64.b64decode(header[6:], validate=True).decode("utf-8")
-                    supplied_user, supplied_password = decoded.split(":", 1)
-                except (ValueError, UnicodeDecodeError):
-                    pass
-            valid_user = hmac.compare_digest(supplied_user, username)
-            valid_password = hmac.compare_digest(supplied_password, password)
-            if not (valid_user and valid_password):
-                return JSONResponse(
-                    {"detail": "Authentication required."},
-                    status_code=401,
-                    headers={"WWW-Authenticate": 'Basic realm="AI Crypto Trader"'},
-                )
+
+        client_ip = _auth_client_ip(request)
+        retry_after = _auth_retry_after(client_ip, time.monotonic())
+        if retry_after:
+            return JSONResponse(
+                {"detail": "Too many failed authentication attempts. Try again later."},
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        header = request.headers.get("authorization", "")
+        supplied_user = supplied_password = ""
+        if header.startswith("Basic "):
+            try:
+                decoded = base64.b64decode(header[6:], validate=True).decode("utf-8")
+                supplied_user, supplied_password = decoded.split(":", 1)
+            except (ValueError, UnicodeDecodeError):
+                pass
+
+        # compare_digest accepts bytes for non-ASCII values. Comparing str values
+        # containing non-ASCII characters raises TypeError in Python.
+        valid_user = hmac.compare_digest(
+            supplied_user.encode("utf-8"), username.encode("utf-8")
+        )
+        valid_password = hmac.compare_digest(
+            supplied_password.encode("utf-8"), password.encode("utf-8")
+        )
+        if not (valid_user and valid_password):
+            retry_after = _record_auth_failure(client_ip, time.monotonic())
+            headers = {"WWW-Authenticate": 'Basic realm="AI Crypto Trader"'}
+            status_code = 401
+            detail = "Authentication required."
+            if retry_after:
+                status_code = 429
+                detail = "Too many failed authentication attempts. Try again later."
+                headers["Retry-After"] = str(retry_after)
+            return JSONResponse({"detail": detail}, status_code=status_code, headers=headers)
+
+        _AUTH_FAILURES.pop(client_ip, None)
 
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -898,8 +975,13 @@ async def paper_close(trade_id: int, body: PaperClose):
         return await run_in_threadpool(close_trade, trade_id, body.exit_price)
     except ExchangeRateLimitCooldown:
         raise
-    except Exception as exc:
-        raise HTTPException(404, str(exc))
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 404 if "not found" in detail.lower() else 422
+        raise HTTPException(status_code, detail)
+    except Exception:
+        # Database and unexpected runtime failures are server errors, not 404s.
+        raise HTTPException(500, "Unable to close this paper trade due to an internal error.")
 
 
 @app.get("/api/journal")
