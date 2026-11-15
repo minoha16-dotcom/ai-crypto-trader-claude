@@ -23,8 +23,15 @@ from backend.exchanges import ExchangeRegistry
 from backend.walk_forward import run_walk_forward_backtest
 
 
-TIMEFRAME = "1h"
-TIMEFRAME_MS = 60 * 60 * 1000
+DEFAULT_TIMEFRAMES = ("1h", "4h")
+TIMEFRAME_MS_BY_INTERVAL = {
+    "15m": 15 * 60 * 1000,
+    "30m": 30 * 60 * 1000,
+    "1h": 60 * 60 * 1000,
+    "2h": 2 * 60 * 60 * 1000,
+    "4h": 4 * 60 * 60 * 1000,
+    "1d": 24 * 60 * 60 * 1000,
+}
 DEFAULT_EXCHANGES = ("kucoin", "okx")
 SPOT_SYMBOLS = ("BTC/USDT", "ETH/USDT")
 FUTURES_SYMBOLS = ("BTC/USDT", "ETH/USDT")
@@ -56,6 +63,21 @@ def _parse_csv(name, default):
     value = os.getenv(name, "")
     items = [item.strip().lower() for item in value.split(",") if item.strip()]
     return tuple(items) if items else tuple(default)
+
+
+def _parse_timeframes():
+    raw = os.getenv("STRATEGY_VALIDATION_TIMEFRAMES", "")
+    values = [item.strip().lower() for item in raw.split(",") if item.strip()]
+    timeframes = tuple(dict.fromkeys(values or DEFAULT_TIMEFRAMES))
+    unsupported = sorted(set(timeframes) - set(TIMEFRAME_MS_BY_INTERVAL))
+    if unsupported:
+        raise ValueError(
+            "unsupported strategy-validation timeframe(s): "
+            + ", ".join(unsupported)
+            + ". Supported: "
+            + ", ".join(TIMEFRAME_MS_BY_INTERVAL)
+        )
+    return timeframes
 
 
 def _iso_utc(timestamp_ms):
@@ -125,16 +147,18 @@ def _summarize(result, candles):
     }
 
 
-async def _fetch_dataset(registry, exchange_id, market_type, requested_symbol, limit):
+async def _fetch_dataset(
+    registry, exchange_id, market_type, requested_symbol, timeframe, timeframe_ms, limit
+):
     spec = await registry.market_spec(exchange_id, requested_symbol, market_type)
     candles, metadata = await registry.ohlcv_with_metadata(
-        exchange_id, spec["symbol"], TIMEFRAME, limit, market_type
+        exchange_id, spec["symbol"], timeframe, limit, market_type
     )
     # CCXT may include the still-forming candle. Never score it.
     now_ms = int(time.time() * 1000)
     closed = [
         row for row in candles
-        if int(row[0]) + TIMEFRAME_MS <= now_ms
+        if int(row[0]) + timeframe_ms <= now_ms
     ]
     if len(closed) < MINIMUM_CANDLES:
         raise ValueError(
@@ -145,6 +169,7 @@ async def _fetch_dataset(registry, exchange_id, market_type, requested_symbol, l
 
 
 async def run():
+    timeframes = _parse_timeframes()
     exchanges = _parse_csv("STRATEGY_VALIDATION_EXCHANGES", DEFAULT_EXCHANGES)
     allowed = {"kucoin", "bybit", "okx"}
     unknown = sorted(set(exchanges) - allowed)
@@ -161,75 +186,80 @@ async def run():
     errors = []
     results = []
     try:
-        for exchange_id in exchanges:
-            requests = (
-                [("spot", symbol) for symbol in SPOT_SYMBOLS]
-                + [("futures", symbol) for symbol in FUTURES_SYMBOLS]
-            )
-            for market_type, requested_symbol in requests:
-                key = f"{exchange_id}:{market_type}:{requested_symbol}"
-                try:
-                    spec, candles, source_meta = await _fetch_dataset(
-                        registry, exchange_id, market_type, requested_symbol, limit
-                    )
-                    # The runner fails closed on any missing bar instead of
-                    # interpolating or forward-filling market prices.
-                    wf_kwargs = dict(
-                        **WALK_FORWARD,
-                        starting_balance=STARTING_BALANCE,
-                        instrument=spec,
-                        expected_candle_ms=TIMEFRAME_MS,
-                        max_missing_bars=0,
-                    )
-                    if market_type == "futures":
-                        wf_kwargs.update(
-                            leverage=2.0,
-                            funding_rate=settings.paper_futures_default_funding_rate,
-                            funding_interval_hours=settings.paper_futures_funding_interval_hours,
-                            maintenance_margin_rate=settings.paper_futures_maintenance_margin_rate,
-                            liquidation_fee_rate=settings.paper_futures_liquidation_fee_rate,
+        for timeframe in timeframes:
+            timeframe_ms = TIMEFRAME_MS_BY_INTERVAL[timeframe]
+            for exchange_id in exchanges:
+                requests = (
+                    [("spot", symbol) for symbol in SPOT_SYMBOLS]
+                    + [("futures", symbol) for symbol in FUTURES_SYMBOLS]
+                )
+                for market_type, requested_symbol in requests:
+                    key = f"{exchange_id}:{timeframe}:{market_type}:{requested_symbol}"
+                    try:
+                        spec, candles, source_meta = await _fetch_dataset(
+                            registry, exchange_id, market_type, requested_symbol,
+                            timeframe, timeframe_ms, limit
                         )
-                    datasets.append({
-                        "id": key,
-                        "exchange": exchange_id,
-                        "market_type": market_type,
-                        "symbol": spec["symbol"],
-                        "contract_type": spec["contract_type"],
-                        "contract_size": spec["contract_size"],
-                        "candle_count": len(candles),
-                        "first_candle_utc": _iso_utc(candles[0][0]),
-                        "last_candle_utc": _iso_utc(candles[-1][0]),
-                        "source_metadata": source_meta,
-                    })
-                    scenarios = [
-                        (threshold, "baseline")
-                        for threshold in VOLUME_THRESHOLDS
-                    ] + [
-                        (1.0, ablation)
-                        for ablation in ABLATIONS
-                        if ablation != "baseline"
-                    ]
-                    for threshold, ablation in scenarios:
-                        evaluated = run_walk_forward_backtest(
-                            candles,
-                            volume_ratio_threshold=threshold,
-                            feature_ablation=ablation,
-                            **wf_kwargs,
+                        # The runner fails closed on any missing bar instead of
+                        # interpolating or forward-filling market prices.
+                        wf_kwargs = dict(
+                            **WALK_FORWARD,
+                            starting_balance=STARTING_BALANCE,
+                            instrument=spec,
+                            expected_candle_ms=timeframe_ms,
+                            max_missing_bars=0,
                         )
-                        summary = _summarize(evaluated, candles)
-                        results.append({
-                            "dataset_id": key,
-                            "volume_ratio_threshold": threshold,
-                            "feature_ablation": ablation,
-                            "metrics": summary,
+                        if market_type == "futures":
+                            wf_kwargs.update(
+                                leverage=2.0,
+                                funding_rate=settings.paper_futures_default_funding_rate,
+                                funding_interval_hours=settings.paper_futures_funding_interval_hours,
+                                maintenance_margin_rate=settings.paper_futures_maintenance_margin_rate,
+                                liquidation_fee_rate=settings.paper_futures_liquidation_fee_rate,
+                            )
+                        datasets.append({
+                            "id": key,
+                            "exchange": exchange_id,
+                            "timeframe": timeframe,
+                            "market_type": market_type,
+                            "symbol": spec["symbol"],
+                            "contract_type": spec["contract_type"],
+                            "contract_size": spec["contract_size"],
+                            "candle_count": len(candles),
+                            "first_candle_utc": _iso_utc(candles[0][0]),
+                            "last_candle_utc": _iso_utc(candles[-1][0]),
+                            "source_metadata": source_meta,
                         })
-                    print(
-                        f"PASS {key}: {len(candles)} closed candles, "
-                        f"{len(scenarios)} pre-registered evaluations"
-                    )
-                except Exception as error:
-                    errors.append({"dataset_id": key, "error": f"{type(error).__name__}: {error}"})
-                    print(f"INCOMPLETE {key}: {type(error).__name__}: {error}")
+                        scenarios = [
+                            (threshold, "baseline")
+                            for threshold in VOLUME_THRESHOLDS
+                        ] + [
+                            (1.0, ablation)
+                            for ablation in ABLATIONS
+                            if ablation != "baseline"
+                        ]
+                        for threshold, ablation in scenarios:
+                            evaluated = run_walk_forward_backtest(
+                                candles,
+                                volume_ratio_threshold=threshold,
+                                feature_ablation=ablation,
+                                **wf_kwargs,
+                            )
+                            summary = _summarize(evaluated, candles)
+                            results.append({
+                                "dataset_id": key,
+                                "timeframe": timeframe,
+                                "volume_ratio_threshold": threshold,
+                                "feature_ablation": ablation,
+                                "metrics": summary,
+                            })
+                        print(
+                            f"PASS {key}: {len(candles)} closed candles, "
+                            f"{len(scenarios)} pre-registered evaluations"
+                        )
+                    except Exception as error:
+                        errors.append({"dataset_id": key, "error": f"{type(error).__name__}: {error}"})
+                        print(f"INCOMPLETE {key}: {type(error).__name__}: {error}")
     finally:
         await registry.close()
 
@@ -274,11 +304,12 @@ async def run():
         "report_version": 1,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "code_sha": os.getenv("GITHUB_SHA", "local"),
-        "timeframe": TIMEFRAME,
+        "timeframes": list(timeframes),
         "exchanges_requested": list(exchanges),
         "pre_registered_universe": {
             "spot_symbols": list(SPOT_SYMBOLS),
             "futures_symbols": list(FUTURES_SYMBOLS),
+            "timeframes": list(timeframes),
             "thresholds": list(VOLUME_THRESHOLDS),
             "feature_ablations": list(ABLATIONS),
         },
@@ -325,7 +356,7 @@ async def run():
         "",
         f"- Created (UTC): {report['created_at_utc']}",
         f"- Code SHA: {report['code_sha']}",
-        f"- Timeframe: {TIMEFRAME}",
+        f"- Timeframes: {', '.join(timeframes)}",
         f"- Completed datasets: {len(datasets)}",
         f"- Incomplete datasets: {len(errors)}",
         f"- Baseline OOS folds: {total_folds}",
@@ -358,7 +389,8 @@ async def run():
         "- The test folds are chronological and non-overlapping; every fold resets its own starting balance.",
         "- The baseline uses the current fixed backend strategy. Threshold and feature-ablation runs are pre-registered sensitivity checks, not an optimizer.",
         "- The buy-and-hold comparator is long-only and is a reference, not a risk-matched portfolio benchmark.",
-        "- Spot and Futures results are separated by dataset. Futures depend on simplified paper margin/funding/liquidation assumptions.",
+        "- Spot and Futures results are separated by dataset; each dataset also records its timeframe. Futures depend on simplified paper margin/funding/liquidation assumptions.",
+        "- Multiple timeframes increase the number of comparisons; they are sensitivity evidence, not independent samples or a reason to select the best-looking timeframe.",
         "- No result proves a future edge. Positive evidence requires independent review and a later untouched time period.",
         "- Any incomplete dataset, low sample count, or narrow market coverage reduces confidence.",
         "",
