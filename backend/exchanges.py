@@ -142,7 +142,7 @@ class ExchangeRegistry:
             messages.append(str(body))
         combined = " ".join(messages).lower()
         status_code = status_code or (
-            403 if re.search(r"(?<!\\d)403(?!\\d)", combined) else None
+            403 if re.search(r"(?<!\d)403(?!\d)", combined) else None
         )
         if status_code != 403:
             return False

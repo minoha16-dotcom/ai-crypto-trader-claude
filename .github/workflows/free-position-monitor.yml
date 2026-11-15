@@ -30,7 +30,7 @@ jobs:
       - name: Check out the unified application branch
         uses: actions/checkout@v4
         with:
-          ref: main
+          ref: deploy/render-supabase-postgres
           path: application
 
       - name: Set up Python

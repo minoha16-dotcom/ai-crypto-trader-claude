@@ -134,3 +134,63 @@ def test_dashboard_auth_uses_loaded_dotenv_settings_when_process_env_is_missing(
         response = client.get("/", headers={"Authorization": f"Basic {token}"})
 
     assert response.status_code == 200
+
+
+def test_non_ascii_basic_auth_credentials_return_401_not_500(monkeypatch):
+    monkeypatch.setenv("DASHBOARD_USERNAME", "trader")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "secret")
+    token = base64.b64encode("trãder:sëcret".encode("utf-8")).decode("ascii")
+    with TestClient(app) as client:
+        response = client.get("/", headers={"Authorization": f"Basic {token}"})
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Authentication required."
+
+
+def test_failed_basic_auth_attempts_are_rate_limited_per_cloudflare_client_ip(monkeypatch):
+    import backend.main as main
+
+    main._AUTH_FAILURES.clear()
+    monkeypatch.setenv("DASHBOARD_USERNAME", "trader")
+    monkeypatch.setenv("DASHBOARD_PASSWORD", "secret")
+    monkeypatch.setattr(settings, "auth_rate_limit_max_attempts", 3)
+    monkeypatch.setattr(settings, "auth_rate_limit_window_seconds", 300.0)
+    bad_token = base64.b64encode(b"wrong:wrong").decode("ascii")
+    headers = {
+        "Authorization": f"Basic {bad_token}",
+        "CF-Ray": "test-ray",
+        "CF-Connecting-IP": "198.51.100.22",
+    }
+
+    try:
+        with TestClient(app) as client:
+            first = client.get("/", headers=headers)
+            second = client.get("/", headers=headers)
+            third = client.get("/", headers=headers)
+            fourth = client.get("/", headers=headers)
+
+        assert first.status_code == 401
+        assert second.status_code == 401
+        assert third.status_code == 429
+        assert fourth.status_code == 429
+        assert int(third.headers["Retry-After"]) > 0
+        assert "198.51.100.22" in main._AUTH_FAILURES
+    finally:
+        main._AUTH_FAILURES.clear()
+
+
+def test_auth_limiter_does_not_trust_spoofable_x_forwarded_for():
+    import backend.main as main
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [(b"x-forwarded-for", b"203.0.113.99")],
+        "client": ("192.0.2.44", 12345),
+        "server": ("testserver", 80),
+        "scheme": "http",
+        "query_string": b"",
+    }
+    request = Request(scope)
+    assert main._auth_client_ip(request) == "192.0.2.44"
