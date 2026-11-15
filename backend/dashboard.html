@@ -219,7 +219,8 @@ canvas#chart{width:100%;height:150px}
      </div>
     </div>
     <div class="ticket-actions"><button type="button" class="secondary" onclick="enableAutoTarget()">Auto 2R</button><button onclick="openTrade()">Open paper trade</button></div>
-    <p class="helper-note">Entry must be within 5% of the selected market price. Automatic target uses 2R. Futures use a simplified isolated-margin paper model; no live orders are sent.</p>
+    <p id="setup-quote-status" class="helper-note">Select Review setup to refresh Entry from the exchange. Stop distance is preserved and the server rechecks the quote before opening.</p>
+    <p class="helper-note">A fresh exchange quote is required. If price moves beyond the configured drift limit or the scanner signal is older than 10 minutes, the server rejects the trade and asks you to review again. Futures use the paper-only isolated-margin model; no live orders are sent.</p>
    </section>
    <section class="panel anchor-section" id="risk-panel">
     <div class="panel-head"><div><span class="eyebrow">Capital protection</span><h2 style="margin-top:5px">Risk Controls</h2></div><span class="panel-status" id="risk-open-count">0 / — open</span></div>
@@ -313,6 +314,8 @@ $('watchlist-rows').addEventListener('click',event=>{
  $('market').value=$('watch-market').value;
  $('pair').value=button.dataset.watchPair;
  $('entry').value=price;
+ selectedSetupContext=null;
+ $('setup-quote-status').textContent='Watchlist price selected. The server will recheck price freshness and drift before opening.';
  if($('market').value==='spot')$('side').value='LONG';
  updateAutoTarget();
  $('trade-ticket').scrollIntoView({behavior:'smooth',block:'center'});
@@ -433,7 +436,7 @@ async function refresh(){
 function renderPositions(rows){const body=$('positions'),alerts=$('position-alerts');if(!rows.length){body.innerHTML='<tr><td colspan="13">No open paper positions.</td></tr>';alerts.innerHTML='';$('positions-updated').textContent='No open positions';return}const messages=rows.filter(p=>p.alert).map(p=>({p,text:p.alert==='LIQUIDATION_REACHED'?'Estimated liquidation threshold reached':p.alert==='STOP_REACHED'?'Stop loss level reached':p.alert==='TARGET_REACHED'?'Target level reached':p.alert==='NEAR_STOP'?'Approaching stop loss':'Approaching target'}));alerts.innerHTML=messages.length?messages.map(x=>'<p style="padding:11px 14px;border-radius:9px;background:'+((x.p.alert.includes('LIQUIDATION')||x.p.alert.includes('STOP'))?'rgba(255,113,136,.13)':'rgba(53,214,160,.12)')+';border:1px solid '+((x.p.alert.includes('LIQUIDATION')||x.p.alert.includes('STOP'))?'rgba(255,113,136,.35)':'rgba(53,214,160,.3)')+'">'+escapeHtml(x.p.symbol)+' '+escapeHtml(x.p.side)+': <strong>'+escapeHtml(x.text)+'</strong> · Live '+Number(x.p.live_price).toLocaleString()+'</p>').join(''):'';body.innerHTML=rows.map(p=>{const live=p.live_price==null?'Unavailable':Number(p.live_price).toLocaleString(undefined,{maximumFractionDigits:8});const pnl=p.unrealized_pnl==null?escapeHtml(p.price_error||'Price unavailable'):money(p.unrealized_pnl);const pct=p.unrealized_pnl_pct==null?'—':Number(p.unrealized_pnl_pct).toFixed(3)+'%';const stopGap=p.stop_distance==null?'—':Number(p.stop_distance).toPrecision(5)+' ('+Number(p.stop_distance_pct).toFixed(2)+'%)';const targetGap=p.target_distance==null?'—':Number(p.target_distance).toPrecision(5)+' ('+Number(p.target_distance_pct).toFixed(2)+'%)';const futuresMeta=p.market_type==='futures'&&p.contract_type!=='legacy_base'?' · '+Number(p.leverage||1)+'x · liq '+(p.liquidation_price==null?'—':Number(p.liquidation_price).toLocaleString(undefined,{maximumFractionDigits:4}))+' · funding '+money(p.funding_paid||0):'';return '<tr><td>'+escapeHtml(p.symbol)+'</td><td>'+escapeHtml(p.market_type)+'</td><td class="'+escapeHtml(p.side)+'">'+escapeHtml(p.side)+'</td><td>'+Number(p.entry).toLocaleString()+'</td><td>'+(p.live_price==null?'<span class="muted">'+live+'</span>':'<strong>'+live+'</strong>')+'</td><td>'+Number(p.stop).toLocaleString()+'</td><td>'+stopGap+'</td><td>'+(p.target==null?'—':Number(p.target).toLocaleString())+'</td><td>'+targetGap+'</td><td>'+formatQuantity(p.quantity)+(p.market_type==='futures'?(p.contract_type==='legacy_base'?' base units':' contracts · ×'+Number(p.contract_size||1).toLocaleString()+futuresMeta):'')+'</td><td class="'+(Number(p.unrealized_pnl)>=0?'LONG':'SHORT')+'">'+pnl+'</td><td>'+pct+'</td><td><button type="button" class="danger position-close" data-close-trade="'+Number(p.id)+'" data-exit-price="'+(p.live_price==null?'':Number(p.live_price))+'">Close</button></td></tr>'}).join('');$('positions-updated').textContent='Updated '+new Date().toLocaleTimeString()+' · refreshes every 15s'}
 function renderOpportunities(rows){const body=$('opportunities');if(!rows.length){body.innerHTML='<tr><td colspan="8">No scan results yet. Run Scan markets first.</td></tr>';$('opportunities-updated').textContent='Waiting for scan';return}body.innerHTML=rows.map(p=>'<tr><td>'+escapeHtml(p.symbol)+'</td><td>'+escapeHtml(p.exchange)+'</td><td>'+escapeHtml(p.market_type)+'</td><td class="'+escapeHtml(p.signal)+'">'+escapeHtml(p.signal)+'</td><td class="'+escapeHtml(p.trend)+'">'+escapeHtml(p.trend)+'</td><td>'+(p.live_price==null?'<span class="muted">Unavailable</span>':'<strong>'+Number(p.live_price).toLocaleString(undefined,{maximumFractionDigits:8})+'</strong>')+'</td><td>'+Number(p.score).toLocaleString(undefined,{maximumFractionDigits:0})+'</td><td>'+escapeHtml(p.timeframe)+'</td></tr>').join('');$('opportunities-updated').textContent='Live prices updated '+new Date().toLocaleTimeString()}
 function renderStats(trades){const closed=trades.filter(t=>t.status==='CLOSED'),wins=closed.filter(t=>Number(t.pnl)>0).length,losses=closed.filter(t=>Number(t.pnl)<0).length;$('wins').textContent=wins;$('losses').textContent=losses;$('closed-count').textContent=closed.length;$('winrate').textContent=closed.length?(wins/closed.length*100).toFixed(1)+'%':'—'}
-function setupButton(x){return '<button class="secondary" data-ticket-symbol="'+escapeHtml(x.symbol)+'" data-ticket-price="'+Number(x.price)+'" data-ticket-distance="'+Number(x.stop_distance)+'" data-ticket-signal="'+escapeHtml(x.signal)+'" data-ticket-id="'+Number(x.signal_id||0)+'">Review setup</button>'}
+function setupButton(x){return '<button class="secondary" data-ticket-symbol="'+escapeHtml(x.symbol)+'" data-ticket-price="'+Number(x.price)+'" data-ticket-distance="'+Number(x.stop_distance)+'" data-ticket-signal="'+escapeHtml(x.signal)+'" data-ticket-id="'+Number(x.signal_id||0)+'" data-ticket-exchange="'+escapeHtml(x.exchange||$('exchange').value)+'" data-ticket-market="'+escapeHtml(x.market_type||$('market').value)+'" data-ticket-timeframe="'+escapeHtml(x.timeframe||$('timeframe').value)+'">Review setup</button>'}
 function scanRow(x){if(x.error)return '<tr><td>'+escapeHtml(x.symbol)+'</td><td colspan="7">'+escapeHtml(x.error)+'</td></tr>';const action=['LONG','SHORT'].includes(x.signal)?setupButton(x):'<span class="muted">Wait for a signal</span>';return '<tr><td>'+escapeHtml(x.symbol)+'</td><td class="'+escapeHtml(x.signal)+'">'+escapeHtml(x.signal)+'</td><td class="'+escapeHtml(x.trend)+'">'+escapeHtml(x.trend)+'</td><td>'+Number(x.price).toPrecision(7)+'</td><td>'+Number(x.rsi14).toFixed(1)+'</td><td>'+Number(x.atr14).toPrecision(5)+'</td><td>'+Number(x.score).toLocaleString(undefined,{maximumFractionDigits:0})+'</td><td>'+action+'</td></tr>'}
 async function scan(){let msg=$('scanmsg');msg.textContent='Scanning public exchange candles…';try{let q=new URLSearchParams({exchange:$('exchange').value,market_type:$('market').value,timeframe:$('timeframe').value,symbols:$('symbols').value}),d=await api('/api/scan?'+q,{method:'POST'});$('scanrows').innerHTML=d.results.map(scanRow).join('');msg.textContent='Scan complete. Signals are research prompts, not recommendations.';refresh()}catch(e){msg.textContent=e.message}}
 function renderAiAdvisor(data){const rows=$('advisor-rows');if(!data.ranked_opportunities?.length){rows.innerHTML='<tr><td colspan="6">No LONG or SHORT candidates passed the scanner filters.</td></tr>';$('advisor-status').textContent=data.note+' '+data.execution;return}rows.innerHTML=data.ranked_opportunities.map((x,i)=>{const hasScore=x.historical_win_rate_score!==undefined;const estimate=hasScore?(Number(x.historical_win_rate_score)*100).toFixed(1)+'% historical ranking score (not probability)':Number(x.technical_ranking_score).toFixed(1)+' technical points';const support=data.learning_ready?Number(x.similar_example_support).toFixed(1)+' effective similar outcomes · '+Number(x.historical_outcomes_used||0)+' total':'technical only';return '<tr><td>'+(i+1)+'</td><td>'+escapeHtml(x.symbol)+'</td><td class="'+escapeHtml(x.signal)+'">'+escapeHtml(x.signal)+'</td><td>'+estimate+'</td><td>'+support+'</td><td>'+setupButton(x)+'</td></tr>'}).join('');const training=data.training||{};const calibration=data.calibration||{};const diagnostic=calibration.out_of_sample_brier_score==null?'Chronological holdout: '+(calibration.status||'not available'):'Chronological Brier '+calibration.out_of_sample_brier_score+' vs baseline '+calibration.baseline_brier_score+' ('+calibration.status+')';$('advisor-status').textContent=data.note+' Unique signal-linked outcomes: '+training.examples_for_market_timeframe+' / '+data.minimum_examples+' needed. '+diagnostic+'. No calibrated profit probability is provided. '+data.execution;}
@@ -449,8 +452,29 @@ $('market').addEventListener('change',syncFuturesControls);
   $(id).addEventListener('input',()=>{futuresSettingsTouched=true});
   $(id).addEventListener('change',()=>{futuresSettingsTouched=true});
  });
- $('scanrows').addEventListener('click',event=>{const button=event.target.closest('button[data-ticket-symbol]');if(button)ticket(button.dataset.ticketSymbol,Number(button.dataset.ticketPrice),Number(button.dataset.ticketDistance),button.dataset.ticketSignal,Number(button.dataset.ticketId))});
-$('advisor-rows').addEventListener('click',event=>{const button=event.target.closest('button[data-ticket-symbol]');if(button)ticket(button.dataset.ticketSymbol,Number(button.dataset.ticketPrice),Number(button.dataset.ticketDistance),button.dataset.ticketSignal,Number(button.dataset.ticketId))});
+ async function reviewSetupButton(button){
+ if(!button||button.disabled)return;
+ button.disabled=true;
+ const oldLabel=button.textContent;
+ button.textContent='Refreshing quote…';
+ try{
+  await ticket(
+   button.dataset.ticketSymbol,
+   Number(button.dataset.ticketPrice),
+   Number(button.dataset.ticketDistance),
+   button.dataset.ticketSignal,
+   Number(button.dataset.ticketId),
+   button.dataset.ticketExchange,
+   button.dataset.ticketMarket,
+   button.dataset.ticketTimeframe
+  );
+ }finally{
+  button.disabled=false;
+  button.textContent=oldLabel;
+ }
+}
+$('scanrows').addEventListener('click',event=>{const button=event.target.closest('button[data-ticket-symbol]');if(button)reviewSetupButton(button)});
+$('advisor-rows').addEventListener('click',event=>{const button=event.target.closest('button[data-ticket-symbol]');if(button)reviewSetupButton(button)});
 $('journal-pagination').addEventListener('click',event=>{
  const button=event.target.closest('button[data-journal-page]');
  if(!button||button.disabled)return;
@@ -476,10 +500,46 @@ function updateAutoTarget(){
   $('target-mode').textContent='Auto · '+defaultRewardRiskRatio.toFixed(1)+'R from Stop';
 }
 function enableAutoTarget(){targetAutoMode=true;updateAutoTarget();}
-function ticket(pair,price,dist,signal,signalId){
- $('pair').value=pair;$('entry').value=price;$('stop').value=signal==='SHORT'?price+dist:price-dist;$('side').value=signal==='SHORT'?'SHORT':'LONG';
- selectedSetupContext={signal_id:signalId,signal,symbol:pair.toUpperCase(),exchange:$('exchange').value,market_type:$('market').value,timeframe:$('timeframe').value};
- targetAutoMode=true;updateAutoTarget();
+async function ticket(pair,signalPrice,dist,signal,signalId,exchange,market,timeframe){
+ const status=$('setup-quote-status');
+ const selectedExchange=exchange||$('exchange').value;
+ const selectedMarket=market||$('market').value;
+ const selectedTimeframe=timeframe||$('timeframe').value;
+ status.textContent='Fetching a fresh '+selectedExchange.toUpperCase()+' '+selectedMarket.toUpperCase()+' quote…';
+ try{
+  if(!['LONG','SHORT'].includes(signal))throw new Error('The scanner signal is not tradable.');
+  const quote=await api('/api/markets/'+encodeURIComponent(selectedExchange)+'/'+pair+'?market_type='+encodeURIComponent(selectedMarket));
+  const livePrice=Number(quote.last),stopDistance=Number(dist),sourcePrice=Number(signalPrice);
+  if(!Number.isFinite(livePrice)||livePrice<=0)throw new Error('The exchange did not return a valid last price.');
+  if(!Number.isFinite(stopDistance)||stopDistance<=0)throw new Error('The scanner did not provide a valid stop distance.');
+  if(!Number.isFinite(sourcePrice)||sourcePrice<=0)throw new Error('The scanner signal has an invalid reference price.');
+  const age=Number(quote.quote_age_seconds),maxAge=Number(quote.maximum_accepted_ticker_age_seconds);
+  if(Number.isFinite(age)&&Number.isFinite(maxAge)&&age>maxAge)throw new Error('The exchange quote is stale. Refresh market data and scan again.');
+  const currentStop=signal==='SHORT'?livePrice+stopDistance:livePrice-stopDistance;
+  if(!Number.isFinite(currentStop)||currentStop<=0)throw new Error('The refreshed quote makes the stop price invalid.');
+  $('exchange').value=selectedExchange;
+  $('market').value=selectedMarket;
+  $('timeframe').value=selectedTimeframe;
+  $('pair').value=pair;
+  $('entry').value=Number(livePrice.toPrecision(12)).toString();
+  $('stop').value=Number(currentStop.toPrecision(12)).toString();
+  $('side').value=signal;
+  selectedSetupContext={
+   signal_id:signalId,signal,symbol:pair.toUpperCase(),exchange:selectedExchange,
+   market_type:selectedMarket,timeframe:selectedTimeframe,
+   signal_price:sourcePrice,reviewed_price:livePrice,reviewed_at:Date.now()
+  };
+  targetAutoMode=true;
+  updateAutoTarget();
+  syncFuturesControls();
+  const signalDrift=Math.abs(livePrice-sourcePrice)/sourcePrice*100;
+  status.textContent='Fresh quote: '+marketNumber(livePrice)+' · signal price '+marketNumber(sourcePrice)+' ('+signalDrift.toFixed(3)+'% change). Entry refreshed; Stop distance preserved at '+marketNumber(stopDistance)+'. The server rechecks price and signal age when you open.';
+  $('trade-ticket').scrollIntoView({behavior:'smooth',block:'center'});
+ }catch(error){
+  selectedSetupContext=null;
+  status.textContent='Setup not loaded: '+error.message;
+  alert('Could not refresh this setup. No trade was opened. '+error.message);
+ }
 }
 function syncFuturesControls(){const visible=$('market').value==='futures';$('futures-controls').classList.toggle('is-visible',visible);$('futures-controls').setAttribute('aria-hidden',visible?'false':'true')}
 async function openTrade(){try{let body={exchange:$('exchange').value,symbol:$('pair').value,market_type:$('market').value,side:$('side').value,entry:Number($('entry').value),stop:Number($('stop').value),target:targetAutoMode?null:($('target').value?Number($('target').value):null)};if(body.market_type==='futures'){body.leverage=Number($('futures-leverage').value);body.funding_rate=Number($('futures-funding-rate').value);body.funding_interval_hours=Number($('futures-funding-interval').value)}const selected=selectedSetupContext;body.signal_id=selected&&selected.signal_id>0&&selected.symbol===body.symbol.trim().toUpperCase()&&selected.exchange===body.exchange&&selected.market_type===body.market_type&&selected.timeframe===$('timeframe').value&&selected.signal===body.side?selected.signal_id:null;let r=await api('/api/paper/open',{method:'POST',body:JSON.stringify(body)});$('target').value=Number(r.target).toPrecision(12);$('target-mode').textContent=targetAutoMode?'Auto · '+defaultRewardRiskRatio.toFixed(1)+'R from Stop':'Manual target';alert('Paper trade opened. Target '+Number(r.target).toLocaleString()+' ('+(Math.abs(Number(r.target)-body.entry)/Math.abs(body.entry-body.stop)).toFixed(1)+'R). '+(body.market_type==='futures'?'Contracts ':'Qty ')+formatQuantity(r.quantity)+'; contract size '+Number(r.contract_size||1).toLocaleString()+'; actual risk '+money(r.risk_amount)+' ('+Number(r.risk_pct_actual).toFixed(3)+'%); sizing: '+r.sizing_reason+'; estimated entry/stop costs '+money(r.fees_estimated));refresh()}catch(e){alert(e.message)}}
