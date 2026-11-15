@@ -220,7 +220,7 @@ canvas#chart{width:100%;height:150px}
     </div>
     <div class="ticket-actions"><button type="button" class="secondary" onclick="enableAutoTarget()">Auto 2R</button><button onclick="openTrade()">Open paper trade</button></div>
     <p id="setup-quote-status" class="helper-note">Select Review setup to refresh Entry from the exchange. Stop distance is preserved and the server rechecks the quote before opening.</p>
-    <p class="helper-note">A fresh exchange quote is required. If price moves beyond the configured drift limit or the scanner signal is older than 10 minutes, the server rejects the trade and asks you to review again. Futures use the paper-only isolated-margin model; no live orders are sent.</p>
+    <p class="helper-note">A fresh exchange quote is required. If price moves beyond the configured drift limit or the scanner signal exceeds the configured maximum age, the server rejects the trade and asks you to review again. Futures use the paper-only isolated-margin model; no live orders are sent.</p>
    </section>
    <section class="panel anchor-section" id="risk-panel">
     <div class="panel-head"><div><span class="eyebrow">Capital protection</span><h2 style="margin-top:5px">Risk Controls</h2></div><span class="panel-status" id="risk-open-count">0 / — open</span></div>
@@ -533,7 +533,8 @@ async function ticket(pair,signalPrice,dist,signal,signalId,exchange,market,time
   updateAutoTarget();
   syncFuturesControls();
   const signalDrift=Math.abs(livePrice-sourcePrice)/sourcePrice*100;
-  status.textContent='Fresh quote: '+marketNumber(livePrice)+' · signal price '+marketNumber(sourcePrice)+' ('+signalDrift.toFixed(3)+'% change). Entry refreshed; Stop distance preserved at '+marketNumber(stopDistance)+'. The server rechecks price and signal age when you open.';
+  const maxDrift=Number(quote.maximum_entry_deviation_pct);
+  status.textContent='Fresh quote: '+marketNumber(livePrice)+' · signal price '+marketNumber(sourcePrice)+' ('+signalDrift.toFixed(3)+'% change). Entry refreshed; Stop distance preserved at '+marketNumber(stopDistance)+'. Submit-time drift limit ±'+(Number.isFinite(maxDrift)?maxDrift.toFixed(3)+'%':'configured')+'; the server also rechecks signal age.';
   $('trade-ticket').scrollIntoView({behavior:'smooth',block:'center'});
  }catch(error){
   selectedSetupContext=null;
