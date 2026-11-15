@@ -407,10 +407,7 @@ async function refresh(){
   $('futures-leverage').max=String(risk.max_futures_leverage);
   if(!futuresSettingsTouched){
    $('futures-funding-rate').value=String(risk.paper_futures_default_funding_rate);
-   const interval=String(risk.paper_futures_funding_interval_hours);
-   if([...$('futures-funding-interval').options].some(option=>option.value===interval)){
-    $('futures-funding-interval').value=interval;
-   }
+   $('futures-funding-interval').value=String(risk.paper_futures_funding_interval_hours);
   }
   $('futures-assumptions-note').textContent='Paper assumptions only: isolated margin, '+(Number(risk.paper_futures_maintenance_margin_rate)*100).toFixed(2)+'% maintenance margin and '+(Number(risk.paper_futures_liquidation_fee_rate)*100).toFixed(2)+'% liquidation fee. These are not live exchange rates, exchange tier data or live liquidation estimates.';
  }
