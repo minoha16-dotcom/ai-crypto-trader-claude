@@ -195,7 +195,7 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
         except ValueError:
             position["invalid_reason"] = position.get("invalid_reason") or "MISSING_OR_INVALID_FEE"
             return False
-        token = str(fill.get("feeToken") or "").upper()
+        token = str(fill.get("feeToken") or "").strip().upper()
         if token not in ("USDC", "USD"):
             position["invalid_reason"] = position.get("invalid_reason") or "UNSUPPORTED_FEE_CURRENCY"
             return False
@@ -650,8 +650,12 @@ def prepare_dataset(
                 coin = position["coin"]
                 try:
                     symbol = _market_symbol(exchange, coin)
-                except ValueError:
-                    reconstruction_exclusions["UNSUPPORTED_MARKET"] += 1
+                    market = exchange.market(symbol)
+                    contract_size = float(market.get("contractSize") or 0.0)
+                    if not math.isfinite(contract_size) or not math.isclose(contract_size, 1.0):
+                        raise ValueError("unsupported non-unit Hyperliquid perp contract size")
+                except (ValueError, TypeError, OverflowError):
+                    reconstruction_exclusions["UNSUPPORTED_MARKET_OR_CONTRACT_SIZE"] += 1
                     continue
                 if symbol not in candles_cache:
                     start = max(
@@ -781,6 +785,7 @@ def prepare_dataset(
             "manifest": manifest,
             "preparation_policy": {
                 "position_lifecycle": "single entry order, no add/scale-in, fully closed only; reconcile startPosition on every fill",
+                "contract_multiplier": "only linear Hyperliquid perps with CCXT contractSize exactly 1.0 are included",
                 "eligible_exit_reasons": sorted(ELIGIBLE_EXIT_REASONS),
                 "ineligible_exit_reasons": [
                     "MANUAL_CLOSE", "UNKNOWN", "LIQUIDATION",

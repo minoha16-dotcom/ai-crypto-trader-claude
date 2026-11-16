@@ -632,6 +632,7 @@ def _manifest_rejection_reasons(
         "source_license",
         "source_snapshot_utc",
         "source_snapshot_sha256",
+        "source_metadata_sha256",
         "cohort_selection_as_of_utc",
         "data_start_utc",
         "data_end_utc",
@@ -650,6 +651,9 @@ def _manifest_rejection_reasons(
     source_hash = str(provenance.get("source_snapshot_sha256") or "").lower()
     if source_hash and not SHA256_RE.fullmatch(source_hash):
         reasons.append({"code": "INVALID_SOURCE_SNAPSHOT_SHA256", "detail": "source_snapshot_sha256 must be 64 hexadecimal characters"})
+    metadata_hash = str(provenance.get("source_metadata_sha256") or "").lower()
+    if metadata_hash and not SHA256_RE.fullmatch(metadata_hash):
+        reasons.append({"code": "INVALID_SOURCE_METADATA_SHA256", "detail": "source_metadata_sha256 must be 64 hexadecimal characters"})
 
     if not SHA256_RE.fullmatch(str(dataset_sha256 or "").lower()):
         reasons.append({"code": "INVALID_DATASET_SHA256", "detail": "the exact training dataset file SHA-256 is required"})

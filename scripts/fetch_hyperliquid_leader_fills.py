@@ -227,8 +227,17 @@ def _fetch_time_range(
         if not isinstance(row, dict) or row.get("time") is None:
             continue
         nested = row.get("delta") or {}
+        trade_id = row.get("tid")
+        if trade_id is not None:
+            identity = f"tid:{trade_id}"
+        else:
+            # Transaction hash alone is not a fill identifier: one L1 transaction
+            # can contain multiple fills. Include the complete economic payload.
+            identity = "fallback:" + hashlib.sha256(
+                json.dumps(row, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
         key = (
-            str(row.get("tid") or row.get("hash") or ""),
+            identity,
             str(row.get("coin") or nested.get("coin") or ""),
             int(row["time"]),
             str(row.get("oid") or ""),
