@@ -43,6 +43,7 @@ MAX_OHLCV_PAGES = 400
 OHLCV_PAGE_SIZE = 500
 MIN_FEATURE_CANDLES = 120
 FEATURE_CONTIGUOUS_CANDLES = 120
+FEATURE_WARMUP_CANDLES = FEATURE_CONTIGUOUS_CANDLES + 1
 ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
 
@@ -192,7 +193,7 @@ def _funding_for_position(
             timestamp = int(row.get("time"))
         except (TypeError, ValueError, OverflowError):
             return 0.0, False
-        if timestamp < entry_ms or timestamp > exit_ms:
+        if timestamp <= entry_ms or timestamp > exit_ms:
             continue
         delta = row.get("delta") if isinstance(row.get("delta"), dict) else {}
         row_coin = str(row.get("coin") or delta.get("coin") or "").strip()
@@ -535,6 +536,14 @@ def _position_signal_timestamp(position: dict[str, Any]) -> int:
     return int(position.get("entry_start_timestamp") or position["entry_timestamp"])
 
 
+def _feature_history_start_ms(signal_timestamp_ms: int) -> int:
+    """Fetch one extra 4h bar so 120 closed bars remain before a boundary signal."""
+    return max(
+        0,
+        int(signal_timestamp_ms) - FEATURE_WARMUP_CANDLES * FOUR_HOURS_MS,
+    )
+
+
 def features_before_entry(
     candles: list[list[float]],
     entry_timestamp: int,
@@ -749,11 +758,13 @@ def prepare_dataset(
 
         candles_cache: dict[str, list[list[float]]] = {}
         for symbol, symbol_positions in sorted(positions_by_symbol.items()):
-            earliest_entry = min(int(row["entry_timestamp"]) for row in symbol_positions)
+            earliest_entry = min(
+                _position_signal_timestamp(row) for row in symbol_positions
+            )
             candles_cache[symbol] = fetch_hourly_candles(
                 exchange,
                 symbol,
-                max(0, earliest_entry - 300 * HOUR_MS),
+                _feature_history_start_ms(earliest_entry),
                 data_end_ms + HOUR_MS,
             )
 
@@ -824,6 +835,7 @@ def prepare_dataset(
             "source_snapshot_sha256": raw_manifest.get("source_snapshot_sha256"),
             "source_metadata_sha256": raw_manifest.get("source_metadata_sha256"),
             "raw_dataset_sha256": raw_manifest.get("raw_dataset_sha256"),
+            "collector_code_sha": raw_manifest.get("collector_code_sha"),
             "cohort_selection_as_of_utc": raw_manifest.get("cohort_selection_as_of_utc"),
             "data_start_utc": raw_manifest.get("data_start_utc"),
             "data_end_utc": raw_manifest.get("data_end_utc"),
@@ -899,9 +911,14 @@ def prepare_dataset(
                 "feature_directionality": "trend_composite and RSI14 are position-relative",
                 "hourly_source": "Hyperliquid public CCXT OHLCV 1h",
                 "four_hour_source": "aggregate only four consecutive UTC 1h candles; no fill/interpolation; require 120 contiguous feature bars",
-                "funding": "sum valid same-coin delta.usdc rows from first opening fill to final close; malformed rows invalidate label",
+                "funding": (
+                    "sum valid same-coin delta.usdc rows strictly after the first opening fill "
+                    "through the final close; an event at the exact entry timestamp is excluded "
+                    "because event ordering is ambiguous"
+                ),
                 "ohlcv_coverage": (
-                    "fetch from earliest first fill per symbol with 120 contiguous 4h candles of warmup, "
+                    "fetch from earliest first fill per symbol with 121 contiguous 4h bars available; "
+                    "the extra bar ensures 120 bars remain strictly before a boundary-time signal; "
                     "independent of wallet ranking"
                 ),
             },

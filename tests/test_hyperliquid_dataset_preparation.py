@@ -6,6 +6,8 @@ from scripts.prepare_hyperliquid_advisor_dataset import (
     position_to_sample,
     reconstruct_closed_positions,
     _funding_for_position,
+    _feature_history_start_ms,
+    FEATURE_WARMUP_CANDLES,
 )
 
 
@@ -563,3 +565,20 @@ def test_candle_closing_at_exact_signal_timestamp_is_excluded_from_features():
     actual = features_before_entry(candles, signal_timestamp, "1h")
 
     assert actual == expected
+
+
+
+def test_ohlcv_warmup_reserves_one_extra_4h_bar_for_strict_boundary_cutoff():
+    signal_ms = 10_000 * 60 * 60 * 1000
+    assert FEATURE_WARMUP_CANDLES == 121
+    assert signal_ms - _feature_history_start_ms(signal_ms) == 121 * 4 * 60 * 60 * 1000
+
+
+def test_funding_at_exact_entry_timestamp_is_not_assigned_to_new_position():
+    rows = [
+        {"time": 10_000, "delta": {"coin": "BTC", "usdc": "-0.5"}},
+        {"time": 10_001, "delta": {"coin": "BTC", "usdc": "-0.2"}},
+    ]
+    total, valid = _funding_for_position(rows, "BTC", 10_000, 20_000)
+    assert valid is True
+    assert total == pytest.approx(-0.2)
