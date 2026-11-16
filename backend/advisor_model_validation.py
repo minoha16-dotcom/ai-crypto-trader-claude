@@ -647,6 +647,8 @@ def _manifest_rejection_reasons(
         "source_metadata_sha256",
         "raw_dataset_sha256",
         "collector_code_sha",
+        "cohort_snapshot_code_sha",
+        "cohort_snapshot_file_sha256",
         "preparation_code_sha",
         "cohort_selection_as_of_utc",
         "data_start_utc",
@@ -672,6 +674,12 @@ def _manifest_rejection_reasons(
     raw_dataset_hash = str(provenance.get("raw_dataset_sha256") or "").lower()
     if raw_dataset_hash and not SHA256_RE.fullmatch(raw_dataset_hash):
         reasons.append({"code": "INVALID_RAW_DATASET_SHA256", "detail": "raw_dataset_sha256 must be 64 hexadecimal characters"})
+    cohort_snapshot_hash = str(provenance.get("cohort_snapshot_file_sha256") or "").lower()
+    if cohort_snapshot_hash and not SHA256_RE.fullmatch(cohort_snapshot_hash):
+        reasons.append({
+            "code": "INVALID_COHORT_SNAPSHOT_FILE_SHA256",
+            "detail": "cohort_snapshot_file_sha256 must be 64 hexadecimal characters",
+        })
 
     if not SHA256_RE.fullmatch(str(dataset_sha256 or "").lower()):
         reasons.append({"code": "INVALID_DATASET_SHA256", "detail": "the exact training dataset file SHA-256 is required"})
@@ -684,6 +692,12 @@ def _manifest_rejection_reasons(
         reasons.append({
             "code": "INVALID_COLLECTOR_CODE_SHA",
             "detail": "collector_code_sha must be a Git commit SHA",
+        })
+    cohort_snapshot_code_sha = str(provenance.get("cohort_snapshot_code_sha") or "").lower()
+    if cohort_snapshot_code_sha and not GIT_SHA_RE.fullmatch(cohort_snapshot_code_sha):
+        reasons.append({
+            "code": "INVALID_COHORT_SNAPSHOT_CODE_SHA",
+            "detail": "cohort_snapshot_code_sha must be a Git commit SHA",
         })
     preparation_code_sha = str(provenance.get("preparation_code_sha") or "").lower()
     if preparation_code_sha and not GIT_SHA_RE.fullmatch(preparation_code_sha):
@@ -1159,7 +1173,9 @@ def evaluate_approval(
                 "source_provider", "source_url", "source_license",
                 "source_snapshot_utc", "leaderboard_retrieved_at_utc",
                 "source_snapshot_sha256", "source_metadata_sha256",
-                "raw_dataset_sha256", "collector_code_sha", "preparation_code_sha",
+                "raw_dataset_sha256", "collector_code_sha",
+                "cohort_snapshot_code_sha", "cohort_snapshot_file_sha256",
+                "preparation_code_sha",
                 "cohort_selection_as_of_utc",
                 "data_start_utc", "data_end_utc", "dataset_sha256",
                 "model_version", "feature_schema_version", "code_sha",
