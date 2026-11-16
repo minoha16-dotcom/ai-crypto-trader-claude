@@ -35,6 +35,7 @@ def _wallet(fills, orders, funding=None):
         "fills": fills,
         "funding": funding or [],
         "historical_orders": orders,
+        "twap_slice_fills": [],
     }
 
 
@@ -339,8 +340,10 @@ def test_empty_historical_order_list_is_valid_when_endpoint_reports_complete():
         "fills": [],
         "funding": [],
         "historical_orders": [],
+        "twap_slice_fills": [],
         "fill_history": {"complete": True},
         "funding_history": {"complete": True},
+        "twap_history": {"complete": True},
         "historical_orders_status": {
             "rows": 0,
             "history_limit_reached": False,
@@ -358,6 +361,7 @@ def test_wallet_without_historical_order_completeness_flag_is_not_accepted():
         "complete": True,
         "fill_history": {"complete": True},
         "funding_history": {"complete": True},
+        "twap_history": {"complete": True},
         "historical_orders": [],
     }
 
@@ -488,3 +492,57 @@ def test_short_position_features_are_normalized_to_position_direction():
     assert sample["position_side"] == "SHORT"
     assert sample["features"]["trend_composite"] == pytest.approx(-raw_features["trend_composite"])
     assert sample["features"]["rsi14"] == pytest.approx(100.0 - raw_features["rsi14"])
+
+
+def test_twap_slice_fill_is_reconstructed_as_a_real_position_fill():
+    opening = _fill("Open Long", 10_000, 100.0, 1.0, 10, start_position=0.0)
+    closing = _fill("Close Long", 20_000, 110.0, 1.0, 20, pnl=10.0, start_position=1.0)
+    wallet = _wallet([opening], [_trigger_order(20, 108.0)])
+    wallet["twap_slice_fills"] = [{"fill": closing, "twapId": 333}]
+    positions, exclusions = reconstruct_closed_positions(wallet)
+    assert len(positions) == 1
+    assert positions[0]["exit_reason"] == "TARGET_GAP"
+    assert positions[0]["gross_pnl_reconstructed"] == pytest.approx(10.0)
+
+
+def test_raw_wallet_without_twap_status_is_not_accepted_as_complete():
+    from scripts.prepare_hyperliquid_advisor_dataset import raw_wallet_history_complete
+    wallet = {
+        "complete": True,
+        "fill_history": {"complete": True},
+        "funding_history": {"complete": True},
+        "historical_orders_status": {"complete_within_documented_limit": True},
+    }
+    assert raw_wallet_history_complete(wallet) is False
+
+
+def test_partial_entry_features_are_anchored_to_first_fill_timestamp():
+    from scripts.prepare_hyperliquid_advisor_dataset import _iso_utc
+    candles = _hourly_candles(160)
+    first_fill = 120 * 60 * 60 * 1000
+    last_fill = first_fill + 30 * 60 * 1000
+    expected = features_before_entry(candles, first_fill, "1h")
+    position = {
+        "coin": "BTC",
+        "side": "LONG",
+        "entry_price": 101.0,
+        "entry_quantity": 2.0,
+        "entry_start_timestamp": first_fill,
+        "entry_timestamp": last_fill,
+        "exit_timestamp": first_fill + 2 * 60 * 60 * 1000,
+        "exit_reason": "TARGET",
+        "gross_pnl_reconstructed": 2.0,
+        "fees": 0.0,
+        "funding_paid": 0.0,
+        "atr14": 1.5,
+    }
+    sample, problem = position_to_sample(
+        position,
+        wallet_address="0x" + "a" * 40,
+        candles=candles,
+        timeframe="1h",
+    )
+    assert problem is None
+    assert sample["signal_timestamp"] == _iso_utc(first_fill)
+    assert sample["features"]["trend_composite"] == pytest.approx(expected["trend_composite"])
+    assert sample["features"]["rsi14"] == pytest.approx(expected["rsi14"])

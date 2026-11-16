@@ -8,6 +8,7 @@ from scripts.fetch_hyperliquid_leader_fills import (
     _load_leaderboard,
     extract_wallet_addresses,
     _fetch_historical_orders,
+    _fetch_twap_slice_fills,
     _cohort_selection_cutoff_ms,
     _info_request_weight,
     _weighted_pacing_delay,
@@ -262,3 +263,64 @@ def test_info_request_sleeps_for_weight_of_returned_rows(monkeypatch):
 
     assert len(result) == 2000
     assert sleeps == [pytest.approx(8.0)]
+
+
+def test_twap_slice_fetch_unwraps_and_filters_requested_window(monkeypatch):
+    from scripts import fetch_hyperliquid_leader_fills as module
+    monkeypatch.setattr(
+        module,
+        "_post_info",
+        lambda body, timeout: [
+            {"fill": {"coin": "BTC", "time": 150, "tid": 11, "sz": "1"}, "twapId": 7},
+            {"fill": {"coin": "ETH", "time": 250, "tid": 12, "sz": "2"}, "twapId": 8},
+            {"fill": {"coin": "BTC", "time": 350, "tid": 13, "sz": "3"}, "twapId": 9},
+        ],
+    )
+    rows, status = _fetch_twap_slice_fills(
+        "0x" + "a" * 40, 200, 300, timeout=1
+    )
+    assert len(rows) == 1
+    assert rows[0]["tid"] == 12
+    assert rows[0]["twapId"] == 8
+    assert rows[0]["_fill_source"] == "userTwapSliceFills"
+    assert status["complete"] is True
+
+
+def test_full_twap_page_is_incomplete_even_when_rows_fall_outside_window(monkeypatch):
+    from scripts import fetch_hyperliquid_leader_fills as module
+    monkeypatch.setattr(
+        module,
+        "_post_info",
+        lambda body, timeout: [
+            {"fill": {"coin": "BTC", "time": 1, "tid": index}, "twapId": 1}
+            for index in range(2000)
+        ],
+    )
+    rows, status = _fetch_twap_slice_fills(
+        "0x" + "a" * 40, 100_000, 200_000, timeout=1
+    )
+    assert rows == []
+    assert status["history_limit_reached"] is True
+    assert status["complete"] is False
+
+
+def test_funding_history_above_10000_is_not_mistaken_for_fill_history_cap(monkeypatch):
+    from scripts import fetch_hyperliquid_leader_fills as module
+    monkeypatch.setattr(
+        module,
+        "_post_info",
+        lambda body, timeout: [
+            {"time": index, "delta": {"coin": "BTC", "usdc": "0.01"}}
+            for index in range(500)
+        ],
+    )
+    rows, status = module._fetch_time_range(
+        "0x" + "a" * 40,
+        "userFunding",
+        0,
+        500,
+        timeout=1,
+        pause_seconds=0,
+    )
+    assert len(rows) == 500
+    assert status["history_limit_reached"] is False

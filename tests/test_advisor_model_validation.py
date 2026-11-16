@@ -68,8 +68,8 @@ def _manifest(_unused=0):
         "cohort_selection_as_of_utc": "2026-11-01T00:00:00+00:00",
         "data_start_utc": "2026-11-02T00:00:00+00:00",
         "data_end_utc": "2026-12-15T00:00:00+00:00",
-        "model_version": "1.1.0",
-        "feature_schema_version": "advisor-r5-v2",
+        "model_version": "1.2.0",
+        "feature_schema_version": "advisor-r5-v3",
         "code_sha": "abcdef1234567",
         "backtest_config": {
             "risk_unit_definition": "net PnL divided by standardized max(2xATR, 0.5pct entry) risk",
@@ -143,7 +143,7 @@ def test_ridge_model_fits_and_predicts_finite_r_multiple():
     estimate = predict_ridge(model, samples[0]["features"])
 
     assert model["model_family"] == "ridge_linear_r"
-    assert model["feature_schema_version"] == "advisor-r5-v2"
+    assert model["feature_schema_version"] == "advisor-r5-v3"
     assert math.isfinite(estimate)
     assert set(model["coefficients"]) == {
         "trend_composite", "rsi14", "adx14", "volume_ratio", "atr_pct"
@@ -647,3 +647,51 @@ def test_train_validate_rejects_samples_from_a_different_market_group():
             manifest=_manifest(),
             dataset_sha256=hashlib.sha256(b"mixed-group").hexdigest(),
         )
+
+
+
+def test_research_approval_never_marks_external_trader_samples_runtime_eligible():
+    group = {
+        "exchange": "hyperliquid",
+        "symbol": "BTC/USDC",
+        "market_type": "futures",
+        "timeframe": "1h",
+    }
+    rows = _successful_prediction_rows()
+    folds = []
+    for fold_id in range(1, 4):
+        folds.append({
+            "fold_id": fold_id,
+            "training_samples": 250,
+            "test_signal_count": 40,
+            "test_samples": 40,
+            "excluded_test_samples": 0,
+            "excluded_test_reasons": {},
+            "training_label_end_utc": f"2026-11-0{fold_id}T00:00:00Z",
+            "test_start_utc": f"2026-11-0{fold_id}T01:00:00Z",
+            "test_end_utc": f"2026-11-0{fold_id}T05:00:00Z",
+        })
+    walk_forward = {
+        "min_training_samples_per_fold": 250,
+        "fold_count": 3,
+        "oos_signals": 120,
+        "oos_samples": 120,
+        "oos_excluded_samples": 0,
+        "oos_excluded_reasons": {},
+        "folds": folds,
+        "oos_predictions": rows,
+    }
+    result = evaluate_approval(
+        group=group,
+        walk_forward=walk_forward,
+        manifest=_manifest(),
+        dataset_sha256="e" * 64,
+        policy={
+            "min_oos_time_blocks_per_fold": 1,
+            "bootstrap_block_hours": 24,
+            "bootstrap_resamples": 500,
+        },
+    )
+    assert result["approved"] is True
+    assert result["deployment_status"] == "RESEARCH_ONLY"
+    assert result["runtime_eligible"] is False
