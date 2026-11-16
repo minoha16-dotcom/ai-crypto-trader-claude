@@ -770,22 +770,39 @@ def prepare_dataset(
 
         for symbol, symbol_positions in sorted(positions_by_symbol.items()):
             hourly = candles_cache[symbol]
-            for position in sorted(
-                symbol_positions,
-                key=lambda row: (
-                    int(row["entry_timestamp"]),
-                    int(row["exit_timestamp"]),
-                    row["wallet_address"],
-                ),
-            ):
-                for timeframe in timeframes:
-                    tf_candles = hourly if timeframe == "1h" else aggregate_four_hour(hourly)
+            for timeframe in timeframes:
+                group_key = ("hyperliquid", symbol, "futures", timeframe)
+                group = groups.setdefault(group_key, {
+                    "exchange": "hyperliquid",
+                    "symbol": symbol,
+                    "market_type": "futures",
+                    "timeframe": timeframe,
+                    "samples": [],
+                    "provenance": {},
+                    "positions_seen": 0,
+                    "excluded_samples": 0,
+                    "preparation_excluded_samples": 0,
+                    "preparation_excluded_reasons": {},
+                })
+                tf_candles = hourly if timeframe == "1h" else aggregate_four_hour(hourly)
+                for position in sorted(
+                    symbol_positions,
+                    key=lambda row: (
+                        _position_signal_timestamp(row),
+                        int(row["exit_timestamp"]),
+                        row["wallet_address"],
+                    ),
+                ):
+                    group["positions_seen"] += 1
                     try:
                         atr_features = _position_atr(position, tf_candles, timeframe)
-                    except (ValueError, IndexError):
-                        feature_exclusions[
-                            f"{symbol}:{timeframe}:MISSING_PRE_ENTRY_FEATURES"
-                        ] += 1
+                    except (ValueError, IndexError) as exc:
+                        reason = str(exc) or "MISSING_PRE_ENTRY_FEATURES"
+                        group["preparation_excluded_samples"] += 1
+                        group["preparation_excluded_reasons"][reason] = (
+                            group["preparation_excluded_reasons"].get(reason, 0) + 1
+                        )
+                        feature_exclusions[f"{symbol}:{timeframe}:{reason}"] += 1
                         continue
 
                     candidate = dict(position)
@@ -797,21 +814,14 @@ def prepare_dataset(
                         timeframe=timeframe,
                     )
                     if sample is None:
-                        feature_exclusions[
-                            f"{symbol}:{timeframe}:{problem or 'UNKNOWN'}"
-                        ] += 1
+                        reason = problem or "FEATURE_OR_LABEL_PREPARATION_FAILED"
+                        group["preparation_excluded_samples"] += 1
+                        group["preparation_excluded_reasons"][reason] = (
+                            group["preparation_excluded_reasons"].get(reason, 0) + 1
+                        )
+                        feature_exclusions[f"{symbol}:{timeframe}:{reason}"] += 1
                         continue
 
-                    group_key = ("hyperliquid", symbol, "futures", timeframe)
-                    group = groups.setdefault(group_key, {
-                        "exchange": "hyperliquid",
-                        "symbol": symbol,
-                        "market_type": "futures",
-                        "timeframe": timeframe,
-                        "samples": [],
-                        "provenance": {},
-                        "excluded_samples": 0,
-                    })
                     sample.update({
                         "exchange": "hyperliquid",
                         "symbol": symbol,

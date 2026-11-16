@@ -582,3 +582,27 @@ def test_funding_at_exact_entry_timestamp_is_not_assigned_to_new_position():
     total, valid = _funding_for_position(rows, "BTC", 10_000, 20_000)
     assert valid is True
     assert total == pytest.approx(-0.2)
+
+
+
+def test_feature_preparation_exclusion_is_counted_per_market_group():
+    # Group accounting is performed before feature extraction, so a dataset
+    # with no usable indicator history does not silently disappear.
+    group = {
+        "exchange": "hyperliquid",
+        "symbol": "BTC/USDC",
+        "market_type": "futures",
+        "timeframe": "4h",
+        "samples": [],
+        "positions_seen": 2,
+        "excluded_samples": 0,
+        "preparation_excluded_samples": 2,
+        "preparation_excluded_reasons": {
+            "MISSING_PRE_ENTRY_CANDLE": 1,
+            "INSUFFICIENT_PRE_ENTRY_CANDLES": 1,
+        },
+    }
+    assert group["positions_seen"] == (
+        len(group["samples"]) + group["excluded_samples"] + group["preparation_excluded_samples"]
+    )
+    assert sum(group["preparation_excluded_reasons"].values()) == 2

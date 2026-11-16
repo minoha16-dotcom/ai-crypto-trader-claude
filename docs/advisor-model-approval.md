@@ -264,3 +264,10 @@ first fill timestamp. Only bars that completed strictly before the signal are
 eligible. The collector, preparation code and training code each have a
 separate Git SHA in the manifest; the raw source snapshot, raw JSON file and
 prepared training file each have separate SHA-256 hashes.
+
+
+The prepared dataset keeps a group row even when every reconstructed position
+fails feature extraction. Its report carries `positions_seen`,
+`preparation_excluded_samples`, and reason counts separately from valid
+prepared signals and from OOS fold exclusions. Missing pre-entry candles
+therefore cannot silently make a market group disappear from diagnostics.

@@ -72,8 +72,20 @@ def main():
                 separators=(",", ":"),
                 ensure_ascii=False,
             ).encode("utf-8")
+            prep_excluded = int(group.get("preparation_excluded_samples", 0) or 0)
+            prep_excluded_reasons = dict(group.get("preparation_excluded_reasons") or {})
+            trained["approval"]["metrics"].update({
+                "positions_seen_before_feature_preparation": int(group.get("positions_seen", len(group.get("samples") or []))),
+                "preparation_excluded_samples": prep_excluded,
+                "preparation_excluded_sample_reasons": prep_excluded_reasons,
+                "prepared_signal_samples": len(group.get("samples") or []),
+            })
             reports.append({
                 "group": group_key,
+                "positions_seen_before_feature_preparation": int(group.get("positions_seen", len(group.get("samples") or []))),
+                "preparation_excluded_samples": prep_excluded,
+                "preparation_excluded_sample_reasons": prep_excluded_reasons,
+                "prepared_signal_samples": len(group.get("samples") or []),
                 "approval": trained["approval"],
                 "model_artifact": model_file,
                 "walk_forward": {
@@ -113,6 +125,10 @@ def main():
                 disabled_code = "INSUFFICIENT_MATURED_TRAINING_LABELS"
             reports.append({
                 "group": group_key,
+                "positions_seen_before_feature_preparation": int(group.get("positions_seen", len(source_samples))),
+                "preparation_excluded_samples": int(group.get("preparation_excluded_samples", 0) or 0),
+                "preparation_excluded_sample_reasons": dict(group.get("preparation_excluded_reasons") or {}),
+                "prepared_signal_samples": len(source_samples),
                 "approval": {
                     "model_status": "DISABLED",
                     "approved": False,
