@@ -1,0 +1,216 @@
+import pytest
+
+from scripts.prepare_hyperliquid_advisor_dataset import (
+    aggregate_four_hour,
+    features_before_entry,
+    position_to_sample,
+    reconstruct_closed_positions,
+)
+
+
+def _fill(direction, timestamp, price, size, oid, pnl=None, fee=0.1):
+    return {
+        "coin": "BTC",
+        "dir": direction,
+        "time": timestamp,
+        "px": str(price),
+        "sz": str(size),
+        "oid": oid,
+        "closedPnl": None if pnl is None else str(pnl),
+        "fee": str(fee),
+        "feeToken": "USDC",
+        "tid": f"tid-{timestamp}-{oid}",
+    }
+
+
+def _wallet(fills, orders, funding=None):
+    return {
+        "address": "0x" + "a" * 40,
+        "complete": True,
+        "fills": fills,
+        "funding": funding or [],
+        "historical_orders": orders,
+    }
+
+
+def _trigger_order(oid, trigger_price):
+    return {
+        "order": {
+            "coin": "BTC",
+            "oid": oid,
+            "isTrigger": True,
+            "isPositionTpsl": True,
+            "reduceOnly": True,
+            "triggerPx": str(trigger_price),
+            "triggerCondition": "Price above",
+            "orderType": "Stop Market",
+        },
+        "status": "filled",
+        "statusTimestamp": 1_760_000_000_000,
+    }
+
+
+def _hourly_candles(count=130):
+    candles = []
+    for index in range(count):
+        close = 100.0 + index * 0.1
+        candles.append([
+            index * 60 * 60 * 1000,
+            close - 0.05,
+            close + 0.4,
+            close - 0.4,
+            close,
+            100.0 + index,
+        ])
+    return candles
+
+
+def test_reconstructs_full_trigger_closed_long_and_accounts_for_fees_funding():
+    fills = [
+        _fill("Open Long", 10_000, 100.0, 2.0, 10),
+        _fill("Close Long", 20_000, 110.0, 2.0, 20, pnl=20.0),
+    ]
+    funding = [{
+        "time": 15_000,
+        "delta": {"coin": "BTC", "usdc": "0.2"},
+    }]
+    wallet = _wallet(fills, [_trigger_order(20, 108.0)], funding)
+
+    positions, exclusions = reconstruct_closed_positions(wallet)
+
+    assert exclusions == {}
+    assert len(positions) == 1
+    position = positions[0]
+    assert position["side"] == "LONG"
+    assert position["entry_price"] == 100.0
+    assert position["entry_quantity"] == 2.0
+    assert position["closed_pnl"] == 20.0
+    assert position["fees"] == pytest.approx(0.2)
+    assert position["funding_paid"] == pytest.approx(0.2)
+    assert position["exit_reason"] == "TARGET_GAP"
+
+
+def test_reconstruct_manual_close_as_excluded_not_as_a_target_or_stop():
+    fills = [
+        _fill("Open Long", 10_000, 100.0, 1.0, 10),
+        _fill("Close Long", 20_000, 99.0, 1.0, 20, pnl=-1.0),
+    ]
+    wallet = _wallet(fills, [])
+
+    positions, _ = reconstruct_closed_positions(wallet)
+
+    assert len(positions) == 1
+    assert positions[0]["exit_reason"] == "MANUAL_CLOSE"
+
+
+def test_reconstruct_different_close_orders_as_manual_not_single_trigger():
+    fills = [
+        _fill("Open Long", 10_000, 100.0, 2.0, 10),
+        _fill("Close Long", 20_000, 110.0, 1.0, 20, pnl=10.0),
+        _fill("Close Long", 30_000, 109.0, 1.0, 21, pnl=9.0),
+    ]
+    wallet = _wallet(
+        fills,
+        [_trigger_order(20, 108.0), _trigger_order(21, 108.0)],
+    )
+
+    positions, _ = reconstruct_closed_positions(wallet)
+
+    assert len(positions) == 1
+    assert positions[0]["exit_reason"] == "MANUAL_CLOSE"
+
+
+def test_scaled_position_is_excluded_instead_of_inventing_single_entry_risk():
+    fills = [
+        _fill("Open Long", 10_000, 100.0, 1.0, 10),
+        _fill("Add Long", 15_000, 105.0, 1.0, 11),
+        _fill("Close Long", 20_000, 103.0, 2.0, 20, pnl=1.0),
+    ]
+    wallet = _wallet(fills, [_trigger_order(20, 102.0)])
+
+    positions, exclusions = reconstruct_closed_positions(wallet)
+
+    assert len(positions) == 1
+    assert positions[0]["invalid_reason"] == "SCALED_POSITION"
+    assert positions[0]["exit_reason"] == "UNKNOWN"
+    assert exclusions["SCALED_POSITION"] >= 1
+
+
+def test_incomplete_wallet_history_is_never_reconstructed():
+    wallet = _wallet(
+        [_fill("Open Long", 10_000, 100.0, 1.0, 10)],
+        [],
+    )
+    wallet["complete"] = False
+
+    positions, exclusions = reconstruct_closed_positions(wallet)
+
+    assert positions == []
+    assert exclusions["RAW_WALLET_INCOMPLETE"] == 1
+
+
+def test_four_hour_aggregation_requires_four_consecutive_utc_hour_candles():
+    hourly = _hourly_candles(16)
+    four_hour = aggregate_four_hour(hourly)
+
+    assert len(four_hour) == 4
+    assert four_hour[0][0] == 0
+    assert four_hour[0][1] == hourly[0][1]
+    assert four_hour[0][2] == max(row[2] for row in hourly[:4])
+    assert four_hour[0][3] == min(row[3] for row in hourly[:4])
+    assert four_hour[0][4] == hourly[3][4]
+    assert four_hour[0][5] == sum(row[5] for row in hourly[:4])
+
+    gapped = [row for index, row in enumerate(hourly) if index != 5]
+    assert len(aggregate_four_hour(gapped)) == 3
+
+
+def test_features_use_only_fully_closed_candles_before_entry():
+    candles = _hourly_candles(130)
+    entry_timestamp = 120 * 60 * 60 * 1000
+
+    features = features_before_entry(candles, entry_timestamp, "1h")
+
+    assert set(features) == {
+        "trend_composite", "rsi14", "adx14", "volume_ratio", "atr_pct"
+    }
+    assert all(value == value for value in features.values())
+
+
+def test_position_sample_uses_system_normalized_r_and_keeps_manual_exit_unlabelled():
+    base_position = {
+        "coin": "BTC",
+        "side": "LONG",
+        "entry_price": 100.0,
+        "entry_quantity": 2.0,
+        "entry_timestamp": 120 * 60 * 60 * 1000,
+        "exit_timestamp": 121 * 60 * 60 * 1000,
+        "exit_reason": "TARGET",
+        "closed_pnl": 20.0,
+        "fees": 0.2,
+        "funding_paid": 0.2,
+        "atr14": 1.5,
+    }
+    candles = _hourly_candles(130)
+
+    sample, problem = position_to_sample(
+        base_position,
+        wallet_address="0x" + "a" * 40,
+        candles=candles,
+        timeframe="1h",
+    )
+
+    assert problem is None
+    assert sample["r_multiple"] == pytest.approx(20.0 / 6.0)
+    assert sample["exit_reason"] == "TARGET"
+
+    manual = dict(base_position, exit_reason="MANUAL_CLOSE")
+    manual_sample, manual_problem = position_to_sample(
+        manual,
+        wallet_address="0x" + "a" * 40,
+        candles=candles,
+        timeframe="1h",
+    )
+    assert manual_problem is None
+    assert "r_multiple" not in manual_sample
+    assert manual_sample["exit_reason"] == "MANUAL_CLOSE"
