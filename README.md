@@ -221,7 +221,9 @@ python scripts/run_strategy_validation.py
 ~~~
 
 It evaluates Spot BTC/USDT and ETH/USDT plus Futures BTC/USDT, where available,
-using chronological 1h folds. It compares Volume Ratio thresholds 0.8, 1.0,
+using chronological 1h and 4h folds by default. Comparisons within each
+exchange × symbol × market-type group are trimmed to a complete common UTC
+window; incomplete groups are rejected rather than compared on different dates. It compares Volume Ratio thresholds 0.8, 1.0,
 and 1.2 and runs three pre-registered directional-vote ablations at threshold
 1.0: remove EMA20/EMA50 alignment, remove close/EMA20, and collapse the two
 correlated trend votes into one composite vote. The report includes per-fold

@@ -334,3 +334,43 @@ def test_walk_forward_forwards_isolated_futures_assumptions_to_each_period(monke
     assert all(call["leverage"] == 3 for call in calls)
     assert all(call["funding_rate"] == pytest.approx(0.0002) for call in calls)
     assert all(call["funding_interval_hours"] == 4 for call in calls)
+
+
+
+def test_period_summary_counts_eligible_r_samples_and_excluded_exit_reasons():
+    result = {
+        "trades": [
+            {"pnl": 10.0, "r_multiple": 1.0, "exit_reason": "TARGET"},
+            {"pnl": -10.0, "r_multiple": -1.0, "exit_reason": "STOP"},
+            {"pnl": 5.0, "r_multiple": 0.5, "exit_reason": "TIME_EXIT"},
+            {"pnl": -2.0, "r_multiple": -0.2, "exit_reason": "PERIOD_END"},
+            {"pnl": -20.0, "r_multiple": -2.0, "exit_reason": "LIQUIDATION_GAP"},
+        ],
+        "open_positions": [],
+        "skipped_signals": [{"reason": "DAILY_LOSS_LIMIT"}, {"reason": "MIN_NOTIONAL"}],
+        "net_pnl": -17.0,
+        "ending_balance": 983.0,
+        "ending_equity": 983.0,
+        "realized_pnl": -17.0,
+        "unrealized_pnl": 0.0,
+        "win_rate_pct": 20.0,
+        "expectancy_r": -0.34,
+        "profit_factor": 0.5,
+        "max_drawdown_pct": 2.0,
+    }
+
+    summary = walk_forward._period_summary(result, 1000.0, 100)
+
+    assert summary["oos_signals"] == 7
+    assert summary["eligible_samples"] == 3
+    assert summary["excluded_samples"] == 2
+    assert summary["eligible_r_sum"] == pytest.approx(0.5)
+    assert summary["mean_r"] == pytest.approx(1.0 / 6.0)
+    assert summary["positive_r_count"] == 2
+    assert summary["positive_r_share"] == pytest.approx(2.0 / 3.0)
+    assert summary["excluded_sample_reasons"] == {
+        "LIQUIDATION": 1,
+        "PERIOD_END": 1,
+    }
+    assert summary["wilson_ci_positive_r_share_95"][0] < 2.0 / 3.0
+    assert summary["wilson_ci_positive_r_share_95"][1] > 2.0 / 3.0

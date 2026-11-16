@@ -6,6 +6,7 @@ It does not optimize or choose a strategy based on the test results.
 """
 import asyncio
 import json
+from collections import Counter
 import math
 import os
 import statistics
@@ -84,6 +85,27 @@ def _iso_utc(timestamp_ms):
     return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat()
 
 
+def _wilson_interval(successes, sample_size):
+    """95% Wilson interval for the positive-R share."""
+    if sample_size <= 0:
+        return None
+    successes = max(0, min(int(successes), int(sample_size)))
+    n = float(sample_size)
+    p = successes / n
+    z = 1.959963984540054
+    z2 = z * z
+    denominator = 1.0 + z2 / n
+    center = (p + z2 / (2.0 * n)) / denominator
+    radius = (
+        z * math.sqrt((p * (1.0 - p) / n) + z2 / (4.0 * n * n))
+        / denominator
+    )
+    return [
+        round(max(0.0, center - radius), 6),
+        round(min(1.0, center + radius), 6),
+    ]
+
+
 def _benchmark_return(candles, start, end):
     """Long buy-and-hold comparator with round-trip fee/slippage estimate."""
     if end - start < 2:
@@ -101,6 +123,12 @@ def _benchmark_return(candles, start, end):
 def _summarize(result, candles):
     aggregate = result["aggregate_test"]
     test_folds = []
+    excluded_reasons = Counter()
+    eligible_samples = 0
+    excluded_samples = 0
+    eligible_r_sum = 0.0
+    positive_r_count = 0
+    oos_signals = 0
     for fold in result["folds"]:
         test = fold["test"]
         span = fold["ranges"]["test"]
@@ -117,7 +145,21 @@ def _summarize(result, candles):
             "buy_hold_return_pct": _benchmark_return(
                 candles, span["start_index"], span["end_index_exclusive"]
             ),
+            "oos_signals": test["oos_signals"],
+            "eligible_samples": test["eligible_samples"],
+            "excluded_samples": test["excluded_samples"],
+            "eligible_r_sum": test["eligible_r_sum"],
+            "positive_r_count": test["positive_r_count"],
+            "excluded_sample_reasons": test["excluded_sample_reasons"],
         })
+        eligible_samples += int(test["eligible_samples"])
+        excluded_samples += int(test["excluded_samples"])
+        eligible_r_sum += float(test["eligible_r_sum"])
+        positive_r_count += int(test["positive_r_count"])
+        oos_signals += int(test["oos_signals"])
+        for reason, count in test["excluded_sample_reasons"].items():
+            excluded_reasons[reason] += int(count)
+
     strategy_returns = [row["net_return_pct"] for row in test_folds]
     benchmark_returns = [row["buy_hold_return_pct"] for row in test_folds]
     return {
@@ -143,6 +185,13 @@ def _summarize(result, candles):
         "profit_factor": aggregate["profit_factor"],
         "worst_fold_max_drawdown_pct": aggregate["worst_fold_max_drawdown_pct"],
         "sum_of_independent_fold_net_pnl": aggregate["sum_of_independent_fold_net_pnl"],
+        "eligible_samples": eligible_samples,
+        "excluded_samples": excluded_samples,
+        "excluded_sample_reasons": dict(sorted(excluded_reasons.items())),
+        "oos_signals": oos_signals,
+        "mean_r": eligible_r_sum / eligible_samples if eligible_samples else None,
+        "positive_r_share": positive_r_count / eligible_samples if eligible_samples else None,
+        "wilson_ci_positive_r_share_95": _wilson_interval(positive_r_count, eligible_samples),
         "test_folds": test_folds,
     }
 
@@ -168,6 +217,280 @@ async def _fetch_dataset(
     return spec, closed, metadata
 
 
+
+def _align_group_to_common_utc(group_rows, requested_timeframes, min_candles=MINIMUM_CANDLES):
+    """Trim an exchange/symbol/market group to one exact UTC comparison window.
+
+    OHLCV timestamps are candle-open times in UTC milliseconds. The common
+    interval is rounded inward to a boundary shared by every requested
+    timeframe, then only fully closed candles in that interval are retained.
+    """
+    requested_timeframes = tuple(dict.fromkeys(requested_timeframes))
+    group_id = group_rows[0].get("comparison_group_id") if group_rows else "unknown"
+    by_timeframe = {}
+    for row in group_rows:
+        timeframe = row["timeframe"]
+        if timeframe in by_timeframe:
+            return {
+                "comparison_group_id": group_id,
+                "timeframes": list(requested_timeframes),
+                "status": "REJECTED_DUPLICATE_TIMEFRAME",
+                "reason": f"More than one dataset was supplied for timeframe {timeframe}.",
+            }, []
+        by_timeframe[timeframe] = row
+
+    missing = [frame for frame in requested_timeframes if frame not in by_timeframe]
+    failed = [
+        f"{row['timeframe']}: {row.get('error') or 'no candle data'}"
+        for row in group_rows if row.get("error") or not row.get("candles")
+    ]
+    if missing or failed:
+        details = []
+        if missing:
+            details.append("missing requested timeframe(s): " + ", ".join(missing))
+        if failed:
+            details.append("failed dataset(s): " + "; ".join(failed))
+        return {
+            "comparison_group_id": group_id,
+            "timeframes": list(requested_timeframes),
+            "status": "REJECTED_MISSING_TIMEFRAME_DATA",
+            "reason": " | ".join(details),
+        }, []
+
+    if len(by_timeframe) != len(requested_timeframes):
+        return {
+            "comparison_group_id": group_id,
+            "timeframes": list(requested_timeframes),
+            "status": "REJECTED_INCOMPLETE_TIMEFRAME_SET",
+            "reason": "The group does not contain exactly one successful dataset for every requested timeframe.",
+        }, []
+
+    widths = [TIMEFRAME_MS_BY_INTERVAL[frame] for frame in requested_timeframes]
+    common_step_ms = math.lcm(*widths)
+    available_start_ms = max(
+        int(by_timeframe[frame]["candles"][0][0])
+        for frame in requested_timeframes
+    )
+    available_end_ms = min(
+        int(by_timeframe[frame]["candles"][-1][0]) + TIMEFRAME_MS_BY_INTERVAL[frame]
+        for frame in requested_timeframes
+    )
+    common_start_ms = ((available_start_ms + common_step_ms - 1) // common_step_ms) * common_step_ms
+    common_end_ms = (available_end_ms // common_step_ms) * common_step_ms
+
+    base = {
+        "comparison_group_id": group_id,
+        "timeframes": list(requested_timeframes),
+        "common_timeframe_boundary_ms": common_step_ms,
+        "available_start_utc": _iso_utc(available_start_ms),
+        "available_end_utc": _iso_utc(available_end_ms),
+        "common_window_start_utc": _iso_utc(common_start_ms),
+        "common_window_end_utc": _iso_utc(common_end_ms),
+        "common_window_start_ms": common_start_ms,
+        "common_window_end_ms": common_end_ms,
+        "minimum_candles_per_timeframe": min_candles,
+    }
+    if common_end_ms <= common_start_ms:
+        return {
+            **base,
+            "status": "REJECTED_NO_COMMON_UTC_WINDOW",
+            "reason": "The requested timeframes have no positive common UTC interval after boundary alignment.",
+        }, []
+
+    aligned_rows = []
+    coverage_details = []
+    problems = []
+    for timeframe in requested_timeframes:
+        row = by_timeframe[timeframe]
+        timeframe_ms = TIMEFRAME_MS_BY_INTERVAL[timeframe]
+        raw_candles = row["candles"]
+        timestamps = [int(candle[0]) for candle in raw_candles]
+        if any(timestamp % timeframe_ms != 0 for timestamp in timestamps):
+            problems.append(f"{timeframe}: candle timestamps are not aligned to UTC timeframe boundaries")
+            continue
+        if any(right <= left for left, right in zip(timestamps, timestamps[1:])):
+            problems.append(f"{timeframe}: candle timestamps are unsorted or duplicated")
+            continue
+
+        clipped = [
+            candle for candle in raw_candles
+            if int(candle[0]) >= common_start_ms
+            and int(candle[0]) + timeframe_ms <= common_end_ms
+        ]
+        expected = (common_end_ms - common_start_ms) // timeframe_ms
+        if len(clipped) < min_candles:
+            problems.append(
+                f"{timeframe}: only {len(clipped)} complete candles remain in the common window; "
+                f"minimum required is {min_candles}"
+            )
+            continue
+        if len(clipped) != expected:
+            problems.append(
+                f"{timeframe}: common window contains {expected - len(clipped)} missing candle(s); "
+                "gaps are not interpolated or forward-filled"
+            )
+            continue
+        clipped_timestamps = [int(candle[0]) for candle in clipped]
+        if any(right - left != timeframe_ms for left, right in zip(clipped_timestamps, clipped_timestamps[1:])):
+            problems.append(f"{timeframe}: missing or irregular candle timestamps inside the common UTC window")
+            continue
+
+        aligned_row = dict(row)
+        aligned_row["candles"] = clipped
+        aligned_row["candle_count_before_alignment"] = len(raw_candles)
+        aligned_row["candle_count"] = len(clipped)
+        aligned_row["first_candle_utc"] = _iso_utc(clipped[0][0])
+        aligned_row["last_candle_utc"] = _iso_utc(clipped[-1][0])
+        aligned_row["last_candle_close_utc"] = _iso_utc(int(clipped[-1][0]) + timeframe_ms)
+        aligned_row["common_window_start_utc"] = base["common_window_start_utc"]
+        aligned_row["common_window_end_utc"] = base["common_window_end_utc"]
+        aligned_row["coverage_pct"] = len(clipped) / expected * 100.0 if expected else 0.0
+        aligned_rows.append(aligned_row)
+        coverage_details.append({
+            "dataset_id": row["id"],
+            "timeframe": timeframe,
+            "candles_before_alignment": len(raw_candles),
+            "candles_in_common_window": len(clipped),
+            "expected_candles": expected,
+            "coverage_pct": round(aligned_row["coverage_pct"], 4),
+            "actual_start_utc": aligned_row["first_candle_utc"],
+            "actual_end_utc": aligned_row["last_candle_close_utc"],
+        })
+
+    if problems:
+        status = (
+            "REJECTED_INSUFFICIENT_COMMON_COVERAGE"
+            if any("minimum required" in problem or "missing candle" in problem for problem in problems)
+            else "REJECTED_INVALID_OR_GAPPED_DATA"
+        )
+        return {
+            **base,
+            "status": status,
+            "reason": " | ".join(problems),
+            "dataset_coverage": coverage_details,
+        }, []
+
+    status = (
+        "SINGLE_TIMEFRAME_NO_CROSS_TIMEFRAME_COMPARISON"
+        if len(requested_timeframes) == 1 else "ALIGNED_COMMON_UTC"
+    )
+    return {
+        **base,
+        "status": status,
+        "reason": None,
+        "common_duration_days": round((common_end_ms - common_start_ms) / 86_400_000, 4),
+        "dataset_coverage": coverage_details,
+    }, aligned_rows
+
+
+def _dataset_report_row(row, comparison_status, evaluation_status, reason=None):
+    timeframe_ms = TIMEFRAME_MS_BY_INTERVAL[row["timeframe"]]
+    candles = row.get("candles") or []
+    first = candles[0] if candles else None
+    last = candles[-1] if candles else None
+    return {
+        "id": row["id"],
+        "comparison_group_id": row["comparison_group_id"],
+        "exchange": row["exchange"],
+        "symbol": row.get("symbol") or row.get("requested_symbol"),
+        "requested_symbol": row["requested_symbol"],
+        "market_type": row["market_type"],
+        "timeframe": row["timeframe"],
+        "contract_type": (row.get("instrument") or {}).get("contract_type"),
+        "contract_size": (row.get("instrument") or {}).get("contract_size"),
+        "candle_count_before_alignment": row.get("candle_count_before_alignment", len(candles)),
+        "candle_count": row.get("candle_count", len(candles)),
+        "first_candle_utc": row.get("first_candle_utc") or (_iso_utc(first[0]) if first else None),
+        "last_candle_utc": row.get("last_candle_utc") or (_iso_utc(last[0]) if last else None),
+        "last_candle_close_utc": row.get("last_candle_close_utc") or (
+            _iso_utc(int(last[0]) + timeframe_ms) if last else None
+        ),
+        "common_window_start_utc": row.get("common_window_start_utc"),
+        "common_window_end_utc": row.get("common_window_end_utc"),
+        "coverage_pct": row.get("coverage_pct"),
+        "source_metadata": row.get("source_metadata"),
+        "comparison_status": comparison_status,
+        "evaluation_status": evaluation_status,
+        "status_reason": reason or row.get("error"),
+    }
+
+
+def _build_advisor_diagnostics(dataset_rows, results):
+    """Build per-dataset OOS diagnostics without inventing predicted-R values."""
+    baseline_by_dataset = {
+        result["dataset_id"]: result["metrics"]
+        for result in results
+        if result["volume_ratio_threshold"] == 1.0
+        and result["feature_ablation"] == "baseline"
+    }
+    diagnostics = []
+    for dataset in dataset_rows:
+        metrics = baseline_by_dataset.get(dataset["id"])
+        if metrics:
+            eligible = int(metrics.get("eligible_samples", 0))
+            excluded = int(metrics.get("excluded_samples", 0))
+            reasons = metrics.get("excluded_sample_reasons", {})
+            oos_signals = int(metrics.get("oos_signals", 0))
+            oos_trades = int(metrics.get("total_closed_trades", 0))
+            folds = int(metrics.get("fold_count", 0))
+            mean_r = metrics.get("mean_r")
+            positive_share = metrics.get("positive_r_share")
+            wilson = metrics.get("wilson_ci_positive_r_share_95")
+            diagnostic_status = "AVAILABLE"
+        else:
+            eligible = excluded = oos_signals = oos_trades = folds = 0
+            reasons = {}
+            mean_r = positive_share = wilson = None
+            diagnostic_status = "UNAVAILABLE_NO_COMPLETED_BASELINE_EVALUATION"
+
+        diagnostics.append({
+            "dataset_id": dataset["id"],
+            "comparison_group_id": dataset["comparison_group_id"],
+            "exchange": dataset["exchange"],
+            "symbol": dataset["symbol"],
+            "market_type": dataset["market_type"],
+            "timeframe": dataset["timeframe"],
+            "common_window_start_utc": dataset.get("common_window_start_utc"),
+            "common_window_end_utc": dataset.get("common_window_end_utc"),
+            "candle_count": dataset.get("candle_count", 0),
+            "walk_forward_folds": folds,
+            "oos_signals": oos_signals,
+            "oos_closed_trades": oos_trades,
+            "eligible_samples": eligible,
+            "eligible_samples_scope": "eligible closed trades in chronological OOS test folds; not model-training rows",
+            "excluded_samples": excluded,
+            "excluded_sample_reasons": reasons,
+            "mean_r": mean_r,
+            "positive_r_share": positive_share,
+            "wilson_ci_positive_r_share_95": wilson,
+            "training_eligible_samples": None,
+            "training_excluded_samples": None,
+            "top_tercile_mean_r": None,
+            "uplift": None,
+            "uplift_confidence_interval_95": None,
+            "diagnostic_status": diagnostic_status,
+            "model_status": "DISABLED",
+            "model_status_scope": "R-multiple out-of-sample ranker",
+            "runtime_advisor_status": "LEGACY_LOCAL_PAPER_TRADE_SIMILARITY",
+            "model_status_reason": (
+                "No approved R-multiple model or out-of-sample predicted-R scores exist in this deployed source. "
+                "The runtime Advisor still uses user-selected closed paper trades and a local similarity score, "
+                "which is not a predicted-R score and cannot support a valid top-tercile/uplift calculation."
+            ),
+        })
+    return diagnostics
+
+
+def _format_metric(value, digits=4):
+    return "N/A" if value is None else f"{float(value):.{digits}f}"
+
+
+def _format_interval(value):
+    if not value or len(value) != 2 or value[0] is None or value[1] is None:
+        return "N/A"
+    return f"[{float(value[0]):.4f}, {float(value[1]):.4f}]"
+
+
 async def run():
     timeframes = _parse_timeframes()
     exchanges = _parse_csv("STRATEGY_VALIDATION_EXCHANGES", DEFAULT_EXCHANGES)
@@ -182,98 +505,168 @@ async def run():
         )
 
     registry = ExchangeRegistry()
-    datasets = []
+    raw_groups = {}
     errors = []
     results = []
+    comparison_groups = []
+    dataset_reports = []
     try:
-        for timeframe in timeframes:
-            timeframe_ms = TIMEFRAME_MS_BY_INTERVAL[timeframe]
-            for exchange_id in exchanges:
-                requests = (
-                    [("spot", symbol) for symbol in SPOT_SYMBOLS]
-                    + [("futures", symbol) for symbol in FUTURES_SYMBOLS]
-                )
-                for market_type, requested_symbol in requests:
-                    key = f"{exchange_id}:{timeframe}:{market_type}:{requested_symbol}"
+        for exchange_id in exchanges:
+            requests = (
+                [("spot", symbol) for symbol in SPOT_SYMBOLS]
+                + [("futures", symbol) for symbol in FUTURES_SYMBOLS]
+            )
+            for market_type, requested_symbol in requests:
+                group_id = f"{exchange_id}:{market_type}:{requested_symbol}"
+                group_rows = []
+                for timeframe in timeframes:
+                    timeframe_ms = TIMEFRAME_MS_BY_INTERVAL[timeframe]
+                    dataset_id = f"{exchange_id}:{timeframe}:{market_type}:{requested_symbol}"
+                    row = {
+                        "id": dataset_id,
+                        "comparison_group_id": group_id,
+                        "exchange": exchange_id,
+                        "timeframe": timeframe,
+                        "market_type": market_type,
+                        "requested_symbol": requested_symbol,
+                        "candles": None,
+                        "instrument": None,
+                        "source_metadata": None,
+                        "error": None,
+                    }
                     try:
                         spec, candles, source_meta = await _fetch_dataset(
                             registry, exchange_id, market_type, requested_symbol,
                             timeframe, timeframe_ms, limit
                         )
-                        # The runner fails closed on any missing bar instead of
-                        # interpolating or forward-filling market prices.
-                        wf_kwargs = dict(
-                            **WALK_FORWARD,
-                            starting_balance=STARTING_BALANCE,
-                            instrument=spec,
-                            expected_candle_ms=timeframe_ms,
-                            max_missing_bars=0,
-                        )
-                        if market_type == "futures":
-                            wf_kwargs.update(
-                                leverage=2.0,
-                                funding_rate=settings.paper_futures_default_funding_rate,
-                                funding_interval_hours=settings.paper_futures_funding_interval_hours,
-                                maintenance_margin_rate=settings.paper_futures_maintenance_margin_rate,
-                                liquidation_fee_rate=settings.paper_futures_liquidation_fee_rate,
-                            )
-                        datasets.append({
-                            "id": key,
-                            "exchange": exchange_id,
-                            "timeframe": timeframe,
-                            "market_type": market_type,
+                        row.update({
                             "symbol": spec["symbol"],
-                            "contract_type": spec["contract_type"],
-                            "contract_size": spec["contract_size"],
-                            "candle_count": len(candles),
-                            "first_candle_utc": _iso_utc(candles[0][0]),
-                            "last_candle_utc": _iso_utc(candles[-1][0]),
+                            "candles": candles,
+                            "instrument": spec,
                             "source_metadata": source_meta,
                         })
-                        scenarios = [
-                            (threshold, "baseline")
-                            for threshold in VOLUME_THRESHOLDS
-                        ] + [
-                            (1.0, ablation)
-                            for ablation in ABLATIONS
-                            if ablation != "baseline"
-                        ]
-                        for threshold, ablation in scenarios:
-                            evaluated = run_walk_forward_backtest(
-                                candles,
-                                volume_ratio_threshold=threshold,
-                                feature_ablation=ablation,
-                                **wf_kwargs,
-                            )
-                            summary = _summarize(evaluated, candles)
-                            results.append({
-                                "dataset_id": key,
-                                "timeframe": timeframe,
-                                "volume_ratio_threshold": threshold,
-                                "feature_ablation": ablation,
-                                "metrics": summary,
-                            })
                         print(
-                            f"PASS {key}: {len(candles)} closed candles, "
-                            f"{len(scenarios)} pre-registered evaluations"
+                            f"FETCHED {dataset_id}: {len(candles)} closed candles "
+                            f"from {_iso_utc(candles[0][0])} to "
+                            f"{_iso_utc(int(candles[-1][0]) + timeframe_ms)}"
                         )
                     except Exception as error:
-                        errors.append({"dataset_id": key, "error": f"{type(error).__name__}: {error}"})
-                        print(f"INCOMPLETE {key}: {type(error).__name__}: {error}")
+                        row["error"] = f"{type(error).__name__}: {error}"
+                        errors.append({"dataset_id": dataset_id, "error": row["error"]})
+                        print(f"INCOMPLETE {dataset_id}: {row['error']}")
+                    group_rows.append(row)
+                raw_groups[group_id] = group_rows
     finally:
         await registry.close()
+
+    for group_id, group_rows in raw_groups.items():
+        alignment, aligned_rows = _align_group_to_common_utc(
+            group_rows, timeframes, min_candles=MINIMUM_CANDLES
+        )
+        if not aligned_rows:
+            comparison_groups.append(alignment)
+            reason = alignment.get("reason") or alignment["status"]
+            for row in group_rows:
+                dataset_reports.append(
+                    _dataset_report_row(row, alignment["status"], "NOT_RUN_COMMON_WINDOW_REJECTED", reason)
+                )
+            errors.append({
+                "comparison_group_id": group_id,
+                "error": f"{alignment['status']}: {reason}",
+            })
+            print(f"REJECTED {group_id}: {alignment['status']} — {reason}")
+            continue
+
+        group_results = []
+        group_dataset_reports = []
+        group_error = None
+        for row in aligned_rows:
+            timeframe = row["timeframe"]
+            timeframe_ms = TIMEFRAME_MS_BY_INTERVAL[timeframe]
+            instrument = row["instrument"]
+            candles = row["candles"]
+            wf_kwargs = dict(
+                **WALK_FORWARD,
+                starting_balance=STARTING_BALANCE,
+                instrument=instrument,
+                expected_candle_ms=timeframe_ms,
+                max_missing_bars=0,
+            )
+            if row["market_type"] == "futures":
+                wf_kwargs.update(
+                    leverage=2.0,
+                    funding_rate=settings.paper_futures_default_funding_rate,
+                    funding_interval_hours=settings.paper_futures_funding_interval_hours,
+                    maintenance_margin_rate=settings.paper_futures_maintenance_margin_rate,
+                    liquidation_fee_rate=settings.paper_futures_liquidation_fee_rate,
+                )
+
+            scenarios = [
+                (threshold, "baseline") for threshold in VOLUME_THRESHOLDS
+            ] + [
+                (1.0, ablation) for ablation in ABLATIONS if ablation != "baseline"
+            ]
+            try:
+                for threshold, ablation in scenarios:
+                    evaluated = run_walk_forward_backtest(
+                        candles,
+                        volume_ratio_threshold=threshold,
+                        feature_ablation=ablation,
+                        **wf_kwargs,
+                    )
+                    group_results.append({
+                        "dataset_id": row["id"],
+                        "comparison_group_id": group_id,
+                        "timeframe": timeframe,
+                        "common_window_start_utc": alignment["common_window_start_utc"],
+                        "common_window_end_utc": alignment["common_window_end_utc"],
+                        "volume_ratio_threshold": threshold,
+                        "feature_ablation": ablation,
+                        "metrics": _summarize(evaluated, candles),
+                    })
+                group_dataset_reports.append(
+                    _dataset_report_row(row, alignment["status"], "COMPLETE", None)
+                )
+                print(
+                    f"PASS {row['id']}: {len(candles)} candles in common UTC window, "
+                    f"{len(scenarios)} pre-registered evaluations"
+                )
+            except Exception as error:
+                group_error = f"{row['id']}: {type(error).__name__}: {error}"
+                errors.append({
+                    "dataset_id": row["id"],
+                    "comparison_group_id": group_id,
+                    "error": group_error,
+                })
+                break
+
+        if group_error:
+            alignment["status"] = "REJECTED_EVALUATION_FAILURE"
+            alignment["reason"] = group_error
+            comparison_groups.append(alignment)
+            for row in aligned_rows:
+                dataset_reports.append(
+                    _dataset_report_row(row, alignment["status"], "FAILED_EVALUATION", group_error)
+                )
+            print(f"REJECTED {group_id}: {group_error}")
+            continue
+
+        comparison_groups.append(alignment)
+        dataset_reports.extend(group_dataset_reports)
+        results.extend(group_results)
 
     baseline = [
         row for row in results
         if row["volume_ratio_threshold"] == 1.0
         and row["feature_ablation"] == "baseline"
     ]
+    completed_datasets = [
+        row for row in dataset_reports if row["evaluation_status"] == "COMPLETE"
+    ]
     total_trades = sum(row["metrics"]["total_closed_trades"] for row in baseline)
     total_folds = sum(row["metrics"]["fold_count"] for row in baseline)
     baseline_folds = [
-        fold
-        for row in baseline
-        for fold in row["metrics"]["test_folds"]
+        fold for row in baseline for fold in row["metrics"]["test_folds"]
     ]
     fold_returns = [row["net_return_pct"] for row in baseline_folds]
     buy_hold = [row["buy_hold_return_pct"] for row in baseline_folds]
@@ -285,23 +678,23 @@ async def run():
     )
     total_wins = sum(row["metrics"]["winning_trades"] for row in baseline)
     total_losses = sum(row["metrics"]["losing_trades"] for row in baseline)
-    gross_profit = sum(
-        max(0.0, row["metrics"]["sum_of_independent_fold_net_pnl"])
-        for row in baseline
-    )
     pf_values = [row["metrics"]["profit_factor"] for row in baseline]
-    valid_pf = [float(value) for value in pf_values if value is not None and math.isfinite(float(value))]
+    valid_pf = [
+        float(value) for value in pf_values
+        if value is not None and math.isfinite(float(value))
+    ]
     pooled_pf = statistics.fmean(valid_pf) if valid_pf else None
 
-    if len(datasets) < 4 or total_folds < 12 or total_trades < 100:
+    if len(completed_datasets) < 4 or total_folds < 12 or total_trades < 100:
         evidence = "INCONCLUSIVE_INSUFFICIENT_COVERAGE_OR_TRADES"
     elif mean_return > 0 and positive_fold_pct >= 55 and mean_return > mean_benchmark:
         evidence = "POSITIVE_OUT_OF_SAMPLE_SIGNAL_REQUIRES_INDEPENDENT_REVIEW"
     else:
         evidence = "NO_ROBUST_POSITIVE_EDGE_DEMONSTRATED"
 
+    advisor_diagnostics = _build_advisor_diagnostics(dataset_reports, results)
     report = {
-        "report_version": 1,
+        "report_version": 2,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "code_sha": os.getenv("GITHUB_SHA", "local"),
         "timeframes": list(timeframes),
@@ -312,6 +705,14 @@ async def run():
             "timeframes": list(timeframes),
             "thresholds": list(VOLUME_THRESHOLDS),
             "feature_ablations": list(ABLATIONS),
+        },
+        "comparison_protocol": {
+            "grouping": "exchange x requested symbol x market type",
+            "common_window": "intersection of available UTC coverage, rounded inward to shared timeframe boundaries",
+            "minimum_candles_per_timeframe": MINIMUM_CANDLES,
+            "missing_timeframes": "reject entire comparison group",
+            "missing_bars": "reject entire comparison group; no interpolation or forward filling",
+            "forming_candles": "excluded before computing the common window",
         },
         "assumptions": {
             "strategy_parameters": "frozen from backend Settings; no fitting or optimization",
@@ -325,8 +726,17 @@ async def run():
             "interpretation": "historical research, not a forecast, guarantee, or proof of future profitability",
         },
         "coverage": {
-            "datasets_completed": len(datasets),
-            "datasets_failed_or_incomplete": len(errors),
+            "comparison_groups_requested": len(comparison_groups),
+            "comparison_groups_eligible": sum(
+                group["status"] in ("ALIGNED_COMMON_UTC", "SINGLE_TIMEFRAME_NO_CROSS_TIMEFRAME_COMPARISON")
+                for group in comparison_groups
+            ),
+            "comparison_groups_rejected": sum(
+                group["status"] not in ("ALIGNED_COMMON_UTC", "SINGLE_TIMEFRAME_NO_CROSS_TIMEFRAME_COMPARISON")
+                for group in comparison_groups
+            ),
+            "datasets_completed": len(completed_datasets),
+            "datasets_failed_or_incomplete": len(dataset_reports) - len(completed_datasets),
             "total_baseline_oos_test_folds": total_folds,
             "total_baseline_oos_closed_trades": total_trades,
             "baseline_mean_fold_return_pct": mean_return,
@@ -338,8 +748,10 @@ async def run():
             "mean_dataset_profit_factor": pooled_pf,
             "evidence_status": evidence,
         },
-        "datasets": datasets,
+        "comparison_groups": comparison_groups,
+        "datasets": dataset_reports,
         "evaluations": results,
+        "advisor_diagnostics": advisor_diagnostics,
         "errors": errors,
     }
 
@@ -352,13 +764,15 @@ async def run():
         encoding="utf-8",
     )
     lines = [
-        "# Strategy validation report",
+        "# Strategy validation and Advisor diagnostics report",
         "",
         f"- Created (UTC): {report['created_at_utc']}",
         f"- Code SHA: {report['code_sha']}",
         f"- Timeframes: {', '.join(timeframes)}",
-        f"- Completed datasets: {len(datasets)}",
-        f"- Incomplete datasets: {len(errors)}",
+        f"- Comparable groups eligible: {report['coverage']['comparison_groups_eligible']}",
+        f"- Comparable groups rejected: {report['coverage']['comparison_groups_rejected']}",
+        f"- Completed datasets: {len(completed_datasets)}",
+        f"- Incomplete datasets: {len(dataset_reports) - len(completed_datasets)}",
         f"- Baseline OOS folds: {total_folds}",
         f"- Baseline OOS trades: {total_trades}",
         f"- Mean test-fold strategy return: {mean_return:.4f}%",
@@ -367,45 +781,109 @@ async def run():
         f"- Positive test folds: {positive_fold_pct:.1f}%",
         f"- Evidence status: **{evidence}**",
         "",
-        "## Dataset results",
+        "## Common UTC comparison groups",
+        "",
+        "| Group | Status | UTC start | UTC end | Duration (days) | Reason |",
+        "|---|---|---|---|---:|---|",
+    ]
+    for group in comparison_groups:
+        lines.append(
+            f"| {group['comparison_group_id']} | {group['status']} | "
+            f"{group.get('common_window_start_utc') or 'N/A'} | "
+            f"{group.get('common_window_end_utc') or 'N/A'} | "
+            f"{_format_metric(group.get('common_duration_days'), 2)} | "
+            f"{(group.get('reason') or '').replace('|', '/')} |"
+        )
+
+    lines.extend([
+        "",
+        "## Strategy dataset results",
         "",
         "| Dataset | Threshold | Feature ablation | OOS trades | Mean return | Mean excess | Expectancy (R) | Profit factor | Positive folds |",
         "|---|---:|---|---:|---:|---:|---:|---:|---:|",
-    ]
+    ])
     for row in results:
-        m = row["metrics"]
+        metrics = row["metrics"]
         lines.append(
             f"| {row['dataset_id']} | {row['volume_ratio_threshold']:.1f} | "
-            f"{row['feature_ablation']} | {m['total_closed_trades']} | "
-            f"{m['mean_fold_net_return_pct']:.4f}% | "
-            f"{m['mean_excess_vs_buy_hold_pct']:.4f}% | "
-            f"{m['expectancy_r']:.4f} | {m['profit_factor']} | "
-            f"{m['positive_test_fold_pct']:.1f}% |"
+            f"{row['feature_ablation']} | {metrics['total_closed_trades']} | "
+            f"{metrics['mean_fold_net_return_pct']:.4f}% | "
+            f"{metrics['mean_excess_vs_buy_hold_pct']:.4f}% | "
+            f"{metrics['expectancy_r']:.4f} | {metrics['profit_factor']} | "
+            f"{metrics['positive_test_fold_pct']:.1f}% |"
         )
+
     lines.extend([
+        "",
+        "## Advisor diagnostics by dataset",
+        "",
+        "| Dataset | UTC start | UTC end | Candles | WF folds | OOS signals | Eligible samples | Excluded samples | Mean R | Top tercile Mean R | Uplift | Uplift 95% CI | Wilson CI positive R | Model status |",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|",
+    ])
+    for row in advisor_diagnostics:
+        lines.append(
+            f"| {row['dataset_id']} | {row.get('common_window_start_utc') or 'N/A'} | "
+            f"{row.get('common_window_end_utc') or 'N/A'} | {row.get('candle_count') or 0} | "
+            f"{row['walk_forward_folds']} | {row['oos_signals']} | "
+            f"{row['eligible_samples']} | {row['excluded_samples']} | "
+            f"{_format_metric(row['mean_r'])} | "
+            f"{_format_metric(row['top_tercile_mean_r'])} | "
+            f"{_format_metric(row['uplift'])} | "
+            f"{_format_interval(row['uplift_confidence_interval_95'])} | "
+            f"{_format_interval(row['wilson_ci_positive_r_share_95'])} | "
+            f"{row['model_status']} |"
+        )
+
+    lines.extend([
+        "",
+        "### Excluded sample reasons",
+        "",
+    ])
+    for row in advisor_diagnostics:
+        if row["excluded_sample_reasons"]:
+            reasons = ", ".join(
+                f"{reason}={count}" for reason, count in row["excluded_sample_reasons"].items()
+            )
+            lines.append(f"- {row['dataset_id']}: {reasons}")
+    if not any(row["excluded_sample_reasons"] for row in advisor_diagnostics):
+        lines.append("- No excluded OOS exits were observed in the completed baseline folds.")
+
+    lines.extend([
+        "",
+        "### Advisor-model interpretation",
+        "",
+        "- Eligible samples are eligible closed trades in chronological OOS test folds; they are not model-training rows.",
+        "- Eligible exits are STOP, STOP_GAP, TARGET, TARGET_GAP and TIME_EXIT. PERIOD_END and all LIQUIDATION exits are excluded.",
+        "- Wilson CI is the interval for the positive-R share across all eligible OOS samples; it is not an uplift interval.",
+        "- Top-tercile Mean R, Uplift and its confidence interval are N/A because this source has no approved predicted-R model.",
+        "- model_status=DISABLED applies to the R-multiple OOS ranker; it does not disable the legacy local paper-trade Advisor.",
         "",
         "## Interpretation and limits",
         "",
+        "- Every multi-timeframe comparison uses the exact same UTC start/end window within each exchange × symbol × market-type group.",
+        "- A group is rejected when a requested timeframe is missing, aligned coverage is below 600 candles, or any candle is missing/irregular inside the common window.",
         "- The test folds are chronological and non-overlapping; every fold resets its own starting balance.",
-        "- The baseline uses the current fixed backend strategy. Threshold and feature-ablation runs are pre-registered sensitivity checks, not an optimizer.",
-        "- The buy-and-hold comparator is long-only and is a reference, not a risk-matched portfolio benchmark.",
-        "- Spot and Futures results are separated by dataset; each dataset also records its timeframe. Futures depend on simplified paper margin/funding/liquidation assumptions.",
-        "- Multiple timeframes increase the number of comparisons; they are sensitivity evidence, not independent samples or a reason to select the best-looking timeframe.",
-        "- No result proves a future edge. Positive evidence requires independent review and a later untouched time period.",
-        "- Any incomplete dataset, low sample count, or narrow market coverage reduces confidence.",
+        "- The fixed strategy is not optimized by this research runner. Threshold and feature-ablation runs are pre-registered sensitivity checks.",
+        "- Buy-and-hold is a long-only reference, not a risk-matched portfolio benchmark.",
+        "- Spot and Futures are separate datasets; Futures results depend on simplified paper margin/funding/liquidation assumptions.",
+        "- Multiple timeframes are sensitivity evidence, not independent samples or a reason to select the best-looking timeframe.",
+        "- No result proves a future edge. Positive evidence requires independent review and a later untouched test period.",
         "",
-        "## Incomplete datasets",
+        "## Incomplete datasets and errors",
         "",
     ])
     if errors:
-        lines.extend(f"- {item['dataset_id']}: {item['error']}" for item in errors)
+        lines.extend(
+            f"- {item.get('dataset_id') or item.get('comparison_group_id')}: {item['error']}"
+            for item in errors
+        )
     else:
         lines.append("- None.")
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"REPORT {json_path}")
     print(f"REPORT {md_path}")
     print(f"EVIDENCE_STATUS {evidence}")
-    return 0 if datasets else 1
+    return 0 if completed_datasets else 1
 
 
 if __name__ == "__main__":
