@@ -37,6 +37,11 @@ def _samples(count, start_ms=None):
         r_value = 0.65 if index % 2 else -0.15
         rows.append({
             "sample_id": f"trade-{index}",
+            "exchange": "hyperliquid",
+            "symbol": "BTC/USDC",
+            "market_type": "futures",
+            "timeframe": "1h",
+            "position_side": "LONG",
             "signal_timestamp": signal_ms,
             "exit_timestamp": signal_ms + 10 * 60 * 1000,
             "exit_reason": "TARGET" if r_value > 0 else "STOP",
@@ -58,11 +63,13 @@ def _manifest(_unused=0):
         "source_snapshot_utc": "2026-11-01T00:00:00+00:00",
         "source_snapshot_sha256": "a" * 64,
         "source_metadata_sha256": "b" * 64,
+        "raw_dataset_sha256": "c" * 64,
+        "preparation_code_sha": "feedface1234567",
         "cohort_selection_as_of_utc": "2026-11-01T00:00:00+00:00",
         "data_start_utc": "2026-11-02T00:00:00+00:00",
         "data_end_utc": "2026-12-15T00:00:00+00:00",
-        "model_version": "1.0.0",
-        "feature_schema_version": "advisor-r5-v1",
+        "model_version": "1.1.0",
+        "feature_schema_version": "advisor-r5-v2",
         "code_sha": "abcdef1234567",
         "backtest_config": {
             "risk_unit_definition": "net PnL divided by standardized max(2xATR, 0.5pct entry) risk",
@@ -136,7 +143,7 @@ def test_ridge_model_fits_and_predicts_finite_r_multiple():
     estimate = predict_ridge(model, samples[0]["features"])
 
     assert model["model_family"] == "ridge_linear_r"
-    assert model["feature_schema_version"] == "advisor-r5-v1"
+    assert model["feature_schema_version"] == "advisor-r5-v2"
     assert math.isfinite(estimate)
     assert set(model["coefficients"]) == {
         "trend_composite", "rsi14", "adx14", "volume_ratio", "atr_pct"
@@ -622,3 +629,21 @@ def test_walk_forward_does_not_split_concurrent_wallet_signals_across_folds():
         fold["test_end_utc"] < next_fold["test_start_utc"]
         for fold, next_fold in zip(result["folds"], result["folds"][1:])
     )
+
+
+
+def test_train_validate_rejects_samples_from_a_different_market_group():
+    group = {
+        "exchange": "hyperliquid",
+        "symbol": "BTC/USDC",
+        "market_type": "futures",
+        "timeframe": "1h",
+        "samples": _samples(260),
+    }
+    group["samples"][10]["symbol"] = "ETH/USDC"
+    with pytest.raises(ValueError, match="expected 'BTC/USDC'"):
+        train_validate_group(
+            group=group,
+            manifest=_manifest(),
+            dataset_sha256=hashlib.sha256(b"mixed-group").hexdigest(),
+        )
