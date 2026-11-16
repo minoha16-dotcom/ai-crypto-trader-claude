@@ -55,7 +55,7 @@ WALK_FORWARD = {
     "purge_bars": 20,
     "embargo_bars": 50,
     "max_holding_bars": 20,
-    "window_mode": "rolling",
+    "window_mode": "expanding",
     "max_folds": 45,
 }
 
@@ -776,7 +776,7 @@ async def run():
                         feature_ablation=ablation,
                         **wf_kwargs,
                     )
-                    group_results.append({
+                    result_row = {
                         "dataset_id": row["id"],
                         "comparison_group_id": group_id,
                         "timeframe": timeframe,
@@ -785,7 +785,35 @@ async def run():
                         "volume_ratio_threshold": threshold,
                         "feature_ablation": ablation,
                         "metrics": _summarize(evaluated, candles),
-                    })
+                    }
+                    if threshold == 1.0 and ablation == "baseline":
+                        advisor_backtest_config = {
+                            "walk_forward": WALK_FORWARD,
+                            "starting_balance": STARTING_BALANCE,
+                            "fee_rate_per_side": float(settings.taker_fee_rate),
+                            "slippage_bps_per_side": float(settings.slippage_bps),
+                            "risk_per_trade_pct": float(settings.risk_per_trade_pct),
+                            "max_open_risk_pct": float(settings.max_open_risk_pct),
+                            "max_daily_loss_pct": float(settings.max_daily_loss_pct),
+                            "max_position_notional_pct": float(settings.max_position_notional_pct),
+                            "reward_risk_ratio": float(settings.reward_risk_ratio),
+                            "volume_ratio_threshold": float(settings.signal_min_volume_ratio),
+                            "futures_leverage": wf_kwargs.get("leverage", 1.0),
+                            "futures_funding_rate": wf_kwargs.get("funding_rate"),
+                            "futures_funding_interval_hours": wf_kwargs.get("funding_interval_hours"),
+                            "futures_maintenance_margin_rate": wf_kwargs.get("maintenance_margin_rate"),
+                            "futures_liquidation_fee_rate": wf_kwargs.get("liquidation_fee_rate"),
+                            "instrument_contract_type": instrument.get("contract_type"),
+                            "instrument_contract_size": instrument.get("contract_size"),
+                        }
+                        result_row["advisor_model_approval"] = _build_fold_isolated_advisor_model(
+                            evaluated,
+                            row,
+                            candles,
+                            timeframe_ms,
+                            advisor_backtest_config,
+                        )
+                    group_results.append(result_row)
                 group_dataset_reports.append(
                     _dataset_report_row(row, alignment["status"], "COMPLETE", None)
                 )
@@ -1017,8 +1045,11 @@ async def run():
         "- Eligible samples are eligible closed trades in chronological OOS test folds; they are not model-training rows.",
         "- Eligible exits are STOP, STOP_GAP, TARGET, TARGET_GAP and TIME_EXIT. PERIOD_END and all LIQUIDATION exits are excluded.",
         "- Wilson CI is the interval for the positive-R share across all eligible OOS samples; it is not an uplift interval.",
-        "- Top-tercile Mean R, Uplift and its confidence interval are N/A because this source has no approved predicted-R model.",
-        "- model_status=DISABLED applies to the R-multiple OOS ranker; it does not disable the legacy local paper-trade Advisor.",
+        "- The R-multiple ranker is trained independently inside each expanding Walk-Forward fold using only earlier Train+Validation samples; the following Test fold is never used for that fold's fit.",
+        "- A group is approved only when at least three folds each have >=200 eligible training examples and >=20 eligible Test outcomes, with >=100 OOS signals and >=100 eligible OOS outcomes overall.",
+        "- Top-tercile Uplift must be positive and the lower bound of the deterministic 95% circular moving-block bootstrap interval must be strictly above zero.",
+        "- Approval is per exchange × symbol × market type × timeframe group; no examples are pooled across groups.",
+        "- model_status=DISABLED applies to the research R-ranker and does not enable or disable the legacy runtime paper-trade Advisor.",
         "",
         "## Interpretation and limits",
         "",
