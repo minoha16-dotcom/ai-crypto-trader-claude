@@ -846,6 +846,8 @@ def prepare_dataset(
             "source_metadata_sha256": raw_manifest.get("source_metadata_sha256"),
             "raw_dataset_sha256": raw_manifest.get("raw_dataset_sha256"),
             "collector_code_sha": raw_manifest.get("collector_code_sha"),
+            "cohort_snapshot_code_sha": raw_manifest.get("cohort_snapshot_code_sha"),
+            "cohort_snapshot_file_sha256": raw_manifest.get("cohort_snapshot_file_sha256"),
             "cohort_selection_as_of_utc": raw_manifest.get("cohort_selection_as_of_utc"),
             "data_start_utc": raw_manifest.get("data_start_utc"),
             "data_end_utc": raw_manifest.get("data_end_utc"),
