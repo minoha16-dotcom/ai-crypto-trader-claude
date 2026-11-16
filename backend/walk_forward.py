@@ -90,6 +90,8 @@ ADVISOR_ELIGIBLE_EXIT_REASONS = {
 
 
 def _period_summary(result, starting_balance, candle_count):
+    from .advisor_model import features_from_signal
+
     trades = result.get("trades", [])
     winners = [trade for trade in trades if float(trade.get("pnl", 0)) > 0]
     losers = [trade for trade in trades if float(trade.get("pnl", 0)) < 0]
@@ -99,21 +101,44 @@ def _period_summary(result, starting_balance, candle_count):
     net_pnl = float(result.get("net_pnl", 0.0))
 
     eligible_r = []
+    advisor_samples = []
     excluded_reasons = Counter()
+    feature_excluded_reasons = Counter()
     for trade in trades:
         reason = str(trade.get("exit_reason") or "UNKNOWN").upper()
         try:
             r_multiple = float(trade.get("r_multiple"))
         except (TypeError, ValueError, OverflowError):
             r_multiple = float("nan")
-        if reason in ADVISOR_ELIGIBLE_EXIT_REASONS and math.isfinite(r_multiple):
-            eligible_r.append(r_multiple)
-        elif reason in ADVISOR_ELIGIBLE_EXIT_REASONS:
+        if reason not in ADVISOR_ELIGIBLE_EXIT_REASONS:
+            if reason.startswith("LIQUIDATION"):
+                excluded_reasons["LIQUIDATION"] += 1
+            else:
+                excluded_reasons[reason] += 1
+            continue
+        if not math.isfinite(r_multiple):
             excluded_reasons["INVALID_R_MULTIPLE"] += 1
-        elif reason.startswith("LIQUIDATION"):
-            excluded_reasons["LIQUIDATION"] += 1
-        else:
-            excluded_reasons[reason] += 1
+            continue
+
+        eligible_r.append(r_multiple)
+        sample = {
+            "side": str(trade.get("side") or "").upper(),
+            "signal_features": trade.get("signal_features"),
+            "r_multiple": r_multiple,
+            "exit_reason": reason,
+            "signal_timestamp_ms": trade.get("signal_timestamp"),
+            "exit_timestamp_ms": trade.get("exit_timestamp"),
+            "signal_candle_timestamp_ms": trade.get("signal_candle_timestamp"),
+        }
+        try:
+            if sample["signal_timestamp_ms"] is None:
+                raise ValueError("missing signal timestamp")
+            sample["signal_timestamp_ms"] = int(sample["signal_timestamp_ms"])
+            sample["exit_timestamp_ms"] = int(sample["exit_timestamp_ms"])
+            sample["features"] = list(features_from_signal(sample))
+            advisor_samples.append(sample)
+        except (TypeError, ValueError, OverflowError):
+            feature_excluded_reasons["INVALID_OR_MISSING_SIGNAL_FEATURES"] += 1
 
     eligible_count = len(eligible_r)
     positive_r_count = sum(value > 0 for value in eligible_r)
@@ -138,6 +163,12 @@ def _period_summary(result, starting_balance, candle_count):
         "positive_r_share": positive_r_count / eligible_count if eligible_count else None,
         "wilson_ci_positive_r_share_95": _wilson_interval(positive_r_count, eligible_count),
         "excluded_sample_reasons": dict(sorted(excluded_reasons.items())),
+        "model_eligible_samples": len(advisor_samples),
+        "model_feature_excluded_samples": sum(feature_excluded_reasons.values()),
+        "model_feature_excluded_reasons": dict(sorted(feature_excluded_reasons.items())),
+        # Internal rows consumed by the validation runner. They are intentionally
+        # not copied into the published aggregate report.
+        "advisor_samples": advisor_samples,
         "starting_balance": float(starting_balance),
         "ending_balance": float(result.get("ending_balance", starting_balance)),
         "ending_equity": float(result.get("ending_equity", starting_balance)),
@@ -153,6 +184,8 @@ def _period_summary(result, starting_balance, candle_count):
         "gross_loss": gross_loss,
         "volume_ratio_threshold": result.get("assumptions", {}).get("volume_ratio_threshold"),
     }
+
+
 
 
 def _range(candles, start, end):
