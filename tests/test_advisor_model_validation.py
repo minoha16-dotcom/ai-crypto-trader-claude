@@ -88,11 +88,14 @@ def _successful_prediction_rows(actual_zero=False):
     rows = []
     base = _timestamp_ms(3)
     for fold in range(1, 4):
-        fold_start = base + (fold - 1) * 48 * 60 * 60 * 1000
+        # Five 24-hour blocks per fold; each block contains both better and
+        # worse outcomes so the cluster bootstrap tests ranking, not one lucky day.
+        fold_start = base + (fold - 1) * 6 * 24 * 60 * 60 * 1000
         for index in range(40):
-            predicted = float(40 - index)
-            actual = 0.0 if actual_zero else (1.0 if index < 14 else -0.25)
-            signal_ms = fold_start + index * 60 * 60 * 1000
+            within_day = index % 8
+            predicted = float(8 - within_day)
+            actual = 0.0 if actual_zero else (1.0 if within_day < 4 else -0.25)
+            signal_ms = fold_start + (index // 8) * 24 * 60 * 60 * 1000 + within_day * 60 * 60 * 1000
             rows.append({
                 "sample_id": f"f{fold}-{index}",
                 "fold_id": fold,
@@ -113,8 +116,8 @@ def _approval_fold_reports(sample_count=40, train_count=250, excluded_count=0, e
     base = _timestamp_ms(3)
     folds = []
     for fold in range(1, 4):
-        start_ms = base + (fold - 1) * 48 * 60 * 60 * 1000
-        end_ms = start_ms + 39 * 60 * 60 * 1000
+        start_ms = base + (fold - 1) * 6 * 24 * 60 * 60 * 1000
+        end_ms = start_ms + 4 * 24 * 60 * 60 * 1000 + 7 * 60 * 60 * 1000
         folds.append({
             "fold_id": fold,
             "training_samples": train_count,
@@ -657,20 +660,6 @@ def test_research_approval_never_marks_external_trader_samples_runtime_eligible(
         "market_type": "futures",
         "timeframe": "1h",
     }
-    rows = _successful_prediction_rows()
-    folds = []
-    for fold_id in range(1, 4):
-        folds.append({
-            "fold_id": fold_id,
-            "training_samples": 250,
-            "test_signal_count": 40,
-            "test_samples": 40,
-            "excluded_test_samples": 0,
-            "excluded_test_reasons": {},
-            "training_label_end_utc": f"2026-11-0{fold_id}T00:00:00Z",
-            "test_start_utc": f"2026-11-0{fold_id}T01:00:00Z",
-            "test_end_utc": f"2026-11-0{fold_id}T05:00:00Z",
-        })
     walk_forward = {
         "min_training_samples_per_fold": 250,
         "fold_count": 3,
@@ -678,19 +667,14 @@ def test_research_approval_never_marks_external_trader_samples_runtime_eligible(
         "oos_samples": 120,
         "oos_excluded_samples": 0,
         "oos_excluded_reasons": {},
-        "folds": folds,
-        "oos_predictions": rows,
+        "folds": _approval_fold_reports(),
+        "oos_predictions": _successful_prediction_rows(),
     }
     result = evaluate_approval(
         group=group,
         walk_forward=walk_forward,
         manifest=_manifest(),
         dataset_sha256="e" * 64,
-        policy={
-            "min_oos_time_blocks_per_fold": 1,
-            "bootstrap_block_hours": 24,
-            "bootstrap_resamples": 500,
-        },
     )
     assert result["approved"] is True
     assert result["deployment_status"] == "RESEARCH_ONLY"

@@ -29,7 +29,7 @@ FEATURE_KEYS = (
 DEFAULT_POLICY = {
     "min_training_samples_per_fold": 200,
     "min_walk_forward_folds": 3,
-    "max_walk_forward_folds": 5,
+    "max_walk_forward_folds": 3,
     "min_oos_signals": 100,
     "min_oos_samples": 100,
     "min_oos_samples_per_fold": 20,
