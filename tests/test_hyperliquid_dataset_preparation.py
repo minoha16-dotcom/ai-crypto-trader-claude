@@ -214,3 +214,59 @@ def test_position_sample_uses_system_normalized_r_and_keeps_manual_exit_unlabell
     assert manual_problem is None
     assert "r_multiple" not in manual_sample
     assert manual_sample["exit_reason"] == "MANUAL_CLOSE"
+
+
+
+def test_liquidation_is_retained_as_an_oos_signal_without_r_label():
+    position = {
+        "coin": "BTC",
+        "side": "LONG",
+        "entry_price": 100.0,
+        "entry_quantity": 1.0,
+        "entry_timestamp": 120 * 60 * 60 * 1000,
+        "exit_timestamp": 121 * 60 * 60 * 1000,
+        "exit_reason": "LIQUIDATION",
+        "closed_pnl": -100.0,
+        "fees": 0.2,
+        "funding_paid": 0.0,
+        "atr14": 1.5,
+    }
+    sample, reason = position_to_sample(
+        position,
+        wallet_address="0x" + "a" * 40,
+        candles=_hourly_candles(130),
+        timeframe="1h",
+    )
+    assert sample is not None
+    assert reason == "LIQUIDATION"
+    assert sample["exit_reason"] == "LIQUIDATION"
+    assert sample["exclusion_reason"] == "LIQUIDATION"
+    assert "r_multiple" not in sample
+
+
+def test_reconstructable_but_invalid_scaled_position_is_retained_as_excluded_signal():
+    position = {
+        "coin": "BTC",
+        "side": "LONG",
+        "entry_price": 100.0,
+        "entry_quantity": 2.0,
+        "entry_timestamp": 120 * 60 * 60 * 1000,
+        "exit_timestamp": 121 * 60 * 60 * 1000,
+        "exit_reason": "UNKNOWN",
+        "invalid_reason": "SCALED_POSITION",
+        "closed_pnl": 10.0,
+        "fees": 0.2,
+        "funding_paid": 0.0,
+        "atr14": 1.5,
+    }
+    sample, reason = position_to_sample(
+        position,
+        wallet_address="0x" + "a" * 40,
+        candles=_hourly_candles(130),
+        timeframe="1h",
+    )
+    assert sample is not None
+    assert reason == "SCALED_POSITION"
+    assert sample["exit_reason"] == "SCALED_POSITION"
+    assert sample["exclusion_reason"] == "SCALED_POSITION"
+    assert "r_multiple" not in sample

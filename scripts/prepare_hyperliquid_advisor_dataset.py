@@ -470,10 +470,6 @@ def position_to_sample(
     candles: list[list[float]],
     timeframe: str,
 ) -> tuple[dict[str, Any] | None, str | None]:
-    if position.get("invalid_reason"):
-        return None, str(position["invalid_reason"])
-    if position.get("exit_reason") == "LIQUIDATION":
-        return None, "LIQUIDATION"
     try:
         features = features_before_entry(
             candles, int(position["entry_timestamp"]), timeframe
@@ -481,7 +477,9 @@ def position_to_sample(
     except (ValueError, KeyError) as exc:
         return None, str(exc) or "FEATURE_GENERATION_FAILED"
 
-    reason = str(position.get("exit_reason") or "UNKNOWN")
+    raw_reason = str(position.get("exit_reason") or "UNKNOWN")
+    lifecycle_issue = str(position.get("invalid_reason") or "")
+    reason = lifecycle_issue or raw_reason
     sample_id = hashlib.sha256(
         (
             wallet_address.lower()
@@ -501,25 +499,38 @@ def position_to_sample(
         "exit_reason": reason,
         "features": features,
     }
+    if lifecycle_issue:
+        # The entry/close timestamps are reconstructable, but this position's
+        # lifecycle or accounting is not reliable enough for an R label.
+        sample["exclusion_reason"] = lifecycle_issue
+        return sample, lifecycle_issue
+    if reason == "LIQUIDATION":
+        sample["exclusion_reason"] = "LIQUIDATION"
+        return sample, "LIQUIDATION"
     if reason in ELIGIBLE_EXIT_REASONS:
-        risk_distance = max(
-            2.0 * float(position["atr14"]),
-            float(position["entry_price"]) * 0.005,
-        )
-        initial_risk = risk_distance * float(position["entry_quantity"])
-        if not math.isfinite(initial_risk) or initial_risk <= 0:
+        try:
+            risk_distance = max(
+                2.0 * float(position["atr14"]),
+                float(position["entry_price"]) * 0.005,
+            )
+            initial_risk = risk_distance * float(position["entry_quantity"])
+            net_pnl = (
+                float(position["closed_pnl"])
+                - float(position["fees"])
+                + float(position["funding_paid"])
+            )
+            r_multiple = net_pnl / initial_risk
+        except (KeyError, TypeError, ValueError, ZeroDivisionError, OverflowError) as exc:
             sample["exit_reason"] = "UNKNOWN_RISK"
+            sample["exclusion_reason"] = "INVALID_STANDARDIZED_RISK"
             return sample, "INVALID_STANDARDIZED_RISK"
-        net_pnl = (
-            float(position["closed_pnl"])
-            - float(position["fees"])
-            + float(position["funding_paid"])
-        )
-        r_multiple = net_pnl / initial_risk
-        if not math.isfinite(r_multiple):
+        if not math.isfinite(initial_risk) or initial_risk <= 0 or not math.isfinite(r_multiple):
             sample["exit_reason"] = "UNKNOWN_RISK"
-            return sample, "NON_FINITE_R_MULTIPLE"
+            sample["exclusion_reason"] = "INVALID_STANDARDIZED_RISK"
+            return sample, "INVALID_STANDARDIZED_RISK"
         sample["r_multiple"] = r_multiple
+    else:
+        sample["exclusion_reason"] = reason
     return sample, None
 
 
