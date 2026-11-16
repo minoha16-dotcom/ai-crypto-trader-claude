@@ -543,7 +543,7 @@ def features_before_entry(
     timeframe_ms = HOUR_MS if timeframe == "1h" else FOUR_HOURS_MS
     closed = [
         row for row in candles
-        if int(row[0]) + timeframe_ms <= int(entry_timestamp)
+        if int(row[0]) + timeframe_ms < int(entry_timestamp)
     ]
     if len(closed) < MIN_FEATURE_CANDLES:
         raise ValueError("INSUFFICIENT_PRE_ENTRY_CANDLES")
@@ -656,7 +656,7 @@ def _position_atr(position: dict[str, Any], candles: list[list[float]], timefram
     timeframe_ms = HOUR_MS if timeframe == "1h" else FOUR_HOURS_MS
     closed = [
         row for row in candles
-        if int(row[0]) + timeframe_ms <= _position_signal_timestamp(position)
+        if int(row[0]) + timeframe_ms < _position_signal_timestamp(position)
     ]
     if len(closed) < MIN_FEATURE_CANDLES:
         raise ValueError("INSUFFICIENT_PRE_ENTRY_CANDLES")

@@ -181,7 +181,7 @@ def test_four_hour_aggregation_requires_four_consecutive_utc_hour_candles():
 
 def test_features_use_only_fully_closed_candles_before_entry():
     candles = _hourly_candles(130)
-    entry_timestamp = 120 * 60 * 60 * 1000
+    entry_timestamp = 121 * 60 * 60 * 1000
 
     features = features_before_entry(candles, entry_timestamp, "1h")
 
@@ -197,7 +197,7 @@ def test_position_sample_uses_system_normalized_r_and_keeps_manual_exit_unlabell
         "side": "LONG",
         "entry_price": 100.0,
         "entry_quantity": 2.0,
-        "entry_timestamp": 120 * 60 * 60 * 1000,
+        "entry_timestamp": 121 * 60 * 60 * 1000,
         "exit_timestamp": 121 * 60 * 60 * 1000,
         "exit_reason": "TARGET",
         "closed_pnl_reported": 19.9,
@@ -239,7 +239,7 @@ def test_liquidation_is_retained_as_an_oos_signal_without_r_label():
         "side": "LONG",
         "entry_price": 100.0,
         "entry_quantity": 1.0,
-        "entry_timestamp": 120 * 60 * 60 * 1000,
+        "entry_timestamp": 121 * 60 * 60 * 1000,
         "exit_timestamp": 121 * 60 * 60 * 1000,
         "exit_reason": "LIQUIDATION",
         "closed_pnl": -100.0,
@@ -266,7 +266,7 @@ def test_reconstructable_but_invalid_scaled_position_is_retained_as_excluded_sig
         "side": "LONG",
         "entry_price": 100.0,
         "entry_quantity": 2.0,
-        "entry_timestamp": 120 * 60 * 60 * 1000,
+        "entry_timestamp": 121 * 60 * 60 * 1000,
         "exit_timestamp": 121 * 60 * 60 * 1000,
         "exit_reason": "UNKNOWN",
         "invalid_reason": "SCALED_POSITION",
@@ -310,7 +310,7 @@ def test_r_label_does_not_double_subtract_fees_from_exchange_closed_pnl():
         "side": "LONG",
         "entry_price": 100.0,
         "entry_quantity": 2.0,
-        "entry_timestamp": 120 * 60 * 60 * 1000,
+        "entry_timestamp": 121 * 60 * 60 * 1000,
         "exit_timestamp": 121 * 60 * 60 * 1000,
         "exit_reason": "TARGET",
         "closed_pnl_reported": 19.9,
@@ -467,7 +467,7 @@ def test_malformed_funding_timestamp_invalidates_position_label():
 
 def test_short_position_features_are_normalized_to_position_direction():
     candles = _hourly_candles(130)
-    entry = 120 * 60 * 60 * 1000
+    entry = 121 * 60 * 60 * 1000
     raw_features = features_before_entry(candles, entry, "1h")
     position = {
         "coin": "BTC",
@@ -519,7 +519,7 @@ def test_raw_wallet_without_twap_status_is_not_accepted_as_complete():
 def test_partial_entry_features_are_anchored_to_first_fill_timestamp():
     from scripts.prepare_hyperliquid_advisor_dataset import _iso_utc
     candles = _hourly_candles(160)
-    first_fill = 120 * 60 * 60 * 1000
+    first_fill = 121 * 60 * 60 * 1000
     last_fill = first_fill + 30 * 60 * 1000
     expected = features_before_entry(candles, first_fill, "1h")
     position = {
@@ -546,3 +546,20 @@ def test_partial_entry_features_are_anchored_to_first_fill_timestamp():
     assert sample["signal_timestamp"] == _iso_utc(first_fill)
     assert sample["features"]["trend_composite"] == pytest.approx(expected["trend_composite"])
     assert sample["features"]["rsi14"] == pytest.approx(expected["rsi14"])
+
+
+
+def test_candle_closing_at_exact_signal_timestamp_is_excluded_from_features():
+    candles = _hourly_candles(140)
+    signal_timestamp = 121 * 60 * 60 * 1000
+
+    # Candle #120 closes at the exact same millisecond as the first observed
+    # entry fill. Its values must not enter the feature snapshot.
+    expected = features_before_entry(candles[:120], signal_timestamp, "1h")
+    candles[120][1] = 10_000.0
+    candles[120][2] = 20_000.0
+    candles[120][3] = 1.0
+    candles[120][4] = 15_000.0
+    actual = features_before_entry(candles, signal_timestamp, "1h")
+
+    assert actual == expected
