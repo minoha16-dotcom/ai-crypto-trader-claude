@@ -81,6 +81,8 @@ def main():
                     "oos_outcome_samples": walk_forward.get("oos_samples", 0),
                     "input_signals": walk_forward.get("input_signals", 0),
                     "input_eligible_samples": walk_forward.get("input_eligible_samples", 0),
+                    "oos_excluded_samples": walk_forward.get("oos_excluded_samples", 0),
+                    "oos_excluded_reasons": walk_forward.get("oos_excluded_reasons", {}),
                     "input_excluded_samples": walk_forward.get("input_excluded_samples", 0),
                     "input_excluded_reasons": walk_forward.get("input_excluded_reasons", {}),
                     "oos_prediction_count": len(walk_forward.get("oos_predictions", [])),

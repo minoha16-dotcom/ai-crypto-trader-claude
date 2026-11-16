@@ -179,11 +179,11 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
         try:
             fee = _finite(fill.get("fee"), "fee")
         except ValueError:
-            position["invalid_reason"] = "MISSING_OR_INVALID_FEE"
+            position["invalid_reason"] = position.get("invalid_reason") or "MISSING_OR_INVALID_FEE"
             return False
         token = str(fill.get("feeToken") or "").upper()
         if token not in ("USDC", "USD"):
-            position["invalid_reason"] = "UNSUPPORTED_FEE_CURRENCY"
+            position["invalid_reason"] = position.get("invalid_reason") or "UNSUPPORTED_FEE_CURRENCY"
             return False
         position["fees"] += fee
         return True
@@ -248,13 +248,13 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
                 active["entry_quantity"] = new_quantity
                 active["remaining_quantity"] += quantity
             else:
-                active["invalid_reason"] = "MULTIPLE_ENTRY_ORDERS_OR_SCALE_IN"
+                active["invalid_reason"] = active.get("invalid_reason") or "MULTIPLE_ENTRY_ORDERS_OR_SCALE_IN"
             add_fee(active, fill)
             continue
 
         if action == "add":
             if active:
-                active["invalid_reason"] = "SCALED_POSITION"
+                active["invalid_reason"] = active.get("invalid_reason") or "SCALED_POSITION"
             else:
                 reasons["ORPHAN_SCALE_IN"] += 1
             continue
@@ -264,15 +264,15 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
                 reasons["ORPHAN_CLOSE_OR_LIQUIDATION"] += 1
                 continue
             if action == "close" and side != active["side"]:
-                active["invalid_reason"] = "CLOSE_SIDE_MISMATCH"
+                active["invalid_reason"] = active.get("invalid_reason") or "CLOSE_SIDE_MISMATCH"
             if action == "liquidation":
                 active["liquidated"] = True
             if quantity > active["remaining_quantity"] + max(1e-9, active["entry_quantity"] * 1e-7):
-                active["invalid_reason"] = "CLOSE_EXCEEDS_OPEN_QUANTITY"
+                active["invalid_reason"] = active.get("invalid_reason") or "CLOSE_EXCEEDS_OPEN_QUANTITY"
             try:
                 closed_pnl = _finite(fill.get("closedPnl"), "closedPnl")
             except ValueError:
-                active["invalid_reason"] = "MISSING_OR_INVALID_CLOSED_PNL"
+                active["invalid_reason"] = active.get("invalid_reason") or "MISSING_OR_INVALID_CLOSED_PNL"
                 closed_pnl = 0.0
             active["closed_pnl"] += closed_pnl
             active["close_quantity"] += quantity
@@ -294,7 +294,7 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
                 )
                 active["funding_paid"] = funding_paid
                 if not funding_ok:
-                    active["invalid_reason"] = "INVALID_FUNDING_RECORD"
+                    active["invalid_reason"] = active.get("invalid_reason") or "INVALID_FUNDING_RECORD"
                 if active.get("liquidated"):
                     exit_reason = "LIQUIDATION"
                 else:
@@ -671,6 +671,7 @@ def prepare_dataset(
             "source_metadata_url": source_metadata_url,
             "source_license": source_license,
             "source_snapshot_utc": raw_manifest.get("source_snapshot_utc"),
+            "leaderboard_retrieved_at_utc": raw_manifest.get("leaderboard_retrieved_at_utc"),
             "source_snapshot_sha256": raw_manifest.get("source_snapshot_sha256"),
             "source_metadata_sha256": raw_manifest.get("source_metadata_sha256"),
             "cohort_selection_as_of_utc": raw_manifest.get("cohort_selection_as_of_utc"),

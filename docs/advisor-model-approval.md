@@ -53,7 +53,35 @@ retrieved within these published limits; it does **not** mean every possible
 execution type or the wallet's entire lifetime is represented.
 
 The raw collector always marks wallets \`training_eligible=false\`. Raw fills
-are not a ready-made supervised dataset.
+are not a ready-made supervised dataset. Its cohort-selection cutoff is the
+later of the UnderHyper metadata snapshot and the actual raw-leaderboard
+download/selection time. The requested observation start must be strictly
+later than that cutoff.
+
+After the observation window closes, run the conservative preparer:
+
+\`\`\`powershell
+python scripts/prepare_hyperliquid_advisor_dataset.py --raw-dataset artifacts/hyperliquid-raw-leader-data.json --out artifacts/advisor-training-dataset.json --code-sha <git-commit-sha> --timeframes 1h,4h
+\`\`\`
+
+It fetches read-only Hyperliquid 1h OHLCV, aggregates 4h only from four
+consecutive UTC hourly candles, and computes features from candles fully
+closed before each position entry. It reconstructs only fully closed,
+single-entry, non-scaled linear USDC perp positions. It accounts for realized
+closed PnL, USDC fees and same-coin funding. It labels STOP/TARGET only when
+the final close fill's order ID matches a historical reduce-only trigger
+order with a usable trigger price. Manual closes, multiple distinct closing
+orders, unknown triggers, liquidations, scaled positions, open positions,
+missing fees/funding, and missing pre-entry candle history are excluded.
+
+The standardized risk unit is
+\`max(2 × ATR14, 0.5% of entry) × original coin quantity\`. This is system-
+normalized R, not the trader's unknown original stop-risk. The preparer uses
+actual fill prices and adds no synthetic slippage. It preserves reconstructable
+manual closes as excluded signal rows and reports other reconstruction and
+feature exclusions separately. OOS position-entry signals are kept distinct
+from eligible R outcomes in model validation.
+
 
 ## Position reconstruction and label requirements
 

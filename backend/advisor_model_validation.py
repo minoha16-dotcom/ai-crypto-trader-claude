@@ -353,6 +353,11 @@ def walk_forward_predict(
     excluded_reasons: dict[str, int] = {}
     for row in all_excluded:
         excluded_reasons[row["exit_reason"]] = excluded_reasons.get(row["exit_reason"], 0) + 1
+    oos_excluded_reasons: dict[str, int] = {}
+    for fold in fold_reports:
+        for reason, count in (fold.get("excluded_test_reasons") or {}).items():
+            oos_excluded_reasons[reason] = oos_excluded_reasons.get(reason, 0) + int(count)
+    oos_excluded_samples = sum(oos_excluded_reasons.values())
 
     final_model = fit_ridge(eligible_rows, alpha=ridge_alpha)
     return {
@@ -361,6 +366,8 @@ def walk_forward_predict(
         "total_training_rows_used_across_folds": sum(training_counts),
         "oos_signals": sum(row["test_signal_count"] for row in fold_reports),
         "oos_samples": len(predictions),
+        "oos_excluded_samples": oos_excluded_samples,
+        "oos_excluded_reasons": dict(sorted(oos_excluded_reasons.items())),
         "input_signals": len(ordered),
         "input_eligible_samples": len(eligible_rows),
         "input_excluded_samples": len(all_excluded),
@@ -691,8 +698,10 @@ def evaluate_approval(
             reasons.append({"code": "INVALID_WALK_FORWARD_CHRONOLOGY", "detail": str(exc)})
             break
 
-    excluded_reasons = dict(walk_forward.get("input_excluded_reasons") or {})
-    excluded_count = int(walk_forward.get("input_excluded_samples", 0) or 0)
+    excluded_reasons = dict(walk_forward.get("oos_excluded_reasons") or {})
+    excluded_count = int(walk_forward.get("oos_excluded_samples", 0) or 0)
+    input_excluded_reasons = dict(walk_forward.get("input_excluded_reasons") or {})
+    input_excluded_count = int(walk_forward.get("input_excluded_samples", 0) or 0)
     metrics = {
         "oos_signals": oos_signals,
         "oos_samples": oos_count,
@@ -702,6 +711,8 @@ def evaluate_approval(
         "eligible_samples": oos_count,
         "excluded_samples": excluded_count,
         "excluded_sample_reasons": excluded_reasons,
+        "input_excluded_samples": input_excluded_count,
+        "input_excluded_sample_reasons": input_excluded_reasons,
         "mean_r": None,
         "positive_r_share": None,
         "wilson_ci_positive_r_share_95": None,
@@ -825,8 +836,9 @@ def evaluate_approval(
             }.items()
             if key in (
                 "source_provider", "source_url", "source_license",
-                "source_snapshot_utc", "source_snapshot_sha256",
-                "source_metadata_sha256", "cohort_selection_as_of_utc",
+                "source_snapshot_utc", "leaderboard_retrieved_at_utc",
+                "source_snapshot_sha256", "source_metadata_sha256",
+                "raw_dataset_sha256", "cohort_selection_as_of_utc",
                 "data_start_utc", "data_end_utc", "dataset_sha256",
                 "model_version", "feature_schema_version", "code_sha",
                 "backtest_config",
