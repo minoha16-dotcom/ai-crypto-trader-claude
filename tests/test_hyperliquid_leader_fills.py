@@ -12,15 +12,16 @@ def test_wallet_extractor_only_accepts_full_public_hex_addresses():
     payload = {
         "as_of": "2026-11-16T00:00:00Z",
         "leaderboardRows": [
-            {"ethAddress": "0x" + "a" * 40, "displayName": "leader"},
-            {"address": "0x" + "b" * 40},
+            {"ethAddress": "0x" + "b" * 40, "displayName": "leader"},
+            {"address": "0x" + "a" * 40},
+            {"contract": "0x" + "c" * 40},
             {"address": "0x1234"},
         ],
     }
 
     assert extract_wallet_addresses(payload) == [
-        "0x" + "a" * 40,
         "0x" + "b" * 40,
+        "0x" + "a" * 40,
     ]
 
 

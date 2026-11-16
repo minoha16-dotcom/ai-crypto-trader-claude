@@ -226,7 +226,7 @@ def test_insufficient_per_group_training_count_never_approves():
         "min_training_samples_per_fold": 199,
         "fold_count": 3,
         "oos_signals": 120,
-        "folds": [{"test_samples": 40}] * 3,
+        "folds": [{"test_samples": 40, "training_samples": 199}] * 3,
         "oos_predictions": _successful_prediction_rows(),
     }
     result = evaluate_approval(

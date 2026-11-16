@@ -78,6 +78,8 @@ def extract_wallet_addresses(payload):
     def walk(value):
         if isinstance(value, dict):
             for key, item in value.items():
+                if isinstance(key, str) and ADDRESS_RE.fullmatch(key):
+                    add(key)
                 normalized_key = str(key).replace("_", "").replace("-", "").lower()
                 if normalized_key in address_keys and isinstance(item, str) and ADDRESS_RE.fullmatch(item):
                     add(item)
@@ -85,8 +87,6 @@ def extract_wallet_addresses(payload):
         elif isinstance(value, list):
             for item in value:
                 walk(item)
-        elif isinstance(value, str) and ADDRESS_RE.fullmatch(value):
-            add(value)
 
     walk(payload)
     return found
