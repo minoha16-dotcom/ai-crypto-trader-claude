@@ -97,7 +97,7 @@ def _feature_vector(features: dict[str, Any]) -> list[float]:
     volume_ratio = max(0.0, _finite_number(features["volume_ratio"], "volume_ratio"))
     atr_pct = max(0.0, _finite_number(features["atr_pct"], "atr_pct"))
 
-    # In schema r5-v2, trend_composite and RSI14 are position-relative:
+    # In schema advisor-r5-v3, trend_composite and RSI14 are position-relative:
     # positive values consistently indicate conditions supportive of LONG or
     # SHORT positions. EMA alignment and price-vs-EMA20 are merged upstream
     # into one trend_composite feature.
@@ -243,6 +243,7 @@ def walk_forward_predict(
     min_test_samples_per_fold: int = 20,
     min_test_signals_per_fold: int = 20,
     ridge_alpha: float = 1.0,
+    bootstrap_block_hours: int = 24,
 ) -> dict[str, Any]:
     """Expanding chronological validation with timestamp groups kept intact.
 
@@ -259,6 +260,9 @@ def walk_forward_predict(
         raise ValueError("invalid walk-forward policy")
     if min_test_samples_per_fold < 1 or min_test_signals_per_fold < 1:
         raise ValueError("minimum test signals and samples must be positive")
+    bootstrap_block_hours = int(bootstrap_block_hours)
+    if bootstrap_block_hours < 1:
+        raise ValueError("bootstrap_block_hours must be positive")
 
     ordered = _validate_samples(samples)
     eligible_rows = [row for row in ordered if row["eligible"]]
@@ -433,7 +437,7 @@ def walk_forward_predict(
             "test_signal_count": len(test_rows),
             "test_samples": len(eligible_test_rows),
             "oos_time_blocks": len({
-                row["signal_timestamp_ms"] // (6 * 60 * 60 * 1000)
+                row["signal_timestamp_ms"] // (bootstrap_block_hours * 60 * 60 * 1000)
                 for row in eligible_test_rows
             }),
             "excluded_test_samples": len(excluded_test_rows),
@@ -1227,6 +1231,7 @@ def train_validate_group(
         min_test_samples_per_fold=int(policy["min_oos_samples_per_fold"]),
         min_test_signals_per_fold=int(policy["min_oos_signals_per_fold"]),
         ridge_alpha=float(policy["ridge_alpha"]),
+        bootstrap_block_hours=int(policy["bootstrap_block_hours"]),
     )
     approval = evaluate_approval(
         group=group,

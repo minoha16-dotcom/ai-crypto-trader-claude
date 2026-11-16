@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from backend.advisor_model_validation import train_validate_group
+from backend.advisor_model_validation import DEFAULT_POLICY, train_validate_group
 
 
 def main():
@@ -117,12 +117,22 @@ def main():
             )
             disabled_code = "TRAINING_OR_VALIDATION_FAILED"
             detail = f"{type(exc).__name__}: {exc}"
-            if "insufficient eligible training labels" in str(exc).lower():
+            error_text = str(exc).lower()
+            if "insufficient eligible training labels" in error_text:
                 disabled_code = "INSUFFICIENT_TRAINING_SAMPLES"
-            elif "insufficient signals for walk-forward" in str(exc).lower():
-                disabled_code = "INSUFFICIENT_OOS_SIGNALS"
-            elif "fully matured eligible training labels" in str(exc).lower():
+            elif "fully matured eligible training labels" in error_text:
                 disabled_code = "INSUFFICIENT_MATURED_TRAINING_LABELS"
+            elif (
+                "insufficient chronological oos windows" in error_text
+                or "insufficient oos signal groups" in error_text
+                or "valid walk-forward folds" in error_text
+            ):
+                disabled_code = "INSUFFICIENT_WALK_FORWARD_FOLDS"
+            elif "insufficient" in error_text and "oos" in error_text:
+                disabled_code = "INSUFFICIENT_OOS_SIGNALS"
+            failure_provenance = dict(manifest)
+            failure_provenance.update(group.get("provenance") or {})
+            failure_provenance["dataset_sha256"] = dataset_sha256
             reports.append({
                 "group": group_key,
                 "positions_seen_before_feature_preparation": int(group.get("positions_seen", len(source_samples))),
@@ -132,6 +142,11 @@ def main():
                 "approval": {
                     "model_status": "DISABLED",
                     "approved": False,
+                    "approval_scope": "RESEARCH_ONLY_EXTERNAL_TRADER_POSITION_OUTCOMES",
+                    "deployment_status": "RESEARCH_ONLY",
+                    "runtime_eligible": False,
+                    "policy": DEFAULT_POLICY,
+                    "provenance": failure_provenance,
                     "rejection_reasons": [{
                         "code": disabled_code,
                         "detail": detail,
