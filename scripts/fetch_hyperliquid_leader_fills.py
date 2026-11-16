@@ -1,38 +1,40 @@
 #!/usr/bin/env python3
-"""Snapshot Hyperliquid public wallet fills/funding for a pre-registered cohort.
+"""Snapshot Hyperliquid's public leaderboard and selected wallets' public fills.
 
-The wallet discovery snapshot is sourced from UnderHyper's CC BY 4.0
-leaderboard dataset. Public fills and funding are read-only Hyperliquid Info
-API requests. This creates a raw provenance snapshot; it does not yet infer
-stops or calculate system-normalized R labels.
+The cohort is ranked locally from Hyperliquid's public leaderboard file by its
+month PnL metric. UnderHyper's dated CC BY 4.0 metadata is retained as a
+third-party citation, but that license is not assumed to cover the raw
+Hyperliquid source data. This output is raw evidence, not model-ready training
+data.
 """
 import argparse
 import hashlib
 import json
+import math
 from datetime import datetime, timezone
 from pathlib import Path
 import re
-import sys
 import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-LEADERBOARD_URL = "https://underhyper.com/data/leaderboard.json"
+LEADERBOARD_URL = "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard"
+LEADERBOARD_METADATA_URL = "https://underhyper.com/data/leaderboard.json"
 INFO_URL = "https://api.hyperliquid.xyz/info"
 ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 MAX_PAGE_SIZE_BY_TYPE = {"userFillsByTime": 2000, "userFunding": 500}
 MAX_RETAINED_HISTORY = 10000
-USER_AGENT = "ai-crypto-trader-research/1.0 (read-only public data)"
+USER_AGENT = "ai-crypto-trader-research/1.1 (read-only public data)"
 
 
 def _timestamp_ms(value, field):
     if isinstance(value, bool):
         raise ValueError(f"{field} must be an ISO-8601 UTC timestamp or Unix milliseconds")
     if isinstance(value, (int, float)):
-        number = int(value)
-        if number < 100_000_000_000:
-            raise ValueError(f"{field} must be Unix milliseconds")
-        return number
+        number = float(value)
+        if not number.is_integer() or number < 100_000_000_000:
+            raise ValueError(f"{field} must be integer Unix milliseconds")
+        return int(number)
     raw = str(value or "").strip().replace("Z", "+00:00")
     parsed = datetime.fromisoformat(raw)
     if parsed.tzinfo is None or parsed.utcoffset() is None:
@@ -44,119 +46,100 @@ def _iso_utc(timestamp_ms):
     return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat()
 
 
-def _load_leaderboard(url, timeout, cohort="top_pnl"):
-    request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+def _get_json(url, timeout):
+    request = Request(
+        url,
+        headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+    )
     with urlopen(request, timeout=timeout) as response:
         raw = response.read()
     payload = json.loads(raw.decode("utf-8"))
     if not isinstance(payload, dict):
-        raise ValueError("leaderboard JSON must be an object")
-    as_of = payload.get("as_of")
-    if not as_of:
-        raise ValueError("leaderboard JSON is missing its as_of snapshot timestamp")
-    addresses = extract_wallet_addresses(payload, cohort=cohort)
-    if not addresses:
-        raise ValueError("no full 0x wallet addresses found in the leaderboard snapshot")
-    return raw, payload, addresses, as_of
+        raise ValueError(f"{url} must return a JSON object")
+    return raw, payload
+
+
+def _window_performance(row):
+    """Normalize Hyperliquid's windowPerformances list-of-pairs to a mapping."""
+    raw = row.get("windowPerformances")
+    if isinstance(raw, dict):
+        return raw
+    if not isinstance(raw, list):
+        raise ValueError("leaderboard row is missing windowPerformances")
+    normalized = {}
+    for item in raw:
+        if (
+            isinstance(item, (list, tuple))
+            and len(item) == 2
+            and isinstance(item[0], str)
+            and isinstance(item[1], dict)
+        ):
+            normalized[item[0]] = item[1]
+    return normalized
 
 
 def extract_wallet_addresses(payload, cohort="top_pnl"):
-    """Extract a ranked cohort only from its explicitly named leaderboard array.
+    """Rank Hyperliquid leaderboardRows by positive month PnL or month volume.
 
-    Never fall back to arbitrary addresses elsewhere in the JSON: that could
-    mix volume-ranked market makers with the PnL-ranked cohort.
+    Accounts with zero month volume are excluded, so account-value changes are
+    not mistaken for evidence of executed trading activity.
     """
     if cohort not in ("top_pnl", "top_volume"):
         raise ValueError("cohort must be top_pnl or top_volume")
-
-    address_keys = {
-        "address", "ethaddress", "wallet", "walletaddress",
-        "leaderaddress", "useraddress",
-    }
-    cohort_tokens = (
-        ("pnl", "profit", "profitable")
-        if cohort == "top_pnl"
-        else ("volume", "active", "traded")
-    )
-    excluded_tokens = (
-        ("volume", "active")
-        if cohort == "top_pnl"
-        else ("pnl", "profit", "profitable")
-    )
-
-    candidates = []
-
-    def collect_rows(value):
-        rows = value if isinstance(value, list) else [value]
-        output = []
-        for row in rows:
-            if isinstance(row, str) and ADDRESS_RE.fullmatch(row):
-                output.append((row.lower(), None))
-                continue
-            if not isinstance(row, dict):
-                continue
-            address = None
-            for key, item in row.items():
-                normalized = str(key).replace("_", "").replace("-", "").lower()
-                if normalized in address_keys and isinstance(item, str) and ADDRESS_RE.fullmatch(item):
-                    address = item.lower()
-                    break
-            if not address:
-                for key in row:
-                    if isinstance(key, str) and ADDRESS_RE.fullmatch(key):
-                        address = key.lower()
-                        break
-            if address:
-                metric = None
-                for key, item in row.items():
-                    normalized = str(key).replace("_", "").replace("-", "").lower()
-                    if any(token in normalized for token in cohort_tokens):
-                        try:
-                            metric = float(str(item).replace(",", "").replace("$", ""))
-                        except (TypeError, ValueError, OverflowError):
-                            continue
-                        break
-                output.append((address, metric))
-        return output
-
-    def walk(value, path=()):
-        if isinstance(value, dict):
-            for key, item in value.items():
-                walk(item, path + (str(key).lower(),))
-        elif isinstance(value, list):
-            if len(path) and any(
-                token in "/".join(path) for token in cohort_tokens
-            ) and not any(
-                token in "/".join(path) for token in excluded_tokens
-            ):
-                rows = collect_rows(value)
-                if rows:
-                    candidates.append(rows)
-            # Also descend: some datasets nest the two ranked cohorts inside a parent.
-            for index, item in enumerate(value):
-                if isinstance(item, (dict, list)):
-                    walk(item, path + (str(index),))
-
-    walk(payload)
-    if not candidates:
+    rows = payload.get("leaderboardRows")
+    if not isinstance(rows, list) or len(rows) < 100:
         raise ValueError(
-            f"leaderboard JSON does not expose an identifiable {cohort} ranked cohort; "
-            "refusing to select arbitrary wallet addresses"
+            "Hyperliquid leaderboard schema is missing or unexpectedly small; "
+            "refusing to select an unverified cohort"
         )
 
-    # Prefer the most specific matching named array, preserving source rank order.
-    rows = max(candidates, key=len)
-    found = []
+    ranked = []
     seen = set()
-    for address, metric in rows:
-        if cohort == "top_pnl" and metric is not None and metric <= 0:
+    for source_index, row in enumerate(rows):
+        if not isinstance(row, dict):
             continue
-        if address not in seen:
-            seen.add(address)
-            found.append(address)
-    if not found:
-        raise ValueError(f"the {cohort} leaderboard cohort contains no usable wallet addresses")
-    return found
+        address = row.get("ethAddress")
+        if not isinstance(address, str) or not ADDRESS_RE.fullmatch(address):
+            continue
+        address = address.lower()
+        if address in seen:
+            continue
+        seen.add(address)
+        try:
+            month = _window_performance(row).get("month") or {}
+            pnl = float(month.get("pnl"))
+            volume = float(month.get("vlm"))
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if not math.isfinite(pnl) or not math.isfinite(volume) or volume <= 0:
+            continue
+        metric = pnl if cohort == "top_pnl" else volume
+        if cohort == "top_pnl" and pnl <= 0:
+            continue
+        ranked.append((metric, source_index, address))
+
+    ranked.sort(key=lambda item: (-item[0], item[1], item[2]))
+    if not ranked:
+        raise ValueError(f"no eligible wallet addresses found for {cohort}")
+    return [address for _, _, address in ranked]
+
+
+def _load_leaderboard(
+    leaderboard_url,
+    metadata_url,
+    timeout,
+    cohort="top_pnl",
+):
+    """Fetch official rows and a separately timestamped/attributed metadata record."""
+    raw_metadata, metadata = _get_json(metadata_url, timeout)
+    as_of = metadata.get("as_of")
+    if not as_of:
+        raise ValueError("UnderHyper metadata is missing its as_of snapshot timestamp")
+    _timestamp_ms(as_of, "leaderboard metadata as_of")
+
+    raw_leaderboard, leaderboard = _get_json(leaderboard_url, timeout)
+    addresses = extract_wallet_addresses(leaderboard, cohort=cohort)
+    return raw_leaderboard, raw_metadata, metadata, addresses, as_of
 
 
 def _post_info(body, timeout):
@@ -190,7 +173,7 @@ def _fetch_time_range(
     pause_seconds,
     max_depth=24,
 ):
-    """Split saturated ranges until each response is below the 2,000-row cap."""
+    """Split saturated ranges below each endpoint's page cap."""
     request_count = 0
     truncated = False
     results = []
@@ -199,13 +182,12 @@ def _fetch_time_range(
         nonlocal request_count, truncated
         if pause_seconds > 0 and request_count:
             time.sleep(pause_seconds)
-        body = {
+        response = _post_info({
             "type": request_type,
             "user": address,
             "startTime": int(start),
             "endTime": int(end),
-        }
-        response = _post_info(body, timeout)
+        }, timeout)
         request_count += 1
         if not isinstance(response, list):
             raise RuntimeError(f"{request_type} returned a non-list response")
@@ -228,16 +210,13 @@ def _fetch_time_range(
     request_range(int(start_ms), int(end_ms), 0)
     unique = {}
     for row in results:
-        if not isinstance(row, dict):
+        if not isinstance(row, dict) or row.get("time") is None:
             continue
-        timestamp = row.get("time")
-        if timestamp is None:
-            continue
-        # Hyperliquid fills expose tid. Funding rows expose transaction hash.
+        nested = row.get("delta") or {}
         key = (
             str(row.get("tid") or row.get("hash") or ""),
-            str(row.get("coin") or (row.get("delta") or {}).get("coin") or ""),
-            int(timestamp),
+            str(row.get("coin") or nested.get("coin") or ""),
+            int(row["time"]),
             str(row.get("oid") or ""),
         )
         unique[key] = row
@@ -260,28 +239,34 @@ def main():
     parser.add_argument("--end", required=True, help="Observation end (UTC ISO-8601 or Unix ms)")
     parser.add_argument("--out", default="artifacts/hyperliquid-raw-leader-data.json")
     parser.add_argument("--leaderboard-url", default=LEADERBOARD_URL)
+    parser.add_argument("--metadata-url", default=LEADERBOARD_METADATA_URL)
     parser.add_argument(
         "--cohort",
         choices=("top_pnl", "top_volume"),
         default="top_pnl",
-        help="Use the PnL-ranked cohort by default; volume-ranked accounts are mostly market makers.",
+        help="Rank the published month PnL window by default; volume is an explicit separate cohort.",
     )
     parser.add_argument("--wallet-limit", type=int, default=100)
-    parser.add_argument("--pause-seconds", type=float, default=6.0)
-    parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument("--pause-seconds", type=float, default=1.0)
+    parser.add_argument("--timeout", type=float, default=60.0)
     args = parser.parse_args()
 
     start_ms = _timestamp_ms(args.start, "start")
     end_ms = _timestamp_ms(args.end, "end")
     if end_ms <= start_ms:
         raise SystemExit("--end must be later than --start")
-    if args.wallet_limit < 1 or args.wallet_limit > 1000:
-        raise SystemExit("--wallet-limit must be between 1 and 1000")
+    if args.wallet_limit < 1 or args.wallet_limit > 100:
+        raise SystemExit("--wallet-limit must be between 1 and 100")
     if args.pause_seconds < 0:
         raise SystemExit("--pause-seconds cannot be negative")
 
-    raw_leaderboard, leaderboard, addresses, snapshot_as_of = _load_leaderboard(
-        args.leaderboard_url, args.timeout, cohort=args.cohort
+    (
+        raw_leaderboard, raw_metadata, metadata, addresses, snapshot_as_of
+    ) = _load_leaderboard(
+        args.leaderboard_url,
+        args.metadata_url,
+        args.timeout,
+        cohort=args.cohort,
     )
     snapshot_ms = _timestamp_ms(snapshot_as_of, "leaderboard.as_of")
     if start_ms <= snapshot_ms:
@@ -296,56 +281,60 @@ def main():
     for index, address in enumerate(selected, start=1):
         try:
             fills, fill_status = _fetch_time_range(
-                address,
-                "userFillsByTime",
-                start_ms,
-                end_ms,
-                timeout=args.timeout,
-                pause_seconds=args.pause_seconds,
+                address, "userFillsByTime", start_ms, end_ms,
+                timeout=args.timeout, pause_seconds=args.pause_seconds,
             )
             funding, funding_status = _fetch_time_range(
-                address,
-                "userFunding",
-                start_ms,
-                end_ms,
-                timeout=args.timeout,
-                pause_seconds=args.pause_seconds,
+                address, "userFunding", start_ms, end_ms,
+                timeout=args.timeout, pause_seconds=args.pause_seconds,
             )
             complete = fill_status["complete"] and funding_status["complete"]
             wallets.append({
                 "address": address,
+                "rank": index,
                 "fills": fills,
                 "funding": funding,
                 "complete": complete,
+                "training_eligible": False,
                 "fill_history": fill_status,
                 "funding_history": funding_status,
             })
             print(
                 f"{index}/{len(selected)} {address}: "
                 f"{len(fills)} fills, {len(funding)} funding rows, "
-                f"{'COMPLETE' if complete else 'INCOMPLETE'}"
+                f"{'COMPLETE_RAW_SNAPSHOT' if complete else 'INCOMPLETE'}"
             )
         except Exception as exc:
             wallets.append({
                 "address": address,
+                "rank": index,
                 "fills": [],
                 "funding": [],
                 "complete": False,
+                "training_eligible": False,
                 "error": f"{type(exc).__name__}: {exc}",
             })
             print(f"{index}/{len(selected)} {address}: INCOMPLETE ({exc})")
 
     source_hash = hashlib.sha256(raw_leaderboard).hexdigest()
+    metadata_hash = hashlib.sha256(raw_metadata).hexdigest()
     complete_wallets = sum(1 for row in wallets if row["complete"])
+    license_note = (
+        "Hyperliquid public leaderboard and Info API data; the raw endpoint does not "
+        "state a separate CC BY grant. UnderHyper metadata page is CC BY 4.0 with "
+        "attribution, but that license is not assumed to cover Hyperliquid raw data."
+    )
     report = {
-        "dataset_version": 1,
+        "dataset_version": 2,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "manifest": {
-            "source_provider": "UnderHyper leaderboard + Hyperliquid public Info API",
+            "source_provider": "Hyperliquid public leaderboard + Info API; UnderHyper snapshot metadata",
             "source_url": args.leaderboard_url,
-            "source_license": "CC BY 4.0; attribute UnderHyper (underhyper.com)",
+            "source_metadata_url": args.metadata_url,
+            "source_license": license_note,
             "source_snapshot_utc": _iso_utc(snapshot_ms),
             "source_snapshot_sha256": source_hash,
+            "source_metadata_sha256": metadata_hash,
             "cohort_selection_as_of_utc": _iso_utc(snapshot_ms),
             "data_start_utc": _iso_utc(start_ms),
             "data_end_utc": _iso_utc(end_ms),
@@ -356,18 +345,23 @@ def main():
             "max_funding_rows_per_response": MAX_PAGE_SIZE_BY_TYPE["userFunding"],
             "max_recent_fills_per_wallet": MAX_RETAINED_HISTORY,
             "cohort_selection_method": args.cohort,
+            "cohort_metric_window": "month",
+            "cohort_accounts_available": len(addresses),
             "wallets_selected": len(selected),
-            "wallets_complete": complete_wallets,
-            "wallets_incomplete": len(selected) - complete_wallets,
+            "wallets_complete_raw_snapshots": complete_wallets,
+            "wallets_incomplete_raw_snapshots": len(selected) - complete_wallets,
             "read_only_public_data": True,
-            "attribution": "UnderHyper (underhyper.com), CC BY 4.0",
+            "attribution": "UnderHyper leaderboard metadata, CC BY 4.0; Hyperliquid raw data source separately identified",
+            "not_model_ready": True,
         },
         "wallets": wallets,
         "limitations": [
             "This is a raw fills/funding snapshot, not a model-ready dataset.",
-            "Position reconstruction, candle features and explicit system-normalized R labels are required before training.",
-            "Incomplete or history-capped wallets must not contribute eligible training examples.",
-            "Hyperliquid's public fills do not reliably reveal each trader's original stop-risk distance.",
+            "Position reconstruction, candle features and system-normalized R labels are required before training.",
+            "Only fully retrieved raw wallet histories may proceed to a later preparation step.",
+            "Hyperliquid userFillsByTime exposes only the 10,000 most recent fills and at most 2,000 fills per response.",
+            "The raw leaderboard endpoint has no separate explicit reuse license statement; review terms before redistribution.",
+            "The fills endpoint does not state each trader's original stop-risk distance. Model labels must use a declared system-normalized risk unit.",
         ],
     }
     output_path = Path(args.out)
@@ -378,7 +372,7 @@ def main():
     output_path.write_bytes(output_bytes)
     print(f"OUTPUT {output_path}")
     print(f"DATASET_SHA256 {hashlib.sha256(output_bytes).hexdigest()}")
-    print(f"WALLETS_COMPLETE {complete_wallets}/{len(selected)}")
+    print(f"WALLETS_COMPLETE_RAW {complete_wallets}/{len(selected)}")
     return 0 if complete_wallets else 2
 
 
