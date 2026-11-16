@@ -338,6 +338,8 @@ def test_insufficient_per_group_training_count_never_approves():
         "oos_samples": 120,
         "input_excluded_samples": 0,
         "input_excluded_reasons": {},
+        "oos_excluded_samples": 0,
+        "oos_excluded_reasons": {},
         "folds": _approval_fold_reports(train_count=199),
         "oos_predictions": _successful_prediction_rows(),
     }

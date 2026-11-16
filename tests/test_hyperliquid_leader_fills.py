@@ -7,6 +7,8 @@ from scripts.fetch_hyperliquid_leader_fills import (
     _fetch_time_range,
     _load_leaderboard,
     extract_wallet_addresses,
+    _fetch_historical_orders,
+    _cohort_selection_cutoff_ms,
 )
 
 
@@ -189,3 +191,45 @@ def test_range_fetch_marks_the_exchange_history_cap(monkeypatch):
 def test_endpoint_page_caps_are_explicit_and_distinct():
     assert MAX_PAGE_SIZE_BY_TYPE["userFillsByTime"] == 2000
     assert MAX_PAGE_SIZE_BY_TYPE["userFunding"] == 500
+
+
+
+def test_cohort_selection_cutoff_uses_actual_download_time_when_later_than_metadata():
+    snapshot = 1_800_000_000_000
+    retrieved = snapshot + 60_000
+    assert _cohort_selection_cutoff_ms(snapshot, retrieved) == retrieved
+    assert _cohort_selection_cutoff_ms(retrieved, snapshot) == retrieved
+
+
+def test_historical_orders_endpoint_marks_full_2000_record_page_incomplete(monkeypatch):
+    monkeypatch.setattr(
+        "scripts.fetch_hyperliquid_leader_fills._post_info",
+        lambda body, timeout: [
+            {"order": {"oid": index}, "status": "filled"}
+            for index in range(2000)
+        ],
+    )
+
+    rows, status = _fetch_historical_orders(
+        "0x" + "a" * 40,
+        timeout=1,
+    )
+
+    assert len(rows) == 2000
+    assert status["history_limit_reached"] is True
+    assert status["complete_within_documented_limit"] is False
+
+
+def test_historical_orders_endpoint_accepts_a_non_saturated_order_history(monkeypatch):
+    monkeypatch.setattr(
+        "scripts.fetch_hyperliquid_leader_fills._post_info",
+        lambda body, timeout: [{"order": {"oid": 1}, "status": "filled"}],
+    )
+
+    rows, status = _fetch_historical_orders(
+        "0x" + "a" * 40,
+        timeout=1,
+    )
+
+    assert len(rows) == 1
+    assert status["complete_within_documented_limit"] is True

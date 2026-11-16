@@ -47,6 +47,11 @@ def _iso_utc(timestamp_ms):
     return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat()
 
 
+def _cohort_selection_cutoff_ms(source_snapshot_ms, leaderboard_retrieved_ms):
+    """Use actual retrieval/selection time to prevent post-snapshot look-ahead."""
+    return max(int(source_snapshot_ms), int(leaderboard_retrieved_ms))
+
+
 def _get_json(url, timeout):
     request = Request(
         url,
@@ -301,7 +306,7 @@ def main():
     )
     snapshot_ms = _timestamp_ms(snapshot_as_of, "leaderboard.as_of")
     retrieved_at_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    cohort_selection_ms = max(snapshot_ms, retrieved_at_ms)
+    cohort_selection_ms = _cohort_selection_cutoff_ms(snapshot_ms, retrieved_at_ms)
     if start_ms <= cohort_selection_ms:
         raise SystemExit(
             "The observation start must be strictly later than the actual cohort "
