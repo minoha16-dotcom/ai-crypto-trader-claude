@@ -640,6 +640,7 @@ def _manifest_rejection_reasons(
         "source_snapshot_sha256",
         "source_metadata_sha256",
         "raw_dataset_sha256",
+        "collector_code_sha",
         "preparation_code_sha",
         "cohort_selection_as_of_utc",
         "data_start_utc",
@@ -672,6 +673,12 @@ def _manifest_rejection_reasons(
     code_sha = str(provenance.get("code_sha") or "").lower()
     if code_sha and not GIT_SHA_RE.fullmatch(code_sha):
         reasons.append({"code": "INVALID_CODE_SHA", "detail": "code_sha must be a Git commit SHA"})
+    collector_code_sha = str(provenance.get("collector_code_sha") or "").lower()
+    if collector_code_sha and not GIT_SHA_RE.fullmatch(collector_code_sha):
+        reasons.append({
+            "code": "INVALID_COLLECTOR_CODE_SHA",
+            "detail": "collector_code_sha must be a Git commit SHA",
+        })
     preparation_code_sha = str(provenance.get("preparation_code_sha") or "").lower()
     if preparation_code_sha and not GIT_SHA_RE.fullmatch(preparation_code_sha):
         reasons.append({
@@ -1083,7 +1090,7 @@ def evaluate_approval(
                 "source_provider", "source_url", "source_license",
                 "source_snapshot_utc", "leaderboard_retrieved_at_utc",
                 "source_snapshot_sha256", "source_metadata_sha256",
-                "raw_dataset_sha256", "preparation_code_sha",
+                "raw_dataset_sha256", "collector_code_sha", "preparation_code_sha",
                 "cohort_selection_as_of_utc",
                 "data_start_utc", "data_end_utc", "dataset_sha256",
                 "model_version", "feature_schema_version", "code_sha",
