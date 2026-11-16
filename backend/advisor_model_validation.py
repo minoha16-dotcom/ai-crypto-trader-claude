@@ -32,6 +32,7 @@ DEFAULT_POLICY = {
     "min_oos_signals": 100,
     "min_oos_samples": 100,
     "min_oos_samples_per_fold": 20,
+    "min_oos_signals_per_fold": 20,
     "min_top_tercile_samples": 30,
     "bootstrap_resamples": 2000,
     "confidence_level": 0.95,
@@ -183,7 +184,13 @@ def predict_ridge(model: dict[str, Any], features: dict[str, Any]) -> float:
     return result
 
 
+ELIGIBLE_EXIT_REASONS = {
+    "STOP", "STOP_GAP", "TARGET", "TARGET_GAP", "TIME_EXIT",
+}
+
+
 def _validate_samples(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Validate all signals; keep disallowed exits for exclusion accounting."""
     if not isinstance(samples, list):
         raise ValueError("samples must be a list")
     validated = []
@@ -195,24 +202,28 @@ def _validate_samples(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
         exit_ms = _timestamp_ms(row.get("exit_timestamp"), "exit_timestamp")
         if exit_ms < signal_ms:
             raise ValueError(f"sample {index} exits before its signal")
-        r_multiple = _finite_number(row.get("r_multiple"), "r_multiple")
         feature_values = _feature_vector(row.get("features"))
         sample_id = str(row.get("sample_id") or f"sample-{index}")
         if sample_id in seen_ids:
             raise ValueError(f"duplicate sample_id: {sample_id}")
         seen_ids.add(sample_id)
+        exit_reason = str(row.get("exit_reason") or "UNKNOWN").strip().upper()
+        eligible = exit_reason in ELIGIBLE_EXIT_REASONS
+        r_multiple = _finite_number(row.get("r_multiple"), "r_multiple") if eligible else None
         validated.append({
             "sample_id": sample_id,
             "signal_timestamp_ms": signal_ms,
             "exit_timestamp_ms": exit_ms,
+            "exit_reason": exit_reason,
+            "eligible": eligible,
             "r_multiple": r_multiple,
             "features": dict(row["features"]),
             "feature_vector": feature_values,
         })
-    validated.sort(key=lambda row: (row["signal_timestamp_ms"], row["exit_timestamp_ms"], row["sample_id"]))
+    validated.sort(key=lambda row: (
+        row["signal_timestamp_ms"], row["exit_timestamp_ms"], row["sample_id"]
+    ))
     return validated
-
-
 def walk_forward_predict(
     samples: list[dict[str, Any]],
     *,
@@ -220,34 +231,43 @@ def walk_forward_predict(
     min_folds: int = 3,
     max_folds: int = 5,
     min_test_samples_per_fold: int = 20,
+    min_test_signals_per_fold: int = 20,
     ridge_alpha: float = 1.0,
 ) -> dict[str, Any]:
-    """Expanding chronological validation with label-availability purging.
+    """Expanding chronological validation with separate signal and label counts.
 
-    For each test fold, training rows must have both a signal timestamp and an
-    outcome/exit timestamp strictly before the fold's first test signal.
+    Only eligible exits train the model. A training label must be fully matured
+    before the first signal in its test fold. Ineligible exits remain in the
+    signal denominator but never enter the R-label fit or uplift calculation.
     """
     min_training_samples = int(min_training_samples)
     min_folds = int(min_folds)
     max_folds = int(max_folds)
     min_test_samples_per_fold = int(min_test_samples_per_fold)
+    min_test_signals_per_fold = int(min_test_signals_per_fold)
     if min_training_samples < 2 or min_folds < 1 or max_folds < min_folds:
         raise ValueError("invalid walk-forward policy")
-    if min_test_samples_per_fold < 1:
-        raise ValueError("min_test_samples_per_fold must be positive")
+    if min_test_samples_per_fold < 1 or min_test_signals_per_fold < 1:
+        raise ValueError("minimum test signals and samples must be positive")
 
     ordered = _validate_samples(samples)
-    remaining = len(ordered) - min_training_samples
-    possible_folds = remaining // min_test_samples_per_fold
+    eligible_rows = [row for row in ordered if row["eligible"]]
+    if len(eligible_rows) < min_training_samples:
+        raise ValueError(
+            f"insufficient eligible training labels: need {min_training_samples}, "
+            f"received {len(eligible_rows)}"
+        )
+    remaining_signals = len(ordered) - min_training_samples
+    possible_folds = remaining_signals // min_test_signals_per_fold
     fold_count = min(max_folds, possible_folds)
     if fold_count < min_folds:
+        required = min_training_samples + min_folds * min_test_signals_per_fold
         raise ValueError(
-            f"insufficient samples for walk-forward: need at least "
-            f"{min_training_samples + min_folds * min_test_samples_per_fold}, "
+            f"insufficient signals for walk-forward: need at least {required}, "
             f"received {len(ordered)}"
         )
 
-    test_size = remaining // fold_count
+    test_size = remaining_signals // fold_count
     predictions = []
     fold_reports = []
     training_counts = []
@@ -258,32 +278,38 @@ def walk_forward_predict(
             else min(len(ordered), start_index + test_size)
         )
         test_rows = ordered[start_index:end_index]
-        if len(test_rows) < min_test_samples_per_fold:
+        if len(test_rows) < min_test_signals_per_fold:
             continue
         test_start_ms = test_rows[0]["signal_timestamp_ms"]
 
-        # Label availability is the cutoff, not merely the signal time.
         train_rows = [
-            row for row in ordered
+            row for row in eligible_rows
             if row["signal_timestamp_ms"] < test_start_ms
             and row["exit_timestamp_ms"] < test_start_ms
         ]
         if len(train_rows) < min_training_samples:
             raise ValueError(
                 f"fold {fold_index + 1} has only {len(train_rows)} fully matured "
-                f"training labels; minimum is {min_training_samples}"
+                f"eligible training labels; minimum is {min_training_samples}"
             )
 
         model = fit_ridge(train_rows, alpha=ridge_alpha)
         fold_id = fold_index + 1
+        eligible_test_rows = [row for row in test_rows if row["eligible"]]
+        excluded_test_rows = [row for row in test_rows if not row["eligible"]]
+        excluded_reasons: dict[str, int] = {}
+        for row in excluded_test_rows:
+            excluded_reasons[row["exit_reason"]] = excluded_reasons.get(row["exit_reason"], 0) + 1
+
         fold_prediction_rows = []
-        for row in test_rows:
+        for row in eligible_test_rows:
             predicted = predict_ridge(model, row["features"])
             prediction = {
                 "sample_id": row["sample_id"],
                 "fold_id": fold_id,
                 "signal_timestamp": _iso_utc(row["signal_timestamp_ms"]),
                 "exit_timestamp": _iso_utc(row["exit_timestamp_ms"]),
+                "exit_reason": row["exit_reason"],
                 "predicted_r_multiple": predicted,
                 "r_multiple": row["r_multiple"],
             }
@@ -294,12 +320,19 @@ def walk_forward_predict(
         fold_reports.append({
             "fold_id": fold_id,
             "training_samples": len(train_rows),
-            "test_samples": len(test_rows),
+            "test_signal_count": len(test_rows),
+            "test_samples": len(eligible_test_rows),
+            "excluded_test_samples": len(excluded_test_rows),
+            "excluded_test_reasons": dict(sorted(excluded_reasons.items())),
             "training_signal_start_utc": _iso_utc(train_rows[0]["signal_timestamp_ms"]),
-            "training_label_end_utc": _iso_utc(max(row["exit_timestamp_ms"] for row in train_rows)),
+            "training_label_end_utc": _iso_utc(
+                max(row["exit_timestamp_ms"] for row in train_rows)
+            ),
             "test_start_utc": _iso_utc(test_rows[0]["signal_timestamp_ms"]),
             "test_end_utc": _iso_utc(test_rows[-1]["signal_timestamp_ms"]),
-            "test_exit_end_utc": _iso_utc(max(row["exit_timestamp_ms"] for row in test_rows)),
+            "test_exit_end_utc": _iso_utc(
+                max(row["exit_timestamp_ms"] for row in test_rows)
+            ),
             "model_parameters": {
                 "model_family": model["model_family"],
                 "model_version": model["model_version"],
@@ -316,19 +349,26 @@ def walk_forward_predict(
             f"only {len(fold_reports)} valid walk-forward folds; minimum is {min_folds}"
         )
 
-    # This is the deployable fit after validation: all supplied outcomes have
-    # already matured. It is emitted only if the independent OOS gate approves.
-    final_model = fit_ridge(ordered, alpha=ridge_alpha)
+    all_excluded = [row for row in ordered if not row["eligible"]]
+    excluded_reasons: dict[str, int] = {}
+    for row in all_excluded:
+        excluded_reasons[row["exit_reason"]] = excluded_reasons.get(row["exit_reason"], 0) + 1
+
+    final_model = fit_ridge(eligible_rows, alpha=ridge_alpha)
     return {
         "fold_count": len(fold_reports),
         "min_training_samples_per_fold": min(training_counts),
         "total_training_rows_used_across_folds": sum(training_counts),
+        "oos_signals": sum(row["test_signal_count"] for row in fold_reports),
+        "oos_samples": len(predictions),
+        "input_signals": len(ordered),
+        "input_eligible_samples": len(eligible_rows),
+        "input_excluded_samples": len(all_excluded),
+        "input_excluded_reasons": dict(sorted(excluded_reasons.items())),
         "oos_predictions": predictions,
         "folds": fold_reports,
         "final_candidate_model": final_model,
     }
-
-
 def _top_tercile(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not rows:
         return []
@@ -533,16 +573,39 @@ def evaluate_approval(
         "timeframe": str(group.get("timeframe") or ""),
     }
     reasons = _manifest_rejection_reasons(manifest, group, dataset_sha256)
-
     if not all(group_key.values()):
-        reasons.append({"code": "INCOMPLETE_GROUP_KEY", "detail": "exchange, symbol, market_type and timeframe are all required"})
+        reasons.append({
+            "code": "INCOMPLETE_GROUP_KEY",
+            "detail": "exchange, symbol, market_type and timeframe are all required",
+        })
 
     train_count = int(walk_forward.get("min_training_samples_per_fold", 0) or 0)
     fold_count = int(walk_forward.get("fold_count", 0) or 0)
     predictions = walk_forward.get("oos_predictions") or []
     folds = walk_forward.get("folds") or []
     oos_count = len(predictions)
-    oos_signals = int(walk_forward.get("oos_signals", oos_count) or 0)
+    oos_signals = sum(int(row.get("test_signal_count", 0) or 0) for row in folds)
+    if int(walk_forward.get("oos_signals", -1)) != oos_signals:
+        reasons.append({
+            "code": "OOS_SIGNAL_COUNT_MISMATCH",
+            "detail": (
+                f"reported OOS signals {walk_forward.get('oos_signals')} do not match "
+                f"the sum of fold test signals {oos_signals}"
+            ),
+        })
+    if int(walk_forward.get("oos_samples", -1)) != oos_count:
+        reasons.append({
+            "code": "OOS_SAMPLE_COUNT_MISMATCH",
+            "detail": (
+                f"reported OOS samples {walk_forward.get('oos_samples')} do not match "
+                f"prediction rows {oos_count}"
+            ),
+        })
+    if len(folds) != fold_count:
+        reasons.append({
+            "code": "WALK_FORWARD_FOLD_COUNT_MISMATCH",
+            "detail": f"fold_count={fold_count}, but {len(folds)} fold reports were supplied",
+        })
 
     if train_count < int(policy["min_training_samples_per_fold"]):
         reasons.append({
@@ -568,38 +631,77 @@ def evaluate_approval(
             "detail": f"minimum is {policy['min_oos_samples']}; observed {oos_count}",
         })
 
-    per_fold_training_counts = [int(row.get("training_samples", 0)) for row in folds]
+    training_counts = [int(row.get("training_samples", 0)) for row in folds]
     if (
-        len(per_fold_training_counts) < int(policy["min_walk_forward_folds"])
-        or any(count < int(policy["min_training_samples_per_fold"]) for count in per_fold_training_counts)
+        len(training_counts) < int(policy["min_walk_forward_folds"])
+        or any(count < int(policy["min_training_samples_per_fold"]) for count in training_counts)
     ):
         reasons.append({
             "code": "PER_FOLD_TRAINING_COUNT_MISMATCH",
             "detail": (
                 f"every fold must report at least {policy['min_training_samples_per_fold']} "
-                f"training rows; observed {per_fold_training_counts}"
+                f"training rows; observed {training_counts}"
             ),
         })
 
-    per_fold_counts = [int(row.get("test_samples", 0)) for row in folds]
-    if len(per_fold_counts) < int(policy["min_walk_forward_folds"]) or any(
-        count < int(policy["min_oos_samples_per_fold"]) for count in per_fold_counts
+    per_fold_signals = [int(row.get("test_signal_count", 0)) for row in folds]
+    if (
+        len(per_fold_signals) < int(policy["min_walk_forward_folds"])
+        or any(count < int(policy["min_oos_signals_per_fold"]) for count in per_fold_signals)
+    ):
+        reasons.append({
+            "code": "INSUFFICIENT_OOS_SIGNALS_PER_FOLD",
+            "detail": (
+                f"each OOS fold must contain at least {policy['min_oos_signals_per_fold']} "
+                f"signal rows; observed {per_fold_signals}"
+            ),
+        })
+
+    per_fold_samples = [int(row.get("test_samples", 0)) for row in folds]
+    if (
+        len(per_fold_samples) < int(policy["min_walk_forward_folds"])
+        or any(count < int(policy["min_oos_samples_per_fold"]) for count in per_fold_samples)
     ):
         reasons.append({
             "code": "INSUFFICIENT_OOS_SAMPLES_PER_FOLD",
             "detail": (
                 f"each OOS fold must contain at least {policy['min_oos_samples_per_fold']} "
-                f"eligible samples; observed {per_fold_counts}"
+                f"eligible outcomes; observed {per_fold_samples}"
             ),
         })
 
+    sorted_folds = sorted(folds, key=lambda row: int(row.get("fold_id", 0)))
+    if [int(row.get("fold_id", 0)) for row in sorted_folds] != list(range(1, fold_count + 1)):
+        reasons.append({
+            "code": "INVALID_FOLD_SEQUENCE",
+            "detail": "fold IDs must be the contiguous sequence 1..fold_count",
+        })
+    previous_test_end = None
+    for fold in sorted_folds:
+        try:
+            test_start = _timestamp_ms(fold.get("test_start_utc"), "test_start_utc")
+            test_end = _timestamp_ms(fold.get("test_end_utc"), "test_end_utc")
+            label_end = _timestamp_ms(fold.get("training_label_end_utc"), "training_label_end_utc")
+            if test_end < test_start or label_end >= test_start:
+                raise ValueError("invalid test period or training label not matured before test start")
+            if previous_test_end is not None and test_start <= previous_test_end:
+                raise ValueError("walk-forward test windows overlap or are not chronological")
+            previous_test_end = test_end
+        except (TypeError, ValueError) as exc:
+            reasons.append({"code": "INVALID_WALK_FORWARD_CHRONOLOGY", "detail": str(exc)})
+            break
+
+    excluded_reasons = dict(walk_forward.get("input_excluded_reasons") or {})
+    excluded_count = int(walk_forward.get("input_excluded_samples", 0) or 0)
     metrics = {
         "oos_signals": oos_signals,
         "oos_samples": oos_count,
         "walk_forward_folds": fold_count,
+        "training_samples_per_fold": training_counts,
         "min_training_samples_per_fold": train_count,
         "eligible_samples": oos_count,
-        "excluded_samples": int(group.get("excluded_samples", 0) or 0),
+        "excluded_samples": excluded_count,
+        "excluded_sample_reasons": excluded_reasons,
         "mean_r": None,
         "positive_r_share": None,
         "wilson_ci_positive_r_share_95": None,
@@ -610,17 +712,33 @@ def evaluate_approval(
     }
 
     valid_prediction_rows = []
+    seen_ids = set()
+    fold_by_id = {int(row.get("fold_id", 0)): row for row in sorted_folds}
     for row in predictions:
         try:
             predicted = _finite_number(row.get("predicted_r_multiple"), "predicted_r_multiple")
             actual = _finite_number(row.get("r_multiple"), "r_multiple")
             fold_id = int(row.get("fold_id"))
             sample_id = str(row.get("sample_id") or "")
-            if not sample_id or fold_id < 1:
-                raise ValueError("each OOS prediction needs a sample_id and positive fold_id")
+            if not sample_id or fold_id < 1 or sample_id in seen_ids:
+                raise ValueError("each OOS prediction needs a unique sample_id and positive fold_id")
+            seen_ids.add(sample_id)
+            if fold_id not in fold_by_id:
+                raise ValueError(f"prediction {sample_id} refers to an unknown fold")
+            signal_ms = _timestamp_ms(row.get("signal_timestamp"), "prediction.signal_timestamp")
+            exit_ms = _timestamp_ms(row.get("exit_timestamp"), "prediction.exit_timestamp")
+            fold = fold_by_id[fold_id]
+            test_start = _timestamp_ms(fold.get("test_start_utc"), "fold.test_start_utc")
+            test_end = _timestamp_ms(fold.get("test_end_utc"), "fold.test_end_utc")
+            if not test_start <= signal_ms <= test_end or exit_ms < signal_ms:
+                raise ValueError(f"prediction {sample_id} falls outside its OOS fold")
+            if str(row.get("exit_reason") or "").upper() not in ELIGIBLE_EXIT_REASONS:
+                raise ValueError(f"prediction {sample_id} has an ineligible exit reason")
             valid_prediction_rows.append({
                 "sample_id": sample_id,
                 "fold_id": fold_id,
+                "signal_timestamp": row["signal_timestamp"],
+                "exit_timestamp": row["exit_timestamp"],
                 "predicted_r_multiple": predicted,
                 "r_multiple": actual,
             })
@@ -628,13 +746,20 @@ def evaluate_approval(
             reasons.append({"code": "INVALID_OOS_PREDICTION", "detail": str(exc)})
             break
 
-    if valid_prediction_rows:
-        fold_ids = {row["fold_id"] for row in valid_prediction_rows}
-        if len(fold_ids) != fold_count:
+    fold_prediction_counts = {fold_id: 0 for fold_id in fold_by_id}
+    for row in valid_prediction_rows:
+        fold_prediction_counts[row["fold_id"]] += 1
+    for fold_id, fold in fold_by_id.items():
+        if fold_prediction_counts.get(fold_id, 0) != int(fold.get("test_samples", 0)):
             reasons.append({
-                "code": "OOS_FOLD_MISMATCH",
-                "detail": "the OOS predictions do not contain exactly the reported fold count",
+                "code": "FOLD_PREDICTION_COUNT_MISMATCH",
+                "detail": (
+                    f"fold {fold_id} reports {fold.get('test_samples')} outcomes but "
+                    f"contains {fold_prediction_counts.get(fold_id, 0)} predictions"
+                ),
             })
+
+    if valid_prediction_rows:
         try:
             top_mean, all_mean, uplift_value, top_count = _uplift(valid_prediction_rows)
             metrics.update({
@@ -658,7 +783,10 @@ def evaluate_approval(
             if top_count < int(policy["min_top_tercile_samples"]):
                 reasons.append({
                     "code": "INSUFFICIENT_TOP_TERCILE_SAMPLES",
-                    "detail": f"minimum is {policy['min_top_tercile_samples']}; observed {top_count}",
+                    "detail": (
+                        f"minimum is {policy['min_top_tercile_samples']}; "
+                        f"observed {top_count}"
+                    ),
                 })
             if uplift_value <= 0:
                 reasons.append({
@@ -668,12 +796,18 @@ def evaluate_approval(
             if ci is None or ci[0] <= 0:
                 reasons.append({
                     "code": "UPLIFT_CI_INCLUDES_ZERO",
-                    "detail": f"the lower bound of the {policy['confidence_level']:.0%} uplift CI must be greater than zero; interval={ci}",
+                    "detail": (
+                        f"the lower bound of the {policy['confidence_level']:.0%} uplift CI "
+                        f"must be greater than zero; interval={ci}"
+                    ),
                 })
         except (TypeError, ValueError, ZeroDivisionError) as exc:
             reasons.append({"code": "UPLIFT_EVALUATION_FAILED", "detail": str(exc)})
     else:
-        reasons.append({"code": "NO_OOS_PREDICTIONS", "detail": "no valid chronological OOS predictions were supplied"})
+        reasons.append({
+            "code": "NO_OOS_PREDICTIONS",
+            "detail": "no valid chronological OOS predictions were supplied",
+        })
 
     return {
         "group": group_key,
@@ -692,14 +826,13 @@ def evaluate_approval(
             if key in (
                 "source_provider", "source_url", "source_license",
                 "source_snapshot_utc", "source_snapshot_sha256",
-                "cohort_selection_as_of_utc", "data_start_utc", "data_end_utc",
-                "dataset_sha256", "model_version", "feature_schema_version",
-                "code_sha", "backtest_config",
+                "source_metadata_sha256", "cohort_selection_as_of_utc",
+                "data_start_utc", "data_end_utc", "dataset_sha256",
+                "model_version", "feature_schema_version", "code_sha",
+                "backtest_config",
             )
         },
     }
-
-
 def train_validate_group(
     *,
     group: dict[str, Any],
@@ -710,31 +843,27 @@ def train_validate_group(
     """Train, evaluate, and return an approved final model only when all gates pass."""
     policy = {**DEFAULT_POLICY, **(policy or {})}
     samples = group.get("samples") or []
-    walk_forward = walk_forward_predict(
-        samples,
-        min_training_samples=int(policy["min_training_samples_per_fold"]),
-        min_folds=int(policy["min_walk_forward_folds"]),
-        max_folds=int(policy["max_walk_forward_folds"]),
-        min_test_samples_per_fold=int(policy["min_oos_samples_per_fold"]),
-        ridge_alpha=float(policy["ridge_alpha"]),
-    )
-    # Validate every row, not only the final test rows, against the immutable
-    # cohort and observation window. This prevents a manually assembled JSON
-    # file from hiding look-ahead data outside the OOS prediction list.
+    ordered_samples = _validate_samples(samples)
+
     provenance = dict(manifest or {})
     provenance.update(group.get("provenance") or {})
     window_issues = []
     try:
-        cohort_ms = _timestamp_ms(provenance.get("cohort_selection_as_of_utc"), "cohort_selection_as_of_utc")
+        cohort_ms = _timestamp_ms(
+            provenance.get("cohort_selection_as_of_utc"), "cohort_selection_as_of_utc"
+        )
         data_start_ms = _timestamp_ms(provenance.get("data_start_utc"), "data_start_utc")
         data_end_ms = _timestamp_ms(provenance.get("data_end_utc"), "data_end_utc")
-        for row in _validate_samples(samples):
+        for row in ordered_samples:
             if row["signal_timestamp_ms"] <= cohort_ms:
                 window_issues.append({
                     "code": "SAMPLE_PRECEDES_COHORT_CUTOFF",
                     "detail": f"sample {row['sample_id']} is not after the cohort-selection cutoff",
                 })
-            if row["signal_timestamp_ms"] < data_start_ms or row["exit_timestamp_ms"] > data_end_ms:
+            if (
+                row["signal_timestamp_ms"] < data_start_ms
+                or row["exit_timestamp_ms"] > data_end_ms
+            ):
                 window_issues.append({
                     "code": "SAMPLE_OUTSIDE_MANIFEST_DATA_WINDOW",
                     "detail": f"sample {row['sample_id']} falls outside the declared data window",
@@ -742,14 +871,17 @@ def train_validate_group(
             if window_issues:
                 break
     except ValueError as exc:
-        window_issues.append({
-            "code": "INVALID_GROUP_DATA_WINDOW",
-            "detail": str(exc),
-        })
+        window_issues.append({"code": "INVALID_GROUP_DATA_WINDOW", "detail": str(exc)})
 
-    # The walk-forward runner's evaluated signals are closed-trade samples. Keep
-    # this field explicit so reports do not confuse it with unexecuted scanner rows.
-    walk_forward["oos_signals"] = len(walk_forward["oos_predictions"])
+    walk_forward = walk_forward_predict(
+        samples,
+        min_training_samples=int(policy["min_training_samples_per_fold"]),
+        min_folds=int(policy["min_walk_forward_folds"]),
+        max_folds=int(policy["max_walk_forward_folds"]),
+        min_test_samples_per_fold=int(policy["min_oos_samples_per_fold"]),
+        min_test_signals_per_fold=int(policy["min_oos_signals_per_fold"]),
+        ridge_alpha=float(policy["ridge_alpha"]),
+    )
     approval = evaluate_approval(
         group=group,
         walk_forward=walk_forward,
@@ -761,6 +893,7 @@ def train_validate_group(
         approval["rejection_reasons"].extend(window_issues)
         approval["approved"] = False
         approval["model_status"] = "DISABLED"
+
     result = {
         "approval": approval,
         "walk_forward": {
