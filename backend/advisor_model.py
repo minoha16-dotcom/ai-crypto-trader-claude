@@ -150,6 +150,55 @@ def fit_ridge(training_rows, alpha=DEFAULT_ALPHA):
     return model
 
 
+def fit_ridge_on_targets(
+    training_rows,
+    *,
+    target_key,
+    target_name,
+    model_version,
+    alpha=DEFAULT_ALPHA,
+):
+    """Fit a separate Ridge target, such as public expert pnlRatio (never net R)."""
+    penalty = _finite(alpha, "alpha")
+    if penalty <= 0:
+        raise ValueError("alpha must be greater than zero")
+    if not isinstance(training_rows, (list, tuple)) or not training_rows:
+        raise ValueError("at least one training row is required")
+    prepared = []
+    for index, row in enumerate(training_rows):
+        if not isinstance(row, dict):
+            raise ValueError(f"training row {index} must be an object")
+        target = _finite(row.get(target_key), f"training row {index} {target_key}")
+        vector = row.get("features")
+        if not isinstance(vector, (list, tuple)) or len(vector) != len(FEATURE_NAMES):
+            raise ValueError(f"training row {index} must contain five features")
+        clean = [_finite(value, f"training row {index} feature") for value in vector]
+        prepared.append(([1.0] + clean, target))
+    width = len(FEATURE_NAMES) + 1
+    gram = [[0.0 for _ in range(width)] for _ in range(width)]
+    rhs = [0.0 for _ in range(width)]
+    for vector, target in prepared:
+        for left in range(width):
+            rhs[left] += vector[left] * target
+            for right in range(width):
+                gram[left][right] += vector[left] * vector[right]
+    for index in range(1, width):
+        gram[index][index] += penalty
+    coefficients = _solve_linear_system(gram, rhs)
+    return {
+        "model_version": model_version,
+        "feature_schema_version": FEATURE_SCHEMA_VERSION,
+        "algorithm": "ridge_regression_l2",
+        "feature_names": list(FEATURE_NAMES),
+        "alpha": penalty,
+        "intercept": coefficients[0],
+        "weights": coefficients[1:],
+        "training_samples": len(prepared),
+        "target": target_name,
+        "label_source": "public_okx_copy_trading_history",
+    }
+
+
 def predict_r_multiple(model, sample):
     vector = sample.get("features")
     if vector is None:
