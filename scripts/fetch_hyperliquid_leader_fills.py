@@ -351,6 +351,11 @@ def main():
         default="top_pnl",
         help="Rank the published month PnL window by default; volume is an explicit separate cohort.",
     )
+    parser.add_argument(
+        "--collector-code-sha",
+        required=True,
+        help="Git commit SHA of this public-data collector",
+    )
     parser.add_argument("--wallet-limit", type=int, default=100)
     parser.add_argument("--pause-seconds", type=float, default=0.0)
     parser.add_argument("--timeout", type=float, default=60.0)
@@ -364,6 +369,8 @@ def main():
         raise SystemExit("--wallet-limit must be between 1 and 100")
     if args.pause_seconds < 0:
         raise SystemExit("--pause-seconds cannot be negative")
+    if not re.fullmatch(r"[0-9a-fA-F]{7,40}", args.collector_code_sha):
+        raise SystemExit("--collector-code-sha must be a 7-40 character Git SHA")
 
     (
         raw_leaderboard, raw_metadata, metadata, addresses, snapshot_as_of
@@ -468,6 +475,7 @@ def main():
             "cohort_selection_as_of_utc": _iso_utc(cohort_selection_ms),
             "data_start_utc": _iso_utc(start_ms),
             "data_end_utc": _iso_utc(end_ms),
+            "collector_code_sha": args.collector_code_sha.lower(),
             "fills_endpoint": INFO_URL,
             "fills_request_type": "userFillsByTime",
             "funding_request_type": "userFunding",
