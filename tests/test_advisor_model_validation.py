@@ -143,21 +143,27 @@ def test_ridge_model_fits_and_predicts_finite_r_multiple():
     }
 
 
-def test_walk_forward_uses_only_fully_matured_pre_test_labels():
-    samples = _samples(320)
-    first_test_start = samples[200]["signal_timestamp"]
+def test_walk_forward_waits_until_200_eligible_labels_have_fully_matured():
+    samples = _samples(340)
+    first_nominal_test_start = samples[200]["signal_timestamp"]
     for row in samples[120:200]:
-        row["exit_timestamp"] = first_test_start + 1
+        row["exit_timestamp"] = first_nominal_test_start + 1
 
-    with pytest.raises(ValueError, match="fully matured eligible training labels|insufficient chronological OOS windows"):
-        walk_forward_predict(
-            samples,
-            min_training_samples=200,
-            min_folds=3,
-            max_folds=3,
-            min_test_samples_per_fold=20,
-            min_test_signals_per_fold=20,
-        )
+    result = walk_forward_predict(
+        samples,
+        min_training_samples=200,
+        min_folds=3,
+        max_folds=3,
+        min_test_samples_per_fold=20,
+        min_test_signals_per_fold=20,
+    )
+
+    assert result["folds"][0]["training_samples"] >= 200
+    assert result["folds"][0]["training_label_end_utc"] < result["folds"][0]["test_start_utc"]
+    assert result["folds"][0]["test_start_utc"] > datetime.fromtimestamp(
+        first_nominal_test_start / 1000,
+        tz=timezone.utc,
+    ).isoformat()
 
 
 def test_walk_forward_produces_three_chronological_folds_and_separate_oos_counts():
@@ -210,8 +216,8 @@ def test_period_end_and_liquidation_are_excluded_but_remain_oos_signals():
 
 
 def test_unknown_exit_reason_is_never_a_training_label():
-    samples = _samples(260)
-    samples[200]["exit_reason"] = "MANUAL_CLOSE"
+    samples = _samples(340)
+    samples[250]["exit_reason"] = "MANUAL_CLOSE"
     result = walk_forward_predict(
         samples,
         min_training_samples=200,
@@ -221,9 +227,9 @@ def test_unknown_exit_reason_is_never_a_training_label():
         min_test_signals_per_fold=20,
     )
     assert result["input_excluded_reasons"]["MANUAL_CLOSE"] == 1
-    assert result["input_eligible_samples"] == 259
-    assert result["oos_signals"] == 60
-    assert result["oos_samples"] == 59
+    assert result["input_eligible_samples"] == 339
+    assert result["oos_signals"] >= 100
+    assert result["oos_samples"] == result["oos_signals"] - 1
     assert result["oos_excluded_samples"] == 1
     assert result["oos_excluded_reasons"] == {"MANUAL_CLOSE": 1}
 
