@@ -44,7 +44,7 @@ def approved_fixture():
         })
         for index in range(100):
             # The top predicted third has materially higher realized R.
-            band = index // 34
+            band = index // 100
             predicted = float(band)
             realized = (-5.0, 0.0, 5.0)[band]
             rows.append({
