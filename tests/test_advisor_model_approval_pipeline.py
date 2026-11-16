@@ -9,6 +9,7 @@ window.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 import sys
 
@@ -99,7 +100,22 @@ def test_collector_to_independent_group_approval_report_end_to_end(monkeypatch, 
     }
 
     metadata = {"as_of": _iso(now), "license": "CC BY 4.0 metadata attribution"}
-    raw_board = b'{"leaderboardRows":"deterministic integration fixture"}'
+    leaderboard_rows = []
+    for index in range(100):
+        if index == 0:
+            address, pnl = btc_address, 5000.0
+        elif index == 1:
+            address, pnl = eth_address, 4000.0
+        else:
+            address, pnl = f"0x{index + 1000:040x}", 100.0 - index
+        leaderboard_rows.append({
+            "ethAddress": address,
+            "windowPerformances": [
+                ["month", {"pnl": str(pnl), "roi": "0.1", "vlm": str(1000 + index)}]
+            ],
+        })
+    board_payload = {"leaderboardRows": leaderboard_rows}
+    raw_board = json.dumps(board_payload, sort_keys=True).encode("utf-8")
     raw_metadata = json.dumps(metadata, sort_keys=True).encode("utf-8")
     monkeypatch.setattr(
         collector,
@@ -147,20 +163,63 @@ def test_collector_to_independent_group_approval_report_end_to_end(monkeypatch, 
     monkeypatch.setattr(collector, "_fetch_twap_slice_fills", fake_twap)
     monkeypatch.setattr(collector, "_fetch_historical_orders", fake_orders)
 
-    raw_path = tmp_path / "hyperliquid-raw.json"
+    # Stage 1: freeze the leaderboard cohort strictly before the observation
+    # window. The exact snapshot file is the provenance root for later collection.
+    snapshot_path = tmp_path / "hyperliquid-cohort-snapshot.json"
     monkeypatch.setattr(sys, "argv", [
         "fetch_hyperliquid_leader_fills.py",
+        "--snapshot-only",
         "--cohort", "top_pnl",
         "--start", _iso(data_start),
         "--end", _iso(data_end),
         "--collector-code-sha", "a" * 40,
         "--wallet-limit", "2",
+        "--out", str(snapshot_path),
+    ])
+    assert collector.main() == 0
+    snapshot_bytes = snapshot_path.read_bytes()
+    snapshot = json.loads(snapshot_bytes.decode("utf-8"))
+    assert snapshot["snapshot_only"] is True
+    assert [row["address"] for row in snapshot["wallets"]] == [btc_address, eth_address]
+    snapshot_sha256 = hashlib.sha256(snapshot_bytes).hexdigest()
+
+    # Stage 2: simulate collection after the entire observation window has
+    # ended. A fresh leaderboard lookup would be look-ahead and is forbidden.
+    real_datetime = collector.datetime
+
+    class AfterObservationDateTime(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            completed_at = data_end + timedelta(days=1)
+            if tz is not None:
+                return completed_at.astimezone(tz)
+            return completed_at.replace(tzinfo=None)
+
+    monkeypatch.setattr(collector, "_load_leaderboard", lambda *_args, **_kwargs: (
+        (_ for _ in ()).throw(AssertionError("snapshot-file collection must not refresh the leaderboard"))
+    ))
+    monkeypatch.setattr(collector, "datetime", AfterObservationDateTime)
+
+    raw_path = tmp_path / "hyperliquid-raw.json"
+    monkeypatch.setattr(sys, "argv", [
+        "fetch_hyperliquid_leader_fills.py",
+        "--snapshot-file", str(snapshot_path),
+        "--start", _iso(data_start),
+        "--end", _iso(data_end),
+        "--collector-code-sha", "c" * 40,
+        "--wallet-limit", "2",
         "--out", str(raw_path),
     ])
     assert collector.main() == 0
     raw_payload = json.loads(raw_path.read_text(encoding="utf-8"))
-    assert raw_payload["manifest"]["wallets_complete_raw_snapshots"] == 2
+    raw_manifest = raw_payload["manifest"]
+    assert raw_manifest["wallets_complete_raw_snapshots"] == 2
+    assert raw_manifest["cohort_snapshot_code_sha"] == "a" * 40
+    assert raw_manifest["cohort_snapshot_file_sha256"] == snapshot_sha256
+    assert raw_manifest["collector_code_sha"] == "c" * 40
+    assert raw_manifest["cohort_selection_as_of_utc"] < raw_manifest["data_start_utc"]
     assert all(wallet["training_eligible"] is False for wallet in raw_payload["wallets"])
+
 
     class FakeHyperliquid:
         def __init__(self):
