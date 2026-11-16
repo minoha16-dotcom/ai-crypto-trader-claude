@@ -415,17 +415,156 @@ def _dataset_report_row(row, comparison_status, evaluation_status, reason=None):
     }
 
 
+def _build_fold_isolated_advisor_model(evaluated, dataset, candles, timeframe_ms, backtest_config):
+    """Fit only on each fold's past, then score that fold's untouched test rows."""
+    import hashlib
+
+    from backend.advisor_approval import evaluate_ranking_approval
+    from backend.advisor_model import (
+        DEFAULT_ALPHA,
+        FEATURE_SCHEMA_VERSION,
+        MODEL_VERSION,
+        fit_ridge,
+        predict_r_multiple,
+    )
+
+    group_id = dataset["id"]
+    fold_records = []
+    oos_rows = []
+    fold_models = []
+    for fold in evaluated.get("folds", []):
+        fold_id = f"{group_id}:fold:{fold['fold']}"
+        train_rows = (
+            list(fold["train"].get("advisor_samples", []))
+            + list(fold["validation"].get("advisor_samples", []))
+        )
+        test_rows = list(fold["test"].get("advisor_samples", []))
+        test_range = fold["ranges"]["test"]
+        validation_range = fold["ranges"]["validation"]
+        test_start_ms = int(test_range["start_timestamp"])
+        test_end_ms = int(test_range["end_timestamp"]) + int(timeframe_ms)
+        train_end_ms = int(validation_range["end_timestamp"]) + int(timeframe_ms)
+        oos_signals = int(fold["test"].get("oos_signals", 0))
+
+        record = {
+            "fold_id": fold_id,
+            "training_eligible_samples": len(train_rows),
+            "test_eligible_samples": len(test_rows),
+            "oos_signals": oos_signals,
+            "train_end_ms": train_end_ms,
+            "test_start_ms": test_start_ms,
+            "test_end_ms": test_end_ms,
+            "model_fit_success": False,
+        }
+        if len(train_rows) < 200 or len(test_rows) < 20 or oos_signals < 20:
+            record["model_fit_reason"] = "FOLD_BELOW_MINIMUM_TRAIN_OR_TEST_SAMPLE_GATE"
+            fold_records.append(record)
+            continue
+
+        try:
+            model = fit_ridge(train_rows, alpha=DEFAULT_ALPHA)
+            predictions = []
+            for index, sample in enumerate(test_rows):
+                predicted = predict_r_multiple(model, sample)
+                predictions.append({
+                    "group_id": group_id,
+                    "fold_id": fold_id,
+                    "sample_id": f"{fold_id}:{sample['signal_timestamp_ms']}:{index}",
+                    "signal_timestamp_ms": int(sample["signal_timestamp_ms"]),
+                    "r_multiple": float(sample["r_multiple"]),
+                    "predicted_r_multiple": predicted,
+                })
+            oos_rows.extend(predictions)
+            record["model_fit_success"] = True
+            record["model_fit_reason"] = None
+            fold_models.append({
+                "fold_id": fold_id,
+                "model_version": model["model_version"],
+                "feature_schema_version": model["feature_schema_version"],
+                "algorithm": model["algorithm"],
+                "alpha": model["alpha"],
+                "training_samples": model["training_samples"],
+                "intercept": model["intercept"],
+                "weights": model["weights"],
+                "feature_names": model["feature_names"],
+            })
+        except (ValueError, TypeError, OverflowError) as error:
+            record["model_fit_reason"] = f"MODEL_FIT_OR_PREDICTION_ERROR: {type(error).__name__}: {error}"
+        fold_records.append(record)
+
+    digest_payload = {
+        "ohlcv": candles,
+        "source_metadata": dataset.get("source_metadata"),
+        "instrument": dataset.get("instrument"),
+    }
+    dataset_sha256 = hashlib.sha256(
+        json.dumps(
+            digest_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    metadata = {
+        "model_version": MODEL_VERSION,
+        "feature_schema_version": FEATURE_SCHEMA_VERSION,
+        "algorithm": "ridge_regression_l2",
+        "hyperparameters": {
+            "alpha": DEFAULT_ALPHA,
+            "features": [
+                "directional_composite_trend",
+                "directional_rsi",
+                "adx_strength",
+                "log_volume_ratio",
+                "log_atr_percent",
+            ],
+            "target": "net_r_multiple",
+        },
+        "backtest_config": backtest_config,
+        "data_source": {
+            "provider": "ccxt_exchange_registry",
+            "exchange": dataset["exchange"],
+            "symbol": dataset["symbol"],
+            "market_type": dataset["market_type"],
+            "timeframe": dataset["timeframe"],
+            "source_metadata": dataset.get("source_metadata"),
+        },
+        "dataset_sha256": dataset_sha256,
+        "period_utc": {
+            "start": dataset.get("common_window_start_utc"),
+            "end": dataset.get("common_window_end_utc"),
+        },
+        "group_id": group_id,
+        "validation_method": "expanding_chronological_walk_forward",
+        "code_sha": os.getenv("GITHUB_SHA", "local"),
+    }
+    approval = evaluate_ranking_approval(
+        metadata=metadata,
+        fold_records=fold_records,
+        oos_rows=oos_rows,
+    )
+    approval["fold_models"] = fold_models
+    approval["data_period_utc"] = metadata["period_utc"]
+    approval["dataset_sha256"] = dataset_sha256
+    approval["prediction_count"] = len(oos_rows)
+    approval["runtime_activation"] = "NOT_CONNECTED_TO_RUNTIME_ADVISOR"
+    return approval
+
+
 def _build_advisor_diagnostics(dataset_rows, results):
-    """Build per-dataset OOS diagnostics without inventing predicted-R values."""
+    """Build per-dataset R diagnostics and auditable model approval status."""
     baseline_by_dataset = {
-        result["dataset_id"]: result["metrics"]
+        result["dataset_id"]: result
         for result in results
         if result["volume_ratio_threshold"] == 1.0
         and result["feature_ablation"] == "baseline"
     }
     diagnostics = []
     for dataset in dataset_rows:
-        metrics = baseline_by_dataset.get(dataset["id"])
+        result = baseline_by_dataset.get(dataset["id"])
+        metrics = result.get("metrics") if result else None
+        approval = result.get("advisor_model_approval") if result else None
         if metrics:
             eligible = int(metrics.get("eligible_samples", 0))
             excluded = int(metrics.get("excluded_samples", 0))
@@ -436,12 +575,38 @@ def _build_advisor_diagnostics(dataset_rows, results):
             mean_r = metrics.get("mean_r")
             positive_share = metrics.get("positive_r_share")
             wilson = metrics.get("wilson_ci_positive_r_share_95")
+            feature_excluded = int(metrics.get("model_feature_excluded_samples", 0))
+            feature_excluded_reasons = metrics.get("model_feature_excluded_reasons", {})
             diagnostic_status = "AVAILABLE"
         else:
-            eligible = excluded = oos_signals = oos_trades = folds = 0
+            eligible = excluded = oos_signals = oos_trades = folds = feature_excluded = 0
             reasons = {}
+            feature_excluded_reasons = {}
             mean_r = positive_share = wilson = None
             diagnostic_status = "UNAVAILABLE_NO_COMPLETED_BASELINE_EVALUATION"
+
+        if approval:
+            model_status = approval["model_status"]
+            approval_reasons = approval["approval_reasons"]
+            training_samples = approval["maximum_training_eligible_samples"]
+            min_training_samples = approval["minimum_training_samples_across_valid_folds"]
+            valid_folds = approval["valid_walk_forward_folds"]
+            model_oos_signals = approval["oos_signals"]
+            model_oos_eligible = approval["oos_eligible_samples"]
+            top_tercile_mean_r = approval["top_tercile_mean_r"]
+            all_oos_mean_r = approval["all_oos_mean_r"]
+            uplift = approval["uplift"]
+            uplift_ci = approval["uplift_confidence_interval_95"]
+            model_version = approval["model_metadata"]["model_version"]
+            model_metadata = approval["model_metadata"]
+        else:
+            model_status = "DISABLED"
+            approval_reasons = ["NO_COMPLETED_BASELINE_EVALUATION"]
+            training_samples = min_training_samples = valid_folds = 0
+            model_oos_signals = model_oos_eligible = 0
+            top_tercile_mean_r = all_oos_mean_r = uplift = uplift_ci = None
+            model_version = None
+            model_metadata = None
 
         diagnostics.append({
             "dataset_id": dataset["id"],
@@ -457,38 +622,35 @@ def _build_advisor_diagnostics(dataset_rows, results):
             "oos_signals": oos_signals,
             "oos_closed_trades": oos_trades,
             "eligible_samples": eligible,
-            "eligible_samples_scope": "eligible closed trades in chronological OOS test folds; not model-training rows",
+            "eligible_samples_scope": "eligible closed trades with valid net R in chronological OOS test folds",
             "excluded_samples": excluded,
             "excluded_sample_reasons": reasons,
+            "model_feature_excluded_samples": feature_excluded,
+            "model_feature_excluded_reasons": feature_excluded_reasons,
             "mean_r": mean_r,
             "positive_r_share": positive_share,
             "wilson_ci_positive_r_share_95": wilson,
-            "training_eligible_samples": None,
-            "training_excluded_samples": None,
-            "top_tercile_mean_r": None,
-            "uplift": None,
-            "uplift_confidence_interval_95": None,
+            "training_eligible_samples_max": training_samples,
+            "training_eligible_samples_min_valid_fold": min_training_samples,
+            "valid_walk_forward_folds": valid_folds,
+            "model_oos_signals": model_oos_signals,
+            "model_oos_eligible_samples": model_oos_eligible,
+            "top_tercile_mean_r": top_tercile_mean_r,
+            "all_oos_mean_r": all_oos_mean_r,
+            "uplift": uplift,
+            "uplift_confidence_interval_95": uplift_ci,
+            "model_version": model_version,
+            "model_metadata": model_metadata,
+            "approval_reasons": approval_reasons,
             "diagnostic_status": diagnostic_status,
-            "model_status": "DISABLED",
-            "model_status_scope": "R-multiple out-of-sample ranker",
+            "model_status": model_status,
+            "model_status_scope": "per-group R-multiple walk-forward ranker",
             "runtime_advisor_status": "LEGACY_LOCAL_PAPER_TRADE_SIMILARITY",
-            "model_status_reason": (
-                "No approved R-multiple model or out-of-sample predicted-R scores exist in this deployed source. "
-                "The runtime Advisor still uses user-selected closed paper trades and a local similarity score, "
-                "which is not a predicted-R score and cannot support a valid top-tercile/uplift calculation."
-            ),
+            "runtime_activation": "NOT_CONNECTED_TO_RUNTIME_ADVISOR",
         })
     return diagnostics
 
 
-def _format_metric(value, digits=4):
-    return "N/A" if value is None else f"{float(value):.{digits}f}"
-
-
-def _format_interval(value):
-    if not value or len(value) != 2 or value[0] is None or value[1] is None:
-        return "N/A"
-    return f"[{float(value[0]):.4f}, {float(value[1]):.4f}]"
 
 
 async def run():
