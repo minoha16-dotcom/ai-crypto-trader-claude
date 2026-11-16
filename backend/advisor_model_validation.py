@@ -7,6 +7,7 @@ only after the pre-registered sample, fold, uplift and provenance checks pass.
 from __future__ import annotations
 
 from collections import defaultdict
+from bisect import bisect_left
 from datetime import datetime, timezone
 import hashlib
 import math
@@ -236,11 +237,11 @@ def walk_forward_predict(
     min_test_signals_per_fold: int = 20,
     ridge_alpha: float = 1.0,
 ) -> dict[str, Any]:
-    """Expanding chronological validation with separate signal and label counts.
+    """Expanding chronological validation with timestamp groups kept intact.
 
     Only eligible exits train the model. A training label must be fully matured
-    before the first signal in its test fold. Ineligible exits remain in the
-    signal denominator but never enter the R-label fit or uplift calculation.
+    before the first signal in its test fold. All signals with the same UTC
+    timestamp stay in one test fold, preventing concurrent-wallet leakage.
     """
     min_training_samples = int(min_training_samples)
     min_folds = int(min_folds)
@@ -259,53 +260,153 @@ def walk_forward_predict(
             f"insufficient eligible training labels: need {min_training_samples}, "
             f"received {len(eligible_rows)}"
         )
-    remaining_signals = len(ordered) - min_training_samples
-    possible_folds = remaining_signals // min_test_signals_per_fold
-    fold_count = min(max_folds, possible_folds)
-    if fold_count < min_folds:
-        required = min_training_samples + min_folds * min_test_signals_per_fold
+
+    # Candidate test starts are whole UTC signal-time groups. Do not begin OOS
+    # until at least the required number of eligible labels have actually matured.
+    time_groups: list[list[dict[str, Any]]] = []
+    for row in ordered:
+        if (
+            not time_groups
+            or time_groups[-1][0]["signal_timestamp_ms"] != row["signal_timestamp_ms"]
+        ):
+            time_groups.append([row])
+        else:
+            time_groups[-1].append(row)
+
+    eligible_exit_times = sorted(
+        row["exit_timestamp_ms"] for row in eligible_rows
+    )
+    first_test_group = None
+    for index, time_group in enumerate(time_groups):
+        candidate_start = time_group[0]["signal_timestamp_ms"]
+        if bisect_left(eligible_exit_times, candidate_start) >= min_training_samples:
+            first_test_group = index
+            break
+    if first_test_group is None:
         raise ValueError(
-            f"insufficient signals for walk-forward: need at least {required}, "
-            f"received {len(ordered)}"
+            f"insufficient fully matured eligible training labels: need "
+            f"{min_training_samples} before an OOS signal"
         )
 
-    test_size = remaining_signals // fold_count
+    test_groups = time_groups[first_test_group:]
+    if not test_groups:
+        raise ValueError("insufficient OOS signal groups")
+
+    # Partition contiguous time groups into the largest possible number of
+    # folds while satisfying both signal and eligible-outcome minima in each.
+    # If one partition cannot satisfy every fold, retry with fewer folds.
+    selected_chunks = None
+    selected_fold_count = 0
+    for candidate_fold_count in range(max_folds, min_folds - 1, -1):
+        cursor = 0
+        remaining_signals = sum(len(group) for group in test_groups)
+        remaining_eligible = sum(
+            1 for group in test_groups for row in group if row["eligible"]
+        )
+        chunks = []
+        possible = True
+
+        for fold_index in range(candidate_fold_count):
+            folds_left = candidate_fold_count - fold_index
+            max_end = len(test_groups) - (folds_left - 1)
+            if folds_left == 1:
+                chunk = test_groups[cursor:]
+                signal_count = sum(len(group) for group in chunk)
+                eligible_count = sum(
+                    1 for group in chunk for row in group if row["eligible"]
+                )
+                if (
+                    signal_count < min_test_signals_per_fold
+                    or eligible_count < min_test_samples_per_fold
+                ):
+                    possible = False
+                    break
+                chunks.append(chunk)
+                cursor = len(test_groups)
+                break
+
+            target_signals = math.ceil(remaining_signals / folds_left)
+            target_eligible = math.ceil(remaining_eligible / folds_left)
+            candidate_boundaries = []
+            signal_count = 0
+            eligible_count = 0
+            for end_index in range(cursor + 1, max_end + 1):
+                next_group = test_groups[end_index - 1]
+                signal_count += len(next_group)
+                eligible_count += sum(1 for row in next_group if row["eligible"])
+                signals_left = remaining_signals - signal_count
+                eligible_left = remaining_eligible - eligible_count
+                if (
+                    signal_count < min_test_signals_per_fold
+                    or eligible_count < min_test_samples_per_fold
+                    or signals_left < min_test_signals_per_fold * (folds_left - 1)
+                    or eligible_left < min_test_samples_per_fold * (folds_left - 1)
+                ):
+                    continue
+                score = (
+                    abs(signal_count - target_signals) / max(1, remaining_signals)
+                    + abs(eligible_count - target_eligible) / max(1, remaining_eligible)
+                )
+                candidate_boundaries.append((
+                    score,
+                    end_index,
+                    signal_count,
+                    eligible_count,
+                ))
+
+            if not candidate_boundaries:
+                possible = False
+                break
+            _, chosen_end, chosen_signals, chosen_eligible = min(
+                candidate_boundaries,
+                key=lambda item: (item[0], item[1]),
+            )
+            chunks.append(test_groups[cursor:chosen_end])
+            cursor = chosen_end
+            remaining_signals -= chosen_signals
+            remaining_eligible -= chosen_eligible
+
+        if possible and cursor == len(test_groups) and len(chunks) == candidate_fold_count:
+            selected_chunks = chunks
+            selected_fold_count = candidate_fold_count
+            break
+
+    if selected_chunks is None:
+        raise ValueError(
+            f"insufficient chronological OOS windows: need {min_folds} folds "
+            f"with at least {min_test_signals_per_fold} signals and "
+            f"{min_test_samples_per_fold} eligible outcomes per fold"
+        )
+
     predictions = []
     fold_reports = []
     training_counts = []
-    for fold_index in range(fold_count):
-        start_index = min_training_samples + fold_index * test_size
-        end_index = (
-            len(ordered) if fold_index == fold_count - 1
-            else min(len(ordered), start_index + test_size)
-        )
-        test_rows = ordered[start_index:end_index]
-        if len(test_rows) < min_test_signals_per_fold:
-            continue
+    for fold_id, chunk in enumerate(selected_chunks, start=1):
+        test_rows = [row for time_group in chunk for row in time_group]
         test_start_ms = test_rows[0]["signal_timestamp_ms"]
 
         train_rows = [
             row for row in eligible_rows
-            if row["signal_timestamp_ms"] < test_start_ms
-            and row["exit_timestamp_ms"] < test_start_ms
+            if row["exit_timestamp_ms"] < test_start_ms
         ]
         if len(train_rows) < min_training_samples:
             raise ValueError(
-                f"fold {fold_index + 1} has only {len(train_rows)} fully matured "
+                f"fold {fold_id} has only {len(train_rows)} fully matured "
                 f"eligible training labels; minimum is {min_training_samples}"
             )
 
-        model = fit_ridge(train_rows, alpha=ridge_alpha)
-        fold_id = fold_index + 1
+        fitted_model = fit_ridge(train_rows, alpha=ridge_alpha)
         eligible_test_rows = [row for row in test_rows if row["eligible"]]
         excluded_test_rows = [row for row in test_rows if not row["eligible"]]
         excluded_reasons: dict[str, int] = {}
         for row in excluded_test_rows:
-            excluded_reasons[row["exit_reason"]] = excluded_reasons.get(row["exit_reason"], 0) + 1
+            excluded_reasons[row["exit_reason"]] = (
+                excluded_reasons.get(row["exit_reason"], 0) + 1
+            )
 
         fold_prediction_rows = []
         for row in eligible_test_rows:
-            predicted = predict_ridge(model, row["features"])
+            predicted = predict_ridge(fitted_model, row["features"])
             prediction = {
                 "sample_id": row["sample_id"],
                 "fold_id": fold_id,
@@ -340,12 +441,12 @@ def walk_forward_predict(
                 max(row["exit_timestamp_ms"] for row in test_rows)
             ),
             "model_parameters": {
-                "model_family": model["model_family"],
-                "model_version": model["model_version"],
-                "feature_schema_version": model["feature_schema_version"],
-                "ridge_alpha": model["ridge_alpha"],
-                "intercept": model["intercept"],
-                "coefficients": model["coefficients"],
+                "model_family": fitted_model["model_family"],
+                "model_version": fitted_model["model_version"],
+                "feature_schema_version": fitted_model["feature_schema_version"],
+                "ridge_alpha": fitted_model["ridge_alpha"],
+                "intercept": fitted_model["intercept"],
+                "coefficients": fitted_model["coefficients"],
             },
             "test_predictions": fold_prediction_rows,
         })
@@ -358,16 +459,20 @@ def walk_forward_predict(
     all_excluded = [row for row in ordered if not row["eligible"]]
     excluded_reasons: dict[str, int] = {}
     for row in all_excluded:
-        excluded_reasons[row["exit_reason"]] = excluded_reasons.get(row["exit_reason"], 0) + 1
+        excluded_reasons[row["exit_reason"]] = (
+            excluded_reasons.get(row["exit_reason"], 0) + 1
+        )
     oos_excluded_reasons: dict[str, int] = {}
     for fold in fold_reports:
         for reason, count in (fold.get("excluded_test_reasons") or {}).items():
-            oos_excluded_reasons[reason] = oos_excluded_reasons.get(reason, 0) + int(count)
+            oos_excluded_reasons[reason] = (
+                oos_excluded_reasons.get(reason, 0) + int(count)
+            )
     oos_excluded_samples = sum(oos_excluded_reasons.values())
 
     final_model = fit_ridge(eligible_rows, alpha=ridge_alpha)
     return {
-        "fold_count": len(fold_reports),
+        "fold_count": selected_fold_count,
         "min_training_samples_per_fold": min(training_counts),
         "total_training_rows_used_across_folds": sum(training_counts),
         "oos_signals": sum(row["test_signal_count"] for row in fold_reports),

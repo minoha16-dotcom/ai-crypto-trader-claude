@@ -149,7 +149,7 @@ def test_walk_forward_uses_only_fully_matured_pre_test_labels():
     for row in samples[120:200]:
         row["exit_timestamp"] = first_test_start + 1
 
-    with pytest.raises(ValueError, match="fully matured eligible training labels"):
+    with pytest.raises(ValueError, match="fully matured eligible training labels|insufficient chronological OOS windows"):
         walk_forward_predict(
             samples,
             min_training_samples=200,
@@ -585,4 +585,34 @@ def test_approval_rejects_oos_signal_count_not_partitioned_into_eligible_or_excl
         reason["code"] == "OOS_SIGNAL_COUNT_MISMATCH"
         or reason["code"] == "OOS_OUTCOME_PARTITION_MISMATCH"
         for reason in result["rejection_reasons"]
+    )
+
+
+
+def test_walk_forward_does_not_split_concurrent_wallet_signals_across_folds():
+    samples = _samples(340)
+    # Two independently identified wallet positions signal at exactly the same
+    # UTC timestamp; their labels and predictions must remain in one fold.
+    duplicate = dict(samples[230])
+    duplicate["sample_id"] = "concurrent-wallet-trade"
+    samples.append(duplicate)
+
+    result = walk_forward_predict(
+        samples,
+        min_training_samples=200,
+        min_folds=3,
+        max_folds=3,
+        min_test_samples_per_fold=20,
+        min_test_signals_per_fold=20,
+    )
+
+    fold_by_sample = {
+        row["sample_id"]: row["fold_id"]
+        for fold in result["folds"]
+        for row in fold["test_predictions"]
+    }
+    assert fold_by_sample["trade-230"] == fold_by_sample["concurrent-wallet-trade"]
+    assert all(
+        fold["test_end_utc"] < next_fold["test_start_utc"]
+        for fold, next_fold in zip(result["folds"], result["folds"][1:])
     )
