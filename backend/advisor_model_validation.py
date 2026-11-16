@@ -33,6 +33,8 @@ DEFAULT_POLICY = {
     "min_oos_samples": 100,
     "min_oos_samples_per_fold": 20,
     "min_oos_signals_per_fold": 20,
+    "min_oos_time_blocks_per_fold": 5,
+    "bootstrap_block_hours": 6,
     "min_top_tercile_samples": 30,
     "bootstrap_resamples": 2000,
     "confidence_level": 0.95,
@@ -322,6 +324,10 @@ def walk_forward_predict(
             "training_samples": len(train_rows),
             "test_signal_count": len(test_rows),
             "test_samples": len(eligible_test_rows),
+            "oos_time_blocks": len({
+                row["signal_timestamp_ms"] // (6 * 60 * 60 * 1000)
+                for row in eligible_test_rows
+            }),
             "excluded_test_samples": len(excluded_test_rows),
             "excluded_test_reasons": dict(sorted(excluded_reasons.items())),
             "training_signal_start_utc": _iso_utc(train_rows[0]["signal_timestamp_ms"]),
@@ -413,13 +419,33 @@ def bootstrap_uplift_interval(
     resamples: int = 2000,
     confidence_level: float = 0.95,
     seed: int = 271828,
+    block_hours: int = 6,
+    min_blocks_per_fold: int = 5,
 ) -> list[float] | None:
-    """Fold-stratified percentile bootstrap for top-tercile minus all-OOS mean R."""
-    by_fold: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    """Fold-stratified 6h-block bootstrap for Top-Tercile uplift.
+
+    Signals from the same UTC time block are sampled together so a busy market
+    period is not incorrectly treated as dozens of independent observations.
+    Each fold retains its own number of time blocks and its own ranking cut.
+    """
+    by_fold: dict[int, dict[int, list[dict[str, Any]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    block_hours = int(block_hours)
+    min_blocks_per_fold = int(min_blocks_per_fold)
+    if block_hours < 1 or min_blocks_per_fold < 1:
+        raise ValueError("bootstrap block policy must be positive")
+    block_ms = block_hours * 60 * 60 * 1000
     for row in rows:
-        by_fold[int(row["fold_id"])].append(row)
+        timestamp = _timestamp_ms(row.get("signal_timestamp"), "signal_timestamp")
+        fold_id = int(row["fold_id"])
+        by_fold[fold_id][timestamp // block_ms].append(row)
+
     if len(by_fold) < 2 or not rows:
         return None
+    if any(len(blocks) < min_blocks_per_fold for blocks in by_fold.values()):
+        return None
+
     resamples = int(resamples)
     if resamples < 200:
         raise ValueError("at least 200 bootstrap resamples are required")
@@ -428,26 +454,44 @@ def bootstrap_uplift_interval(
         raise ValueError("confidence_level must be between 0.5 and 1.0")
 
     rng = random.Random(int(seed))
-    fold_rows = [by_fold[key] for key in sorted(by_fold)]
+    fold_blocks = [
+        [blocks[key] for key in sorted(blocks)]
+        for _, blocks in sorted(by_fold.items())
+    ]
     uplift_values = []
     for _ in range(resamples):
-        sampled_folds = [
-            [rng.choice(rows_for_fold) for _ in rows_for_fold]
-            for rows_for_fold in fold_rows
-        ]
-        sampled_all = [row for fold in sampled_folds for row in fold]
+        sampled_folds = []
+        for blocks in fold_blocks:
+            sampled_blocks = [
+                rng.choice(blocks)
+                for _ in range(len(blocks))
+            ]
+            sampled_folds.append([
+                row for block in sampled_blocks for row in block
+            ])
+        sampled_all = [row for fold_rows in sampled_folds for row in fold_rows]
         sampled_top = [
-            row for fold in sampled_folds
-            for row in _top_tercile(fold)
+            row for fold_rows in sampled_folds
+            for row in _top_tercile(fold_rows)
         ]
+        if not sampled_all or not sampled_top:
+            continue
         all_mean = sum(float(row["r_multiple"]) for row in sampled_all) / len(sampled_all)
         top_mean = sum(float(row["r_multiple"]) for row in sampled_top) / len(sampled_top)
         uplift_values.append(top_mean - all_mean)
 
+    if len(uplift_values) < max(200, resamples // 2):
+        return None
     uplift_values.sort()
     tail = (1.0 - confidence_level) / 2.0
-    low_index = max(0, min(len(uplift_values) - 1, int(math.floor(tail * len(uplift_values)))))
-    high_index = max(0, min(len(uplift_values) - 1, int(math.ceil((1.0 - tail) * len(uplift_values)) - 1)))
+    low_index = max(
+        0,
+        min(len(uplift_values) - 1, int(math.floor(tail * len(uplift_values)))),
+    )
+    high_index = max(
+        0,
+        min(len(uplift_values) - 1, int(math.ceil((1.0 - tail) * len(uplift_values)) - 1)),
+    )
     return [uplift_values[low_index], uplift_values[high_index]]
 
 
@@ -780,8 +824,31 @@ def evaluate_approval(
             break
 
     fold_prediction_counts = {fold_id: 0 for fold_id in fold_by_id}
+    fold_time_blocks: dict[int, set[int]] = {
+        fold_id: set() for fold_id in fold_by_id
+    }
+    block_hours = int(policy["bootstrap_block_hours"])
+    block_ms = block_hours * 60 * 60 * 1000
     for row in valid_prediction_rows:
         fold_prediction_counts[row["fold_id"]] += 1
+        signal_ms = _timestamp_ms(row["signal_timestamp"], "prediction.signal_timestamp")
+        fold_time_blocks[row["fold_id"]].add(signal_ms // block_ms)
+    time_block_counts = [
+        len(fold_time_blocks[fold_id])
+        for fold_id in sorted(fold_time_blocks)
+    ]
+    metrics["oos_time_blocks_per_fold"] = time_block_counts
+    if (
+        len(time_block_counts) < int(policy["min_walk_forward_folds"])
+        or any(count < int(policy["min_oos_time_blocks_per_fold"]) for count in time_block_counts)
+    ):
+        reasons.append({
+            "code": "INSUFFICIENT_OOS_TIME_BLOCKS",
+            "detail": (
+                f"each OOS fold must contain at least {policy['min_oos_time_blocks_per_fold']} "
+                f"distinct {block_hours}h UTC blocks; observed {time_block_counts}"
+            ),
+        })
     for fold_id, fold in fold_by_id.items():
         if fold_prediction_counts.get(fold_id, 0) != int(fold.get("test_samples", 0)):
             reasons.append({
@@ -811,6 +878,8 @@ def evaluate_approval(
                 resamples=int(policy["bootstrap_resamples"]),
                 confidence_level=float(policy["confidence_level"]),
                 seed=int(policy["bootstrap_seed"]),
+                block_hours=int(policy["bootstrap_block_hours"]),
+                min_blocks_per_fold=int(policy["min_oos_time_blocks_per_fold"]),
             )
             metrics["uplift_confidence_interval_95"] = ci
             if top_count < int(policy["min_top_tercile_samples"]):
