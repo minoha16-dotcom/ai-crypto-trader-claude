@@ -1,10 +1,10 @@
 import hashlib
 import math
+from datetime import datetime, timezone
 
 import pytest
 
 from backend.advisor_model_validation import (
-    DEFAULT_POLICY,
     bootstrap_uplift_interval,
     evaluate_approval,
     fit_ridge,
@@ -12,6 +12,10 @@ from backend.advisor_model_validation import (
     train_validate_group,
     walk_forward_predict,
 )
+
+
+def _timestamp_ms(day, hour=0):
+    return int(datetime(2026, 11, day, hour, tzinfo=timezone.utc).timestamp() * 1000)
 
 
 def _features(index):
@@ -24,39 +28,45 @@ def _features(index):
     }
 
 
-def _samples(count, start_ms=1_760_000_000_000):
+def _samples(count, start_ms=None):
+    if start_ms is None:
+        start_ms = _timestamp_ms(2)
     rows = []
     for index in range(count):
         signal_ms = start_ms + index * 60 * 60 * 1000
-        # Outcomes mature before the next test partition; real-world overlap is
-        # separately guarded by the explicit exit_timestamp cutoff.
         r_value = 0.65 if index % 2 else -0.15
         rows.append({
             "sample_id": f"trade-{index}",
             "signal_timestamp": signal_ms,
             "exit_timestamp": signal_ms + 10 * 60 * 1000,
+            "exit_reason": "TARGET" if r_value > 0 else "STOP",
             "features": _features(index),
             "r_multiple": r_value,
         })
     return rows
 
 
-def _manifest(start_ms):
+def _manifest(_unused=0):
     return {
-        "source_provider": "Hyperliquid public fills + UnderHyper leaderboard",
-        "source_url": "https://underhyper.com/data/leaderboard/",
-        "source_license": "CC BY 4.0; attribute UnderHyper",
+        "source_provider": "Hyperliquid public leaderboard + public Info API",
+        "source_url": "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard",
+        "source_metadata_url": "https://underhyper.com/data/leaderboard.json",
+        "source_license": (
+            "Hyperliquid raw public data; endpoint does not state a separate CC BY grant. "
+            "UnderHyper metadata is CC BY 4.0 and is not assumed to license raw Hyperliquid data."
+        ),
         "source_snapshot_utc": "2026-11-01T00:00:00+00:00",
         "source_snapshot_sha256": "a" * 64,
+        "source_metadata_sha256": "b" * 64,
         "cohort_selection_as_of_utc": "2026-11-01T00:00:00+00:00",
         "data_start_utc": "2026-11-02T00:00:00+00:00",
-        "data_end_utc": "2026-11-15T00:00:00+00:00",
+        "data_end_utc": "2026-12-15T00:00:00+00:00",
         "model_version": "1.0.0",
         "feature_schema_version": "advisor-r5-v1",
         "code_sha": "abcdef1234567",
         "backtest_config": {
-            "risk_unit_definition": "net PnL divided by standardized 2xATR-or-0.5pct initial risk",
-            "fee_model": "actual Hyperliquid fill fees plus configured residual fees",
+            "risk_unit_definition": "net PnL divided by standardized max(2xATR, 0.5pct entry) risk",
+            "fee_model": "actual fill fees plus configured residual fees",
             "slippage_model": "conservative 2 bps each side",
             "slippage_bps": 2.0,
             "fee_rate": 0.0006,
@@ -67,19 +77,53 @@ def _manifest(start_ms):
     }
 
 
-def _successful_prediction_rows():
+def _successful_prediction_rows(actual_zero=False):
     rows = []
+    base = _timestamp_ms(3)
     for fold in range(1, 4):
+        fold_start = base + (fold - 1) * 48 * 60 * 60 * 1000
         for index in range(40):
             predicted = float(40 - index)
-            actual = 1.0 if index < 14 else -0.25
+            actual = 0.0 if actual_zero else (1.0 if index < 14 else -0.25)
+            signal_ms = fold_start + index * 60 * 60 * 1000
             rows.append({
                 "sample_id": f"f{fold}-{index}",
                 "fold_id": fold,
+                "signal_timestamp": datetime.fromtimestamp(
+                    signal_ms / 1000, tz=timezone.utc
+                ).isoformat(),
+                "exit_timestamp": datetime.fromtimestamp(
+                    (signal_ms + 10 * 60 * 1000) / 1000, tz=timezone.utc
+                ).isoformat(),
+                "exit_reason": "TARGET" if actual > 0 else "STOP",
                 "predicted_r_multiple": predicted,
                 "r_multiple": actual,
             })
     return rows
+
+
+def _approval_fold_reports(sample_count=40, train_count=250):
+    base = _timestamp_ms(3)
+    folds = []
+    for fold in range(1, 4):
+        start_ms = base + (fold - 1) * 48 * 60 * 60 * 1000
+        end_ms = start_ms + 39 * 60 * 60 * 1000
+        folds.append({
+            "fold_id": fold,
+            "training_samples": train_count,
+            "test_signal_count": 40,
+            "test_samples": sample_count,
+            "training_label_end_utc": datetime.fromtimestamp(
+                (start_ms - 60 * 1000) / 1000, tz=timezone.utc
+            ).isoformat(),
+            "test_start_utc": datetime.fromtimestamp(
+                start_ms / 1000, tz=timezone.utc
+            ).isoformat(),
+            "test_end_utc": datetime.fromtimestamp(
+                end_ms / 1000, tz=timezone.utc
+            ).isoformat(),
+        })
+    return folds
 
 
 def test_ridge_model_fits_and_predicts_finite_r_multiple():
@@ -97,36 +141,78 @@ def test_ridge_model_fits_and_predicts_finite_r_multiple():
 
 def test_walk_forward_uses_only_fully_matured_pre_test_labels():
     samples = _samples(320)
-    # Make the last 80 pre-test labels close after the first test begins. The
-    # walk-forward runner must not silently include them as training examples.
     first_test_start = samples[200]["signal_timestamp"]
     for row in samples[120:200]:
         row["exit_timestamp"] = first_test_start + 1
 
-    with pytest.raises(ValueError, match="fully matured training labels"):
+    with pytest.raises(ValueError, match="fully matured eligible training labels"):
         walk_forward_predict(
             samples,
             min_training_samples=200,
             min_folds=3,
             max_folds=3,
             min_test_samples_per_fold=20,
+            min_test_signals_per_fold=20,
         )
 
 
-def test_walk_forward_produces_at_least_three_chronological_oos_folds():
+def test_walk_forward_produces_three_chronological_folds_and_separate_oos_counts():
     result = walk_forward_predict(
         _samples(320),
         min_training_samples=200,
         min_folds=3,
         max_folds=3,
         min_test_samples_per_fold=20,
+        min_test_signals_per_fold=20,
     )
 
     assert result["fold_count"] == 3
     assert result["min_training_samples_per_fold"] >= 200
     assert len(result["oos_predictions"]) == 120
+    assert result["oos_signals"] == 120
+    assert result["oos_samples"] == 120
     assert result["folds"][0]["test_end_utc"] < result["folds"][1]["test_start_utc"]
     assert result["folds"][1]["test_end_utc"] < result["folds"][2]["test_start_utc"]
+
+
+def test_period_end_and_liquidation_are_excluded_but_remain_oos_signals():
+    samples = _samples(320)
+    for index in range(200, 320, 10):
+        samples[index]["exit_reason"] = "PERIOD_END" if index % 20 == 0 else "LIQUIDATION_GAP"
+
+    result = walk_forward_predict(
+        samples,
+        min_training_samples=200,
+        min_folds=3,
+        max_folds=3,
+        min_test_samples_per_fold=20,
+        min_test_signals_per_fold=20,
+    )
+
+    assert result["oos_signals"] == 120
+    assert result["oos_samples"] == 108
+    assert result["input_excluded_samples"] == 12
+    assert result["input_excluded_reasons"] == {
+        "LIQUIDATION_GAP": 6,
+        "PERIOD_END": 6,
+    }
+    assert all(fold["test_signal_count"] == 40 for fold in result["folds"])
+    assert all(fold["test_samples"] == 36 for fold in result["folds"])
+
+
+def test_unknown_exit_reason_is_never_a_training_label():
+    samples = _samples(260)
+    samples[0]["exit_reason"] = "MANUAL_CLOSE"
+    result = walk_forward_predict(
+        samples,
+        min_training_samples=200,
+        min_folds=3,
+        max_folds=3,
+        min_test_samples_per_fold=20,
+        min_test_signals_per_fold=20,
+    )
+    assert result["input_excluded_reasons"]["MANUAL_CLOSE"] == 1
+    assert result["input_eligible_samples"] == 259
 
 
 def test_bootstrap_uplift_is_reproducible_and_positive_for_separated_scores():
@@ -144,22 +230,25 @@ def test_approval_requires_provenance_and_non_lookahead_cohort_cutoff():
         "symbol": "BTC/USDC",
         "market_type": "futures",
         "timeframe": "1h",
-        "excluded_samples": 4,
     }
+    rows = _successful_prediction_rows()
     walk_forward = {
         "min_training_samples_per_fold": 250,
         "fold_count": 3,
         "oos_signals": 120,
-        "folds": [{"test_samples": 40, "training_samples": 250}] * 3,
-        "oos_predictions": _successful_prediction_rows(),
+        "oos_samples": 120,
+        "input_excluded_samples": 0,
+        "input_excluded_reasons": {},
+        "folds": _approval_fold_reports(),
+        "oos_predictions": rows,
     }
-    manifest = _manifest(0)
+    manifest = _manifest()
 
     approved = evaluate_approval(
         group=group,
         walk_forward=walk_forward,
         manifest=manifest,
-        dataset_sha256="b" * 64,
+        dataset_sha256="c" * 64,
     )
     assert approved["approved"] is True
     assert approved["model_status"] == "APPROVED"
@@ -173,11 +262,14 @@ def test_approval_requires_provenance_and_non_lookahead_cohort_cutoff():
         group=group,
         walk_forward=walk_forward,
         manifest=leaking_manifest,
-        dataset_sha256="b" * 64,
+        dataset_sha256="c" * 64,
     )
     assert rejected["approved"] is False
     assert rejected["model_status"] == "DISABLED"
-    assert any(reason["code"] == "COHORT_SELECTION_LOOKAHEAD" for reason in rejected["rejection_reasons"])
+    assert any(
+        reason["code"] == "COHORT_SELECTION_LOOKAHEAD"
+        for reason in rejected["rejection_reasons"]
+    )
 
 
 def test_approval_rejects_top_tercile_without_positive_lower_confidence_bound():
@@ -187,32 +279,30 @@ def test_approval_rejects_top_tercile_without_positive_lower_confidence_bound():
         "market_type": "futures",
         "timeframe": "1h",
     }
-    rows = []
-    for fold in range(1, 4):
-        for index in range(40):
-            rows.append({
-                "sample_id": f"f{fold}-{index}",
-                "fold_id": fold,
-                "predicted_r_multiple": float(index),
-                "r_multiple": 0.0,
-            })
+    rows = _successful_prediction_rows(actual_zero=True)
     walk_forward = {
         "min_training_samples_per_fold": 250,
         "fold_count": 3,
         "oos_signals": 120,
-        "folds": [{"test_samples": 40, "training_samples": 250}] * 3,
+        "oos_samples": 120,
+        "input_excluded_samples": 0,
+        "input_excluded_reasons": {},
+        "folds": _approval_fold_reports(),
         "oos_predictions": rows,
     }
     result = evaluate_approval(
         group=group,
         walk_forward=walk_forward,
-        manifest=_manifest(0),
-        dataset_sha256="c" * 64,
+        manifest=_manifest(),
+        dataset_sha256="d" * 64,
         policy={"bootstrap_resamples": 500},
     )
 
     assert result["approved"] is False
-    assert any(reason["code"] == "UPLIFT_CI_INCLUDES_ZERO" for reason in result["rejection_reasons"])
+    assert any(
+        reason["code"] == "UPLIFT_CI_INCLUDES_ZERO"
+        for reason in result["rejection_reasons"]
+    )
 
 
 def test_insufficient_per_group_training_count_never_approves():
@@ -226,21 +316,27 @@ def test_insufficient_per_group_training_count_never_approves():
         "min_training_samples_per_fold": 199,
         "fold_count": 3,
         "oos_signals": 120,
-        "folds": [{"test_samples": 40, "training_samples": 199}] * 3,
+        "oos_samples": 120,
+        "input_excluded_samples": 0,
+        "input_excluded_reasons": {},
+        "folds": _approval_fold_reports(train_count=199),
         "oos_predictions": _successful_prediction_rows(),
     }
     result = evaluate_approval(
         group=group,
         walk_forward=walk_forward,
-        manifest=_manifest(0),
-        dataset_sha256="d" * 64,
+        manifest=_manifest(),
+        dataset_sha256="e" * 64,
     )
 
     assert result["approved"] is False
-    assert any(reason["code"] == "INSUFFICIENT_TRAINING_SAMPLES" for reason in result["rejection_reasons"])
+    assert any(
+        reason["code"] == "INSUFFICIENT_TRAINING_SAMPLES"
+        for reason in result["rejection_reasons"]
+    )
 
 
-def test_train_validate_exports_no_model_when_any_approval_gate_fails():
+def test_train_validate_exports_no_model_when_cohort_selection_looks_ahead():
     group = {
         "exchange": "hyperliquid",
         "symbol": "BTC/USDC",
@@ -250,19 +346,19 @@ def test_train_validate_exports_no_model_when_any_approval_gate_fails():
         "provenance": {
             "cohort_selection_as_of_utc": "2026-11-15T00:00:00+00:00",
             "data_start_utc": "2026-11-02T00:00:00+00:00",
-            "data_end_utc": "2026-11-15T00:00:00+00:00",
+            "data_end_utc": "2026-12-15T00:00:00+00:00",
         },
     }
-    manifest = _manifest(0)
     result = train_validate_group(
         group=group,
-        manifest=manifest,
+        manifest=_manifest(),
         dataset_sha256=hashlib.sha256(b"dataset").hexdigest(),
         policy={
             "min_training_samples_per_fold": 200,
             "min_walk_forward_folds": 3,
             "max_walk_forward_folds": 3,
             "min_oos_samples_per_fold": 20,
+            "min_oos_signals_per_fold": 20,
             "min_oos_samples": 1,
             "min_oos_signals": 1,
             "min_top_tercile_samples": 1,
@@ -273,10 +369,9 @@ def test_train_validate_exports_no_model_when_any_approval_gate_fails():
     assert result["model"] is None
     assert result["approval"]["model_status"] == "DISABLED"
     assert any(
-        reason["code"] == "COHORT_SELECTION_LOOKAHEAD"
+        reason["code"] == "SAMPLE_PRECEDES_COHORT_CUTOFF"
         for reason in result["approval"]["rejection_reasons"]
     )
-
 
 
 def test_train_validate_rejects_samples_outside_declared_manifest_window():
@@ -289,18 +384,19 @@ def test_train_validate_rejects_samples_outside_declared_manifest_window():
         "provenance": {
             "cohort_selection_as_of_utc": "2026-11-01T00:00:00+00:00",
             "data_start_utc": "2026-11-02T00:00:00+00:00",
-            "data_end_utc": "2026-11-15T00:00:00+00:00",
+            "data_end_utc": "2026-11-05T00:00:00+00:00",
         },
     }
     result = train_validate_group(
         group=group,
-        manifest=_manifest(0),
+        manifest=_manifest(),
         dataset_sha256=hashlib.sha256(b"dataset").hexdigest(),
         policy={
             "min_training_samples_per_fold": 200,
             "min_walk_forward_folds": 3,
             "max_walk_forward_folds": 3,
             "min_oos_samples_per_fold": 20,
+            "min_oos_signals_per_fold": 20,
             "min_oos_samples": 1,
             "min_oos_signals": 1,
             "min_top_tercile_samples": 1,
@@ -313,3 +409,24 @@ def test_train_validate_rejects_samples_outside_declared_manifest_window():
         reason["code"] == "SAMPLE_OUTSIDE_MANIFEST_DATA_WINDOW"
         for reason in result["approval"]["rejection_reasons"]
     )
+
+
+def test_end_to_end_model_exports_only_when_all_provenance_and_oos_gates_pass():
+    group = {
+        "exchange": "hyperliquid",
+        "symbol": "BTC/USDC",
+        "market_type": "futures",
+        "timeframe": "1h",
+        "samples": _samples(500),
+    }
+    result = train_validate_group(
+        group=group,
+        manifest=_manifest(),
+        dataset_sha256=hashlib.sha256(b"frozen-dataset").hexdigest(),
+    )
+
+    assert result["approval"]["approved"] is True
+    assert result["model"] is not None
+    assert result["approval"]["metrics"]["oos_signals"] >= 100
+    assert result["approval"]["metrics"]["oos_samples"] >= 100
+    assert result["approval"]["metrics"]["uplift_confidence_interval_95"][0] > 0

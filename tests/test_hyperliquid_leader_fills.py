@@ -1,36 +1,116 @@
-import hashlib
+import json
 
 import pytest
 
 from scripts.fetch_hyperliquid_leader_fills import (
+    MAX_PAGE_SIZE_BY_TYPE,
     _fetch_time_range,
+    _load_leaderboard,
     extract_wallet_addresses,
 )
 
 
-def test_wallet_extractor_only_accepts_full_public_hex_addresses():
-    payload = {
-        "as_of": "2026-11-16T00:00:00Z",
-        "leaderboardRows": [
-            {"ethAddress": "0x" + "b" * 40, "displayName": "leader"},
-            {"address": "0x" + "a" * 40},
-            {"contract": "0x" + "c" * 40},
-            {"address": "0x1234"},
+def _row(address, pnl, volume):
+    return {
+        "ethAddress": address,
+        "windowPerformances": [
+            ["day", {"pnl": "1", "roi": "0.01", "vlm": "10"}],
+            ["week", {"pnl": "2", "roi": "0.02", "vlm": "20"}],
+            ["month", {"pnl": str(pnl), "roi": "0.05", "vlm": str(volume)}],
+            ["allTime", {"pnl": "5", "roi": "0.1", "vlm": "100"}],
         ],
     }
 
-    payload["top_pnl"] = [
-        {"ethAddress": "0x" + "b" * 40, "pnl30d": "500"},
-        {"address": "0x" + "a" * 40, "pnl30d": "200"},
-        {"address": "0x" + "c" * 40, "pnl30d": "-10"},
-    ]
-    assert extract_wallet_addresses(payload, cohort="top_pnl") == [
-        "0x" + "b" * 40,
-        "0x" + "a" * 40,
+
+def _leaderboard_rows():
+    rows = []
+    for index in range(100):
+        rows.append(_row(f"0x{index + 1:040x}", index - 20, 1000 + index))
+    rows.extend([
+        _row("0x" + "a" * 40, 5000, 500),
+        _row("0x" + "b" * 40, 1000, 9000),
+    ])
+    return {"leaderboardRows": rows}
+
+
+def test_wallet_extractor_ranks_real_hyperliquid_schema_by_positive_month_pnl():
+    payload = _leaderboard_rows()
+    addresses = extract_wallet_addresses(payload, cohort="top_pnl")
+
+    assert addresses[0] == "0x" + "a" * 40
+    assert addresses[1] == "0x" + "b" * 40
+    assert len(addresses) == 81
+    assert all(address.startswith("0x") and len(address) == 42 for address in addresses)
+
+
+def test_wallet_extractor_uses_distinct_volume_cohort_when_explicitly_requested():
+    payload = _leaderboard_rows()
+    pnl_ranked = extract_wallet_addresses(payload, cohort="top_pnl")
+    volume_ranked = extract_wallet_addresses(payload, cohort="top_volume")
+
+    assert pnl_ranked[0] == "0x" + "a" * 40
+    assert volume_ranked[0] == "0x" + "b" * 40
+    assert set(pnl_ranked) != set(volume_ranked)
+
+
+def test_wallet_extractor_rejects_unknown_schema_instead_of_scraping_arbitrary_addresses():
+    payload = {"wallets": [{"address": "0x" + "a" * 40}]}
+    with pytest.raises(ValueError, match="leaderboard schema"):
+        extract_wallet_addresses(payload, cohort="top_pnl")
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self.raw = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+
+    def read(self):
+        return self.raw
+
+
+def test_leaderboard_loader_reads_raw_board_and_separate_snapshot_metadata(monkeypatch):
+    from scripts import fetch_hyperliquid_leader_fills as module
+
+    metadata = {
+        "as_of": "2026-11-16T10:18:04.823Z",
+        "license": "CC BY 4.0",
+    }
+    board = _leaderboard_rows()
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append(request.full_url)
+        if request.full_url == "https://metadata.invalid/snapshot.json":
+            return _FakeResponse(metadata)
+        if request.full_url == "https://board.invalid/leaderboard":
+            return _FakeResponse(board)
+        raise AssertionError(f"unexpected URL {request.full_url}")
+
+    monkeypatch.setattr(module, "urlopen", fake_urlopen)
+    raw_board, raw_metadata, returned_metadata, addresses, snapshot = _load_leaderboard(
+        "https://board.invalid/leaderboard",
+        "https://metadata.invalid/snapshot.json",
+        1,
+        cohort="top_pnl",
+    )
+
+    assert len(raw_board) > 0
+    assert len(raw_metadata) > 0
+    assert returned_metadata == metadata
+    assert addresses[0] == "0x" + "a" * 40
+    assert snapshot == "2026-11-16T10:18:04.823Z"
+    assert calls == [
+        "https://metadata.invalid/snapshot.json",
+        "https://board.invalid/leaderboard",
     ]
 
 
-def test_range_fetch_splits_a_saturated_window(monkeypatch):
+def test_range_fetch_splits_saturated_windows(monkeypatch):
     calls = []
 
     def fake_post(body, timeout):
@@ -59,7 +139,7 @@ def test_range_fetch_splits_a_saturated_window(monkeypatch):
     assert rows == sorted(rows, key=lambda row: row["time"])
 
 
-def test_range_fetch_fails_closed_when_page_cannot_be_split(monkeypatch):
+def test_range_fetch_fails_closed_when_saturated_leaf_cannot_be_split(monkeypatch):
     def fake_post(body, timeout):
         return [{"time": 1}] * 2000
 
@@ -82,10 +162,11 @@ def test_range_fetch_fails_closed_when_page_cannot_be_split(monkeypatch):
 
 def test_range_fetch_marks_the_exchange_history_cap(monkeypatch):
     def fake_post(body, timeout):
-        # Each subrange returns small unique records. The aggregate reaches the
-        # hard 10,000-history safety threshold.
         start = body["startTime"]
-        return [{"time": start + index, "tid": f"{start}-{index}"} for index in range(2000)]
+        return [
+            {"time": start + index, "tid": f"{start}-{index}"}
+            for index in range(2000)
+        ]
 
     monkeypatch.setattr(
         "scripts.fetch_hyperliquid_leader_fills._post_info",
@@ -105,65 +186,6 @@ def test_range_fetch_marks_the_exchange_history_cap(monkeypatch):
     assert status["complete"] is False
 
 
-
-def test_wallet_extractor_never_mixes_volume_cohort_into_top_pnl():
-    payload = {
-        "top_by_volume": [
-            {"address": "0x" + "a" * 40, "volume30d": "999"},
-        ],
-        "top_by_pnl": [
-            {"address": "0x" + "b" * 40, "pnl30d": "123"},
-        ],
-    }
-
-    assert extract_wallet_addresses(payload, cohort="top_pnl") == ["0x" + "b" * 40]
-    assert extract_wallet_addresses(payload, cohort="top_volume") == ["0x" + "a" * 40]
-
-
-def test_wallet_extractor_rejects_unknown_json_layout_instead_of_scraping_all_addresses():
-    payload = {
-        "unrelated": [{"address": "0x" + "a" * 40}],
-    }
-    with pytest.raises(ValueError, match="refusing to select arbitrary wallet addresses"):
-        extract_wallet_addresses(payload, cohort="top_pnl")
-
-
-def test_user_funding_uses_the_smaller_time_range_page_limit(monkeypatch):
-    from scripts.fetch_hyperliquid_leader_fills import MAX_PAGE_SIZE_BY_TYPE
-
+def test_endpoint_page_caps_are_explicit_and_distinct():
     assert MAX_PAGE_SIZE_BY_TYPE["userFillsByTime"] == 2000
     assert MAX_PAGE_SIZE_BY_TYPE["userFunding"] == 500
-
-
-
-def test_leaderboard_loader_uses_the_requested_ranked_cohort(monkeypatch):
-    from scripts import fetch_hyperliquid_leader_fills as module
-
-    payload = {
-        "as_of": "2026-11-16T00:00:00Z",
-        "top_pnl": [{"address": "0x" + "a" * 40, "pnl30d": "10"}],
-        "top_volume": [{"address": "0x" + "b" * 40, "volume30d": "20"}],
-    }
-    monkeypatch.setattr(module, "urlopen", lambda *args, **kwargs: _FakeResponse(payload))
-    raw, returned, addresses, as_of = module._load_leaderboard(
-        "https://example.invalid/leaderboard.json", 1, cohort="top_volume"
-    )
-
-    assert returned == payload
-    assert addresses == ["0x" + "b" * 40]
-    assert as_of == "2026-11-16T00:00:00Z"
-
-
-class _FakeResponse:
-    def __init__(self, payload):
-        import json
-        self.raw = json.dumps(payload).encode("utf-8")
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return None
-
-    def read(self):
-        return self.raw
