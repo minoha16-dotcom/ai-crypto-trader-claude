@@ -990,7 +990,7 @@ async def run():
             indent=2,
             ensure_ascii=False,
             allow_nan=False,
-        ) + "\\n",
+        ) + "\n",
         encoding="utf-8",
     )
     lines = [
