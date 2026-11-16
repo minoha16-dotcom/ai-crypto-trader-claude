@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from backend.advisor_model_validation import train_validate_group
+from backend.advisor_model_validation import DEFAULT_POLICY, train_validate_group
 
 
 def main():
@@ -130,6 +130,9 @@ def main():
                 disabled_code = "INSUFFICIENT_WALK_FORWARD_FOLDS"
             elif "insufficient" in error_text and "oos" in error_text:
                 disabled_code = "INSUFFICIENT_OOS_SIGNALS"
+            failure_provenance = dict(manifest)
+            failure_provenance.update(group.get("provenance") or {})
+            failure_provenance["dataset_sha256"] = dataset_sha256
             reports.append({
                 "group": group_key,
                 "positions_seen_before_feature_preparation": int(group.get("positions_seen", len(source_samples))),
@@ -139,6 +142,11 @@ def main():
                 "approval": {
                     "model_status": "DISABLED",
                     "approved": False,
+                    "approval_scope": "RESEARCH_ONLY_EXTERNAL_TRADER_POSITION_OUTCOMES",
+                    "deployment_status": "RESEARCH_ONLY",
+                    "runtime_eligible": False,
+                    "policy": DEFAULT_POLICY,
+                    "provenance": failure_provenance,
                     "rejection_reasons": [{
                         "code": disabled_code,
                         "detail": detail,
