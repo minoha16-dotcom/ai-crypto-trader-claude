@@ -25,6 +25,7 @@ ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 MAX_PAGE_SIZE_BY_TYPE = {"userFillsByTime": 2000, "userFunding": 500}
 MAX_RETAINED_HISTORY = 10000
 MAX_HISTORICAL_ORDERS = 2000
+MAX_TWAP_SLICE_HISTORY = 2000
 INFO_WEIGHT_BUDGET_PER_MINUTE = 900
 INFO_BASE_REQUEST_WEIGHT = 20
 USER_AGENT = "ai-crypto-trader-research/1.1 (read-only public data)"
@@ -263,7 +264,10 @@ def _fetch_time_range(
         )
         unique[key] = row
     ordered = sorted(unique.values(), key=lambda row: int(row["time"]))
-    cap_reached = len(ordered) >= MAX_RETAINED_HISTORY
+    cap_reached = (
+        request_type == "userFillsByTime"
+        and len(ordered) >= MAX_RETAINED_HISTORY
+    )
     if cap_reached:
         truncated = True
     return ordered, {
@@ -272,6 +276,43 @@ def _fetch_time_range(
         "response_page_truncated": truncated,
         "history_limit_reached": cap_reached,
         "complete": not truncated and not cap_reached,
+    }
+
+
+def _fetch_twap_slice_fills(address, start_ms, end_ms, *, timeout):
+    """Fetch the separately exposed TWAP executions, failing closed at 2,000."""
+    response = _post_info(
+        {"type": "userTwapSliceFills", "user": address},
+        timeout,
+    )
+    if not isinstance(response, list):
+        raise RuntimeError("userTwapSliceFills returned a non-list response")
+    history_limit_reached = len(response) >= MAX_TWAP_SLICE_HISTORY
+    rows = []
+    malformed = 0
+    for wrapper in response:
+        if not isinstance(wrapper, dict) or not isinstance(wrapper.get("fill"), dict):
+            malformed += 1
+            continue
+        fill = dict(wrapper["fill"])
+        try:
+            timestamp = int(fill.get("time"))
+        except (TypeError, ValueError, OverflowError):
+            malformed += 1
+            continue
+        if int(start_ms) <= timestamp <= int(end_ms):
+            fill["twapId"] = wrapper.get("twapId")
+            fill["_fill_source"] = "userTwapSliceFills"
+            rows.append(fill)
+    rows.sort(key=lambda row: (int(row["time"]), str(row.get("tid") or "")))
+    return rows, {
+        "rows_returned": len(response),
+        "rows_in_observation_window": len(rows),
+        "malformed_rows": malformed,
+        "history_limit_reached": history_limit_reached,
+        "complete": not history_limit_reached and malformed == 0,
+        "endpoint": "userTwapSliceFills",
+        "limit": MAX_TWAP_SLICE_HISTORY,
     }
 
 
@@ -356,30 +397,38 @@ def main():
             )
             if args.pause_seconds > 0:
                 time.sleep(args.pause_seconds)
+            twap_slice_fills, twap_status = _fetch_twap_slice_fills(
+                address, start_ms, end_ms, timeout=args.timeout
+            )
+            if args.pause_seconds > 0:
+                time.sleep(args.pause_seconds)
             historical_orders, orders_status = _fetch_historical_orders(
                 address, timeout=args.timeout
             )
             complete = (
                 fill_status["complete"]
                 and funding_status["complete"]
+                and twap_status["complete"]
                 and orders_status["complete_within_documented_limit"]
             )
             wallets.append({
                 "address": address,
                 "rank": index,
                 "fills": fills,
+                "twap_slice_fills": twap_slice_fills,
                 "funding": funding,
                 "historical_orders": historical_orders,
                 "complete": complete,
                 "training_eligible": False,
                 "fill_history": fill_status,
                 "funding_history": funding_status,
+                "twap_history": twap_status,
                 "historical_orders_status": orders_status,
             })
             print(
                 f"{index}/{len(selected)} {address}: "
-                f"{len(fills)} fills, {len(funding)} funding rows, "
-                f"{len(historical_orders)} historical orders, "
+                f"{len(fills)} fills + {len(twap_slice_fills)} TWAP slices, "
+                f"{len(funding)} funding rows, {len(historical_orders)} historical orders, "
                 f"{'COMPLETE_RAW_SNAPSHOT' if complete else 'INCOMPLETE'}"
             )
         except Exception as exc:
@@ -387,6 +436,7 @@ def main():
                 "address": address,
                 "rank": index,
                 "fills": [],
+                "twap_slice_fills": [],
                 "funding": [],
                 "historical_orders": [],
                 "complete": False,
@@ -422,6 +472,8 @@ def main():
             "fills_request_type": "userFillsByTime",
             "funding_request_type": "userFunding",
             "historical_orders_request_type": "historicalOrders",
+            "twap_fills_request_type": "userTwapSliceFills",
+            "max_twap_slices_per_wallet": MAX_TWAP_SLICE_HISTORY,
             "max_historical_orders_per_wallet": MAX_HISTORICAL_ORDERS,
             "max_fills_per_response": MAX_PAGE_SIZE_BY_TYPE["userFillsByTime"],
             "max_funding_rows_per_response": MAX_PAGE_SIZE_BY_TYPE["userFunding"],
@@ -434,6 +486,10 @@ def main():
             "wallets_selected": len(selected),
             "wallets_complete_raw_snapshots": complete_wallets,
             "wallets_incomplete_raw_snapshots": len(selected) - complete_wallets,
+            "wallets_with_twap_slices": sum(1 for row in wallets if row.get("twap_slice_fills")),
+            "wallets_with_incomplete_twap_history": sum(
+                1 for row in wallets if not (row.get("twap_history") or {}).get("complete")
+            ),
             "read_only_public_data": True,
             "attribution": "UnderHyper leaderboard metadata, CC BY 4.0; Hyperliquid raw data source separately identified",
             "not_model_ready": True,
@@ -445,6 +501,7 @@ def main():
             "Only fully retrieved raw wallet histories may proceed to a later preparation step.",
             "Hyperliquid userFillsByTime exposes only the 10,000 most recent fills and at most 2,000 fills per response.",
             "Hyperliquid historicalOrders exposes at most 2,000 recent order records per wallet; a full page is treated as incomplete.",
+            "Hyperliquid userTwapSliceFills is a separate latest-2,000 endpoint; a full page is incomplete because the native endpoint cannot paginate older slices.",
             "The raw leaderboard endpoint has no separate explicit reuse license statement; review terms before redistribution.",
             "The fills endpoint does not state each trader's original stop-risk distance. Model labels must use a declared system-normalized risk unit.",
         ],
