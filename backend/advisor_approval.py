@@ -156,24 +156,58 @@ def evaluate_ranking_approval(
     fold_records = list(fold_records or [])
     oos_rows = list(oos_rows or [])
 
+    if not isinstance(group_id, str) or not group_id.strip():
+        reasons.append("MODEL_GROUP_ID_MISSING")
     if not fold_records:
         reasons.append("NO_WALK_FORWARD_FOLDS")
+
+    fold_ids = [str(fold.get("fold_id")) for fold in fold_records]
+    if len(set(fold_ids)) != len(fold_ids):
+        reasons.append("DUPLICATE_WALK_FORWARD_FOLD_ID")
+
+    ordered_folds = sorted(
+        fold_records,
+        key=lambda fold: int(fold.get("test_start_ms", 0)),
+    )
+    previous_test_end = None
+    for fold in ordered_folds:
+        try:
+            test_start = int(fold["test_start_ms"])
+            test_end = int(fold["test_end_ms"])
+            train_end = int(fold["train_end_ms"])
+            if not (train_end <= test_start < test_end):
+                reasons.append("INVALID_WALK_FORWARD_TEMPORAL_ORDER")
+            if previous_test_end is not None and test_start < previous_test_end:
+                reasons.append("OVERLAPPING_OOS_TEST_FOLDS")
+            previous_test_end = test_end
+        except (KeyError, TypeError, ValueError, OverflowError):
+            # The fold-level sample gates still run, but missing temporal
+            # boundaries prevent a fully reproducible approval.
+            reasons.append("MISSING_WALK_FORWARD_TEMPORAL_METADATA")
+
+    sample_ids = set()
     for row in oos_rows:
         if row.get("group_id") != group_id:
             reasons.append("MIXED_OR_MISSING_OOS_GROUP")
             break
+        sample_id = row.get("sample_id")
+        if not sample_id or sample_id in sample_ids:
+            reasons.append("MISSING_OR_DUPLICATE_OOS_SAMPLE_ID")
+            break
+        sample_ids.add(sample_id)
 
     valid_folds = [
         fold for fold in fold_records
         if int(fold.get("training_eligible_samples", 0)) >= min_training_samples
         and int(fold.get("test_eligible_samples", 0)) >= min_oos_samples_per_fold
         and int(fold.get("oos_signals", 0)) >= min_oos_samples_per_fold
-        and bool(fold.get("model_fit_success", True))
+        and bool(fold.get("model_fit_success", False))
+        and fold.get("test_start_ms") is not None
+        and fold.get("test_end_ms") is not None
+        and fold.get("train_end_ms") is not None
     ]
     if len(valid_folds) < min_valid_folds:
-        reasons.append(
-            f"VALID_WALK_FORWARD_FOLDS_BELOW_{min_valid_folds}"
-        )
+        reasons.append(f"VALID_WALK_FORWARD_FOLDS_BELOW_{min_valid_folds}")
 
     valid_fold_ids = {str(fold.get("fold_id")) for fold in valid_folds}
     scored_rows = [
@@ -182,19 +216,18 @@ def evaluate_ranking_approval(
     ]
     oos_signal_count = sum(int(fold.get("oos_signals", 0)) for fold in valid_folds)
     eligible_count = len(scored_rows)
-    max_training_samples = max(
-        (int(fold.get("training_eligible_samples", 0)) for fold in fold_records),
-        default=0,
-    )
+    training_counts = {
+        str(fold.get("fold_id")): int(fold.get("training_eligible_samples", 0))
+        for fold in fold_records
+    }
     minimum_training_samples = min(
-        (int(fold.get("training_eligible_samples", 0)) for fold in valid_folds),
+        (training_counts[str(fold.get("fold_id"))] for fold in valid_folds),
         default=0,
     )
+    maximum_training_samples = max(training_counts.values(), default=0)
 
-    if max_training_samples < min_training_samples:
-        reasons.append(
-            f"TRAINING_SAMPLES_BELOW_{min_training_samples}_FOR_GROUP"
-        )
+    if maximum_training_samples < min_training_samples:
+        reasons.append(f"TRAINING_SAMPLES_BELOW_{min_training_samples}_FOR_GROUP")
     if oos_signal_count < min_oos_signals:
         reasons.append(f"OOS_SIGNALS_BELOW_{min_oos_signals}")
     if eligible_count < min_oos_eligible_samples:
@@ -218,7 +251,7 @@ def evaluate_ranking_approval(
     if uplift is None or uplift <= 0:
         reasons.append("TOP_TERCILE_UPLIFT_NOT_POSITIVE")
     if not uplift_ci or uplift_ci[0] <= 0:
-        reasons.append("UPLIFT_95_CI_INCLUDES_ZERO")
+        reasons.append("UPLIFT_95_CI_LOWER_BOUND_NOT_ABOVE_ZERO")
 
     reasons = list(dict.fromkeys(reasons))
     approved = not reasons
@@ -227,7 +260,8 @@ def evaluate_ranking_approval(
         "approval_status": "APPROVED" if approved else "REJECTED",
         "approval_reasons": reasons,
         "group_id": group_id,
-        "training_eligible_samples": max_training_samples,
+        "training_eligible_samples_by_fold": training_counts,
+        "maximum_training_eligible_samples": maximum_training_samples,
         "minimum_training_samples_across_valid_folds": minimum_training_samples,
         "required_training_samples_per_group": min_training_samples,
         "walk_forward_fold_count": len(fold_records),
@@ -246,10 +280,7 @@ def evaluate_ranking_approval(
             "method": "circular_moving_block_bootstrap",
             "replicates": int(bootstrap_replicates),
             "seed": int(bootstrap_seed),
-            "block_length": (
-                max(2, int(round(eligible_count ** (1.0 / 3.0))))
-                if eligible_count else None
-            ),
+            "block_length": max(2, int(round(eligible_count ** (1.0 / 3.0))) if eligible_count else 0),
             "confidence_level": 0.95,
             "approval_rule": "lower_95_percentile_bound_must_be_greater_than_zero",
         },
