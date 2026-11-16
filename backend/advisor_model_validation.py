@@ -37,6 +37,7 @@ DEFAULT_POLICY = {
     "min_oos_time_blocks_per_fold": 5,
     "bootstrap_block_hours": 24,
     "min_top_tercile_samples": 30,
+    "min_preparation_coverage_pct": 80.0,
     "bootstrap_resamples": 2000,
     "confidence_level": 0.95,
     "bootstrap_seed": 271828,
@@ -921,6 +922,55 @@ def evaluate_approval(
     excluded_count = fold_oos_excluded
     input_excluded_reasons = dict(walk_forward.get("input_excluded_reasons") or {})
     input_excluded_count = int(walk_forward.get("input_excluded_samples", 0) or 0)
+
+    preparation_excluded_count = int(group.get("preparation_excluded_samples", 0) or 0)
+    preparation_excluded_reasons = dict(
+        group.get("preparation_excluded_reasons") or {}
+    )
+    prepared_signal_count = (
+        len(group.get("samples") or [])
+        if "samples" in group else oos_count
+    )
+    positions_seen = int(
+        group.get(
+            "positions_seen",
+            prepared_signal_count + preparation_excluded_count,
+        )
+        or 0
+    )
+    preparation_coverage_pct = (
+        prepared_signal_count / positions_seen * 100.0
+        if positions_seen > 0 else 0.0
+    )
+    if positions_seen != prepared_signal_count + preparation_excluded_count:
+        reasons.append({
+            "code": "PREPARATION_SAMPLE_PARTITION_MISMATCH",
+            "detail": (
+                f"positions_seen={positions_seen} must equal prepared signals "
+                f"{prepared_signal_count} plus preparation exclusions "
+                f"{preparation_excluded_count}"
+            ),
+        })
+    if sum(int(value) for value in preparation_excluded_reasons.values()) != preparation_excluded_count:
+        reasons.append({
+            "code": "PREPARATION_EXCLUSION_REASON_MISMATCH",
+            "detail": (
+                f"preparation exclusion reasons sum to "
+                f"{sum(int(value) for value in preparation_excluded_reasons.values())}, "
+                f"but preparation_excluded_samples={preparation_excluded_count}"
+            ),
+        })
+    if positions_seen > 0 and preparation_coverage_pct < float(policy["min_preparation_coverage_pct"]):
+        reasons.append({
+            "code": "LOW_PREPARATION_FEATURE_COVERAGE",
+            "detail": (
+                f"prepared feature coverage must be at least "
+                f"{policy['min_preparation_coverage_pct']:.1f}%; observed "
+                f"{preparation_coverage_pct:.2f}% "
+                f"({prepared_signal_count}/{positions_seen})"
+            ),
+        })
+
     metrics = {
         "oos_signals": oos_signals,
         "oos_samples": oos_count,
@@ -932,6 +982,11 @@ def evaluate_approval(
         "excluded_sample_reasons": excluded_reasons,
         "input_excluded_samples": input_excluded_count,
         "input_excluded_sample_reasons": input_excluded_reasons,
+        "positions_seen_before_feature_preparation": positions_seen,
+        "prepared_signal_samples": prepared_signal_count,
+        "preparation_excluded_samples": preparation_excluded_count,
+        "preparation_excluded_sample_reasons": preparation_excluded_reasons,
+        "preparation_coverage_pct": preparation_coverage_pct,
         "mean_r": None,
         "positive_r_share": None,
         "wilson_ci_positive_r_share_95": None,

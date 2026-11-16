@@ -271,3 +271,9 @@ fails feature extraction. Its report carries `positions_seen`,
 `preparation_excluded_samples`, and reason counts separately from valid
 prepared signals and from OOS fold exclusions. Missing pre-entry candles
 therefore cannot silently make a market group disappear from diagnostics.
+
+
+The model approval gate also fails closed if fewer than 80% of reconstructed
+positions in an independent group can be prepared with valid pre-entry
+features. It reports positions seen, prepared signal samples, excluded
+preparation samples, exclusion reasons and feature coverage percentage.

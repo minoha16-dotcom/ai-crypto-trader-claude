@@ -680,3 +680,42 @@ def test_research_approval_never_marks_external_trader_samples_runtime_eligible(
     assert result["approved"] is True
     assert result["deployment_status"] == "RESEARCH_ONLY"
     assert result["runtime_eligible"] is False
+
+
+
+def test_approval_disables_group_when_feature_preparation_coverage_is_too_low():
+    group = {
+        "exchange": "hyperliquid",
+        "symbol": "BTC/USDC",
+        "market_type": "futures",
+        "timeframe": "1h",
+        "samples": [{}] * 100,
+        "positions_seen": 200,
+        "preparation_excluded_samples": 100,
+        "preparation_excluded_reasons": {"MISSING_PRE_ENTRY_CANDLE": 100},
+    }
+    rows = _successful_prediction_rows()
+    folds = _approval_fold_reports()
+    walk_forward = {
+        "min_training_samples_per_fold": 250,
+        "fold_count": 3,
+        "oos_signals": 120,
+        "oos_samples": 120,
+        "oos_excluded_samples": 0,
+        "oos_excluded_reasons": {},
+        "folds": folds,
+        "oos_predictions": rows,
+    }
+    result = evaluate_approval(
+        group=group,
+        walk_forward=walk_forward,
+        manifest=_manifest(),
+        dataset_sha256="b" * 64,
+        policy={"bootstrap_resamples": 500},
+    )
+    assert result["approved"] is False
+    assert result["metrics"]["preparation_coverage_pct"] == 50.0
+    assert any(
+        reason["code"] == "LOW_PREPARATION_FEATURE_COVERAGE"
+        for reason in result["rejection_reasons"]
+    )
