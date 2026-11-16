@@ -31,15 +31,31 @@ raw data. Review terms before redistributing raw source records.
 
 ## Raw data collection
 
-Run the read-only collector with an observation window beginning strictly
-after the leaderboard snapshot:
+Freeze the cohort **before 17 November 2026**. Keep this snapshot file unchanged
+for the entire observation period:
 
 \`\`\`powershell
-python scripts/fetch_hyperliquid_leader_fills.py --cohort top_pnl --start 2026-11-17T00:00:00Z --end 2026-12-17T00:00:00Z --collector-code-sha <collector-git-sha> --wallet-limit 100 --out artifacts/hyperliquid-raw-leader-data.json
+python scripts/fetch_hyperliquid_leader_fills.py --snapshot-only --cohort top_pnl --start 2026-11-17T00:00:00Z --end 2026-12-17T00:00:00Z --collector-code-sha <snapshot-git-sha> --wallet-limit 100 --out artifacts/hyperliquid-cohort-snapshot.json
 \`\`\`
 
-The collector snapshots the exact raw leaderboard bytes, the separately
-timestamped UnderHyper metadata, wallet rankings, public fills and funding.
+After 17 December 2026, collect the completed observation window using that
+exact frozen snapshot; the collector must not refresh the leaderboard:
+
+\`\`\`powershell
+python scripts/fetch_hyperliquid_leader_fills.py --snapshot-file artifacts/hyperliquid-cohort-snapshot.json --start 2026-11-17T00:00:00Z --end 2026-12-17T00:00:00Z --collector-code-sha <collection-git-sha> --wallet-limit 100 --out artifacts/hyperliquid-raw-leader-data.json
+\`\`\`
+
+Do not choose a new winner cohort after the observation period has begun. If
+the pre-period snapshot was not preserved, discard the window and register a
+new future observation period instead of backfilling current leaderboard
+winners into the past.
+
+The snapshot-only stage stores the exact raw leaderboard and UnderHyper
+metadata bytes (base64), their SHA-256 hashes, the selected wallet ranking,
+the retrieval cutoff, and the code SHA. The later collection stage verifies
+those bytes and the saved wallet list before requesting public fills/funding.
+The raw collection file also records the frozen snapshot file SHA-256 and the
+separate code SHAs used for cohort selection and data collection.
 Info API requests are paced by estimated response weight at a 900 weight/minute
 budget, below Hyperliquid's documented 1,200 weight/minute per-IP ceiling.
 The 10,000-row recent-history cap applies only to `userFillsByTime`, not to
@@ -168,7 +184,8 @@ Required manifest fields:
 
 - \`source_provider\`, \`source_url\`, \`source_metadata_url\`, \`source_license\`
 - \`source_snapshot_utc\`, \`source_snapshot_sha256\`,
-  \`source_metadata_sha256\`
+  \`source_metadata_sha256\`, \`cohort_snapshot_code_sha\`,
+  \`cohort_snapshot_file_sha256\`
 - \`cohort_selection_as_of_utc\`, \`data_start_utc\`, \`data_end_utc\`
 - \`model_version\`, \`feature_schema_version\`, \`code_sha\`
 - \`backtest_config\`: \`risk_unit_definition\`, \`fee_model\`,
