@@ -24,6 +24,7 @@ INFO_URL = "https://api.hyperliquid.xyz/info"
 ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 MAX_PAGE_SIZE_BY_TYPE = {"userFillsByTime": 2000, "userFunding": 500}
 MAX_RETAINED_HISTORY = 10000
+MAX_HISTORICAL_ORDERS = 2000
 USER_AGENT = "ai-crypto-trader-research/1.1 (read-only public data)"
 
 
@@ -233,6 +234,28 @@ def _fetch_time_range(
     }
 
 
+def _fetch_historical_orders(address, *, timeout):
+    """Fetch the venue's recent order audit needed to classify trigger exits.
+
+    Hyperliquid returns at most 2,000 historical order records. If exactly
+    2,000 rows are returned, completeness cannot be established and the wallet
+    is fail-closed for training preparation.
+    """
+    response = _post_info(
+        {"type": "historicalOrders", "user": address},
+        timeout,
+    )
+    if not isinstance(response, list):
+        raise RuntimeError("historicalOrders returned a non-list response")
+    rows = [row for row in response if isinstance(row, dict)]
+    truncated = len(rows) >= MAX_HISTORICAL_ORDERS
+    return rows, {
+        "rows": len(rows),
+        "history_limit_reached": truncated,
+        "complete_within_documented_limit": not truncated,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start", required=True, help="Observation start (UTC ISO-8601 or Unix ms)")
@@ -288,20 +311,30 @@ def main():
                 address, "userFunding", start_ms, end_ms,
                 timeout=args.timeout, pause_seconds=args.pause_seconds,
             )
-            complete = fill_status["complete"] and funding_status["complete"]
+            historical_orders, orders_status = _fetch_historical_orders(
+                address, timeout=args.timeout
+            )
+            complete = (
+                fill_status["complete"]
+                and funding_status["complete"]
+                and orders_status["complete_within_documented_limit"]
+            )
             wallets.append({
                 "address": address,
                 "rank": index,
                 "fills": fills,
                 "funding": funding,
+                "historical_orders": historical_orders,
                 "complete": complete,
                 "training_eligible": False,
                 "fill_history": fill_status,
                 "funding_history": funding_status,
+                "historical_orders_status": orders_status,
             })
             print(
                 f"{index}/{len(selected)} {address}: "
                 f"{len(fills)} fills, {len(funding)} funding rows, "
+                f"{len(historical_orders)} historical orders, "
                 f"{'COMPLETE_RAW_SNAPSHOT' if complete else 'INCOMPLETE'}"
             )
         except Exception as exc:
@@ -310,6 +343,7 @@ def main():
                 "rank": index,
                 "fills": [],
                 "funding": [],
+                "historical_orders": [],
                 "complete": False,
                 "training_eligible": False,
                 "error": f"{type(exc).__name__}: {exc}",
@@ -341,6 +375,8 @@ def main():
             "fills_endpoint": INFO_URL,
             "fills_request_type": "userFillsByTime",
             "funding_request_type": "userFunding",
+            "historical_orders_request_type": "historicalOrders",
+            "max_historical_orders_per_wallet": MAX_HISTORICAL_ORDERS,
             "max_fills_per_response": MAX_PAGE_SIZE_BY_TYPE["userFillsByTime"],
             "max_funding_rows_per_response": MAX_PAGE_SIZE_BY_TYPE["userFunding"],
             "max_recent_fills_per_wallet": MAX_RETAINED_HISTORY,
@@ -360,6 +396,7 @@ def main():
             "Position reconstruction, candle features and system-normalized R labels are required before training.",
             "Only fully retrieved raw wallet histories may proceed to a later preparation step.",
             "Hyperliquid userFillsByTime exposes only the 10,000 most recent fills and at most 2,000 fills per response.",
+            "Hyperliquid historicalOrders exposes at most 2,000 recent order records per wallet; a full page is treated as incomplete.",
             "The raw leaderboard endpoint has no separate explicit reuse license statement; review terms before redistribution.",
             "The fills endpoint does not state each trader's original stop-risk distance. Model labels must use a declared system-normalized risk unit.",
         ],
