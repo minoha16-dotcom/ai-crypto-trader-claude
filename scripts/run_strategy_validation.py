@@ -883,8 +883,17 @@ async def run():
         evidence = "NO_ROBUST_POSITIVE_EDGE_DEMONSTRATED"
 
     advisor_diagnostics = _build_advisor_diagnostics(dataset_reports, results)
+    advisor_approval_artifacts = [
+        {
+            "dataset_id": row["dataset_id"],
+            "model_approval": row.get("advisor_model_approval"),
+        }
+        for row in results
+        if row["volume_ratio_threshold"] == 1.0
+        and row["feature_ablation"] == "baseline"
+    ]
     report = {
-        "report_version": 2,
+        "report_version": 3,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "code_sha": os.getenv("GITHUB_SHA", "local"),
         "timeframes": list(timeframes),
@@ -895,6 +904,21 @@ async def run():
             "timeframes": list(timeframes),
             "thresholds": list(VOLUME_THRESHOLDS),
             "feature_ablations": list(ABLATIONS),
+        },
+        "advisor_approval_gates": {
+            "group_isolation": "one independent Exchange × Symbol × Market Type × Timeframe model",
+            "minimum_training_samples_per_valid_fold": 200,
+            "minimum_valid_walk_forward_folds": 3,
+            "minimum_oos_signals": 100,
+            "minimum_oos_eligible_outcomes": 100,
+            "minimum_oos_eligible_outcomes_per_fold": 20,
+            "top_tercile_uplift_must_be_positive": True,
+            "uplift_95_percent_confidence_interval_lower_bound_must_be_positive": True,
+            "confidence_interval_method": "circular moving-block bootstrap",
+            "confidence_interval_replicates": 2000,
+            "confidence_interval_seed": 731991,
+            "fold_fit_scope": "earlier Train + Validation outcomes only; predict next disjoint Test fold",
+            "rejection_reasons_recorded": True,
         },
         "comparison_protocol": {
             "grouping": "exchange x requested symbol x market type",
@@ -942,6 +966,7 @@ async def run():
         "datasets": dataset_reports,
         "evaluations": results,
         "advisor_diagnostics": advisor_diagnostics,
+        "advisor_model_approval_artifacts": advisor_approval_artifacts,
         "errors": errors,
     }
 
@@ -949,8 +974,23 @@ async def run():
     out_dir.mkdir(parents=True, exist_ok=True)
     json_path = out_dir / "strategy-validation.json"
     md_path = out_dir / "strategy-validation.md"
+    approval_path = out_dir / "advisor-model-approval.json"
     json_path.write_text(
         json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    approval_path.write_text(
+        json.dumps(
+            {
+                "report_version": report["report_version"],
+                "created_at_utc": report["created_at_utc"],
+                "approval_gates": report["advisor_approval_gates"],
+                "groups": advisor_approval_artifacts,
+            },
+            indent=2,
+            ensure_ascii=False,
+            allow_nan=False,
+        ) + "\\n",
         encoding="utf-8",
     )
     lines = [
@@ -1007,23 +1047,40 @@ async def run():
         "",
         "## Advisor diagnostics by dataset",
         "",
-        "| Dataset | UTC start | UTC end | Candles | WF folds | OOS signals | Eligible samples | Excluded samples | Mean R | Top tercile Mean R | Uplift | Uplift 95% CI | Wilson CI positive R | Model status |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|",
+        "| Dataset | UTC start | UTC end | Candles | OOS signals | Eligible OOS | Excluded | Mean R | Top tercile R | Uplift | Uplift 95% CI | Wilson CI | Train samples max | Valid WF folds | Model version | Model status | Approval reasons |",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|---|---:|---:|---|---|---|",
     ])
     for row in advisor_diagnostics:
         lines.append(
             f"| {row['dataset_id']} | {row.get('common_window_start_utc') or 'N/A'} | "
             f"{row.get('common_window_end_utc') or 'N/A'} | {row.get('candle_count') or 0} | "
-            f"{row['walk_forward_folds']} | {row['oos_signals']} | "
-            f"{row['eligible_samples']} | {row['excluded_samples']} | "
+            f"{row['oos_signals']} | {row['eligible_samples']} | {row['excluded_samples']} | "
             f"{_format_metric(row['mean_r'])} | "
             f"{_format_metric(row['top_tercile_mean_r'])} | "
             f"{_format_metric(row['uplift'])} | "
             f"{_format_interval(row['uplift_confidence_interval_95'])} | "
             f"{_format_interval(row['wilson_ci_positive_r_share_95'])} | "
-            f"{row['model_status']} |"
+            f"{row['training_eligible_samples_max']} | {row['valid_walk_forward_folds']} | "
+            f"{row['model_version'] or 'N/A'} | {row['model_status']} | "
+            f"{';'.join(row['approval_reasons']) or 'None'} |"
         )
 
+    lines.extend([
+        "",
+        "### Model reproducibility metadata",
+        "",
+    ])
+    for row in advisor_diagnostics:
+        if row["model_metadata"]:
+            metadata = row["model_metadata"]
+            lines.append(
+                f"- {row['dataset_id']}: version={metadata['model_version']}; "
+                f"features={metadata['feature_schema_version']}; "
+                f"SHA256={metadata['dataset_sha256']}; "
+                f"period={metadata['period_utc']['start']}..{metadata['period_utc']['end']}; "
+                f"source={metadata['data_source']['provider']}; "
+                f"alpha={metadata['hyperparameters']['alpha']}"
+            )
     lines.extend([
         "",
         "### Excluded sample reasons",
@@ -1062,6 +1119,8 @@ async def run():
         "- Multiple timeframes are sensitivity evidence, not independent samples or a reason to select the best-looking timeframe.",
         "- No result proves a future edge. Positive evidence requires independent review and a later untouched test period.",
         "",
+        "- Per-group model approval records and fold coefficients are also written to advisor-model-approval.json.",
+        "",
         "## Incomplete datasets and errors",
         "",
     ])
@@ -1075,6 +1134,7 @@ async def run():
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"REPORT {json_path}")
     print(f"REPORT {md_path}")
+    print(f"REPORT {approval_path}")
     print(f"EVIDENCE_STATUS {evidence}")
     return 0 if completed_datasets else 1
 
