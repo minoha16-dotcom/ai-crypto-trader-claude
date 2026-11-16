@@ -44,7 +44,7 @@ def _iso_utc(timestamp_ms):
     return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat()
 
 
-def _load_leaderboard(url, timeout):
+def _load_leaderboard(url, timeout, cohort="top_pnl"):
     request = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
     with urlopen(request, timeout=timeout) as response:
         raw = response.read()
@@ -54,7 +54,7 @@ def _load_leaderboard(url, timeout):
     as_of = payload.get("as_of")
     if not as_of:
         raise ValueError("leaderboard JSON is missing its as_of snapshot timestamp")
-    addresses = extract_wallet_addresses(payload)
+    addresses = extract_wallet_addresses(payload, cohort=cohort)
     if not addresses:
         raise ValueError("no full 0x wallet addresses found in the leaderboard snapshot")
     return raw, payload, addresses, as_of
@@ -280,10 +280,9 @@ def main():
     if args.pause_seconds < 0:
         raise SystemExit("--pause-seconds cannot be negative")
 
-    raw_leaderboard, leaderboard, _all_addresses, snapshot_as_of = _load_leaderboard(
-        args.leaderboard_url, args.timeout
+    raw_leaderboard, leaderboard, addresses, snapshot_as_of = _load_leaderboard(
+        args.leaderboard_url, args.timeout, cohort=args.cohort
     )
-    addresses = extract_wallet_addresses(leaderboard, cohort=args.cohort)
     snapshot_ms = _timestamp_ms(snapshot_as_of, "leaderboard.as_of")
     if start_ms <= snapshot_ms:
         raise SystemExit(

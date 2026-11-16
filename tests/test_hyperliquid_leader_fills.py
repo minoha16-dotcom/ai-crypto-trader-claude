@@ -133,3 +133,37 @@ def test_user_funding_uses_the_smaller_time_range_page_limit(monkeypatch):
 
     assert MAX_PAGE_SIZE_BY_TYPE["userFillsByTime"] == 2000
     assert MAX_PAGE_SIZE_BY_TYPE["userFunding"] == 500
+
+
+
+def test_leaderboard_loader_uses_the_requested_ranked_cohort(monkeypatch):
+    from scripts import fetch_hyperliquid_leader_fills as module
+
+    payload = {
+        "as_of": "2026-11-16T00:00:00Z",
+        "top_pnl": [{"address": "0x" + "a" * 40, "pnl30d": "10"}],
+        "top_volume": [{"address": "0x" + "b" * 40, "volume30d": "20"}],
+    }
+    monkeypatch.setattr(module, "urlopen", lambda *args, **kwargs: _FakeResponse(payload))
+    raw, returned, addresses, as_of = module._load_leaderboard(
+        "https://example.invalid/leaderboard.json", 1, cohort="top_volume"
+    )
+
+    assert returned == payload
+    assert addresses == ["0x" + "b" * 40]
+    assert as_of == "2026-11-16T00:00:00Z"
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        import json
+        self.raw = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return None
+
+    def read(self):
+        return self.raw

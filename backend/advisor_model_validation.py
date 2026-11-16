@@ -300,6 +300,14 @@ def walk_forward_predict(
             "test_start_utc": _iso_utc(test_rows[0]["signal_timestamp_ms"]),
             "test_end_utc": _iso_utc(test_rows[-1]["signal_timestamp_ms"]),
             "test_exit_end_utc": _iso_utc(max(row["exit_timestamp_ms"] for row in test_rows)),
+            "model_parameters": {
+                "model_family": model["model_family"],
+                "model_version": model["model_version"],
+                "feature_schema_version": model["feature_schema_version"],
+                "ridge_alpha": model["ridge_alpha"],
+                "intercept": model["intercept"],
+                "coefficients": model["coefficients"],
+            },
             "test_predictions": fold_prediction_rows,
         })
 

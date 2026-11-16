@@ -52,18 +52,49 @@ def main():
                 manifest=manifest,
                 dataset_sha256=dataset_sha256,
             )
-            reports.append(trained["approval"])
-            if trained["model"] is not None:
-                models.append(trained["model"])
+            model = trained["model"]
+            model_file = None
+            if model is not None:
+                safe_key = "_".join(
+                    str(group_key[key]).replace("/", "-").replace(":", "-")
+                    for key in ("exchange", "symbol", "market_type", "timeframe")
+                )
+                model_file = f"advisor-model-{safe_key}.json"
+                models.append((model_file, model))
+
+            walk_forward = trained["walk_forward"]
+            predictions_json = json.dumps(
+                walk_forward.get("oos_predictions", []),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            ).encode("utf-8")
+            reports.append({
+                "group": group_key,
+                "approval": trained["approval"],
+                "model_artifact": model_file,
+                "walk_forward": {
+                    "fold_count": walk_forward["fold_count"],
+                    "min_training_samples_per_fold": walk_forward["min_training_samples_per_fold"],
+                    "total_training_rows_used_across_folds": walk_forward["total_training_rows_used_across_folds"],
+                    "oos_prediction_count": len(walk_forward.get("oos_predictions", [])),
+                    "oos_predictions_sha256": hashlib.sha256(predictions_json).hexdigest(),
+                    "folds": walk_forward.get("folds", []),
+                },
+            })
         except Exception as exc:
             reports.append({
                 "group": group_key,
-                "model_status": "DISABLED",
-                "approved": False,
-                "rejection_reasons": [{
-                    "code": "TRAINING_OR_VALIDATION_FAILED",
-                    "detail": f"{type(exc).__name__}: {exc}",
-                }],
+                "approval": {
+                    "model_status": "DISABLED",
+                    "approved": False,
+                    "rejection_reasons": [{
+                        "code": "TRAINING_OR_VALIDATION_FAILED",
+                        "detail": f"{type(exc).__name__}: {exc}",
+                    }],
+                },
+                "model_artifact": None,
+                "walk_forward": None,
             })
             errors.append({"group": group_key, "error": f"{type(exc).__name__}: {exc}"})
 
@@ -82,8 +113,8 @@ def main():
         "source_snapshot_utc": manifest.get("source_snapshot_utc"),
         "code_sha": manifest.get("code_sha"),
         "groups_requested": len(groups),
-        "groups_approved": sum(1 for row in reports if row.get("approved")),
-        "groups_disabled": sum(1 for row in reports if not row.get("approved")),
+        "groups_approved": sum(1 for row in reports if (row.get("approval") or {}).get("approved")),
+        "groups_disabled": sum(1 for row in reports if not (row.get("approval") or {}).get("approved")),
         "groups": reports,
         "training_errors": errors,
     }
@@ -93,13 +124,8 @@ def main():
         encoding="utf-8",
     )
 
-    for model in models:
-        group = model["group"]
-        safe_key = "_".join(
-            str(group[key]).replace("/", "-").replace(":", "-")
-            for key in ("exchange", "symbol", "market_type", "timeframe")
-        )
-        model_path = out_dir / f"advisor-model-{safe_key}.json"
+    for model_file, model in models:
+        model_path = out_dir / model_file
         model_path.write_text(
             json.dumps(model, indent=2, ensure_ascii=False, allow_nan=False) + "\n",
             encoding="utf-8",
