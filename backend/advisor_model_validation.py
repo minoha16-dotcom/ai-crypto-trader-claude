@@ -726,12 +726,12 @@ def train_validate_group(
                     "code": "SAMPLE_PRECEDES_COHORT_CUTOFF",
                     "detail": f"sample {row['sample_id']} is not after the cohort-selection cutoff",
                 })
-                break
             if row["signal_timestamp_ms"] < data_start_ms or row["exit_timestamp_ms"] > data_end_ms:
                 window_issues.append({
                     "code": "SAMPLE_OUTSIDE_MANIFEST_DATA_WINDOW",
                     "detail": f"sample {row['sample_id']} falls outside the declared data window",
                 })
+            if window_issues:
                 break
     except ValueError as exc:
         window_issues.append({

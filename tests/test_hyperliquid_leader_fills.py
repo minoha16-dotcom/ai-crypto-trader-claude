@@ -92,7 +92,7 @@ def test_range_fetch_marks_the_exchange_history_cap(monkeypatch):
         100_000,
         timeout=1,
         pause_seconds=0,
-        max_depth=1,
+        max_depth=3,
     )
 
     assert status["history_limit_reached"] is True

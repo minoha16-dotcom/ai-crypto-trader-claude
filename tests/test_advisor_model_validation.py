@@ -150,7 +150,7 @@ def test_approval_requires_provenance_and_non_lookahead_cohort_cutoff():
         "min_training_samples_per_fold": 250,
         "fold_count": 3,
         "oos_signals": 120,
-        "folds": [{"test_samples": 40}] * 3,
+        "folds": [{"test_samples": 40, "training_samples": 250}] * 3,
         "oos_predictions": _successful_prediction_rows(),
     }
     manifest = _manifest(0)
@@ -200,7 +200,7 @@ def test_approval_rejects_top_tercile_without_positive_lower_confidence_bound():
         "min_training_samples_per_fold": 250,
         "fold_count": 3,
         "oos_signals": 120,
-        "folds": [{"test_samples": 40}] * 3,
+        "folds": [{"test_samples": 40, "training_samples": 250}] * 3,
         "oos_predictions": rows,
     }
     result = evaluate_approval(

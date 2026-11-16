@@ -62,27 +62,34 @@ def _load_leaderboard(url, timeout):
 
 def extract_wallet_addresses(payload):
     """Find full public wallet addresses without assuming one JSON row layout."""
-    found = set()
+    found = []
+    seen = set()
     address_keys = {
         "address", "ethaddress", "wallet", "walletaddress",
         "leaderaddress", "useraddress",
     }
+
+    def add(value):
+        normalized = value.lower()
+        if normalized not in seen:
+            seen.add(normalized)
+            found.append(normalized)
 
     def walk(value):
         if isinstance(value, dict):
             for key, item in value.items():
                 normalized_key = str(key).replace("_", "").replace("-", "").lower()
                 if normalized_key in address_keys and isinstance(item, str) and ADDRESS_RE.fullmatch(item):
-                    found.add(item.lower())
+                    add(item)
                 walk(item)
         elif isinstance(value, list):
             for item in value:
                 walk(item)
         elif isinstance(value, str) and ADDRESS_RE.fullmatch(value):
-            found.add(value.lower())
+            add(value)
 
     walk(payload)
-    return sorted(found)
+    return found
 
 
 def _post_info(body, timeout):
