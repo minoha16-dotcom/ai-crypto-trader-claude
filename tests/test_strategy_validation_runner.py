@@ -148,3 +148,122 @@ def test_advisor_diagnostics_expose_oos_metrics_and_keep_r_ranker_disabled_witho
     assert diagnostic["uplift"] is None
     assert diagnostic["uplift_confidence_interval_95"] is None
     assert diagnostic["model_status"] == "DISABLED"
+
+
+
+def test_fold_isolated_advisor_model_uses_prior_samples_and_can_pass_approval():
+    dataset = {
+        "id": "okx:1h:futures:BTC/USDT",
+        "exchange": "okx",
+        "symbol": "BTC/USDT:USDT",
+        "market_type": "futures",
+        "timeframe": "1h",
+        "common_window_start_utc": "2026-01-01T00:00:00+00:00",
+        "common_window_end_utc": "2026-07-01T00:00:00+00:00",
+        "source_metadata": {"provider": "ccxt"},
+        "instrument": {"contract_type": "linear", "contract_size": 0.001},
+    }
+    candles = [
+        [index * 3_600_000, 100, 101, 99, 100 + index * 0.01, 1000]
+        for index in range(600)
+    ]
+    folds = []
+    for fold_number in range(3):
+        train_samples = []
+        for index in range(250):
+            x = -1.0 + 2.0 * index / 249
+            train_samples.append({
+                "features": [x, 0.1, 0.2, 0.3, 0.4],
+                "r_multiple": 3.0 * x,
+                "exit_reason": "TARGET",
+                "signal_timestamp_ms": 100_000 + index * 1000,
+                "exit_timestamp_ms": 200_000 + index * 1000,
+            })
+        test_start = 2_000_000 + fold_number * 1_000_000
+        test_samples = []
+        for index in range(100):
+            x = -1.0 + 2.0 * index / 99
+            test_samples.append({
+                "features": [x, 0.1, 0.2, 0.3, 0.4],
+                "r_multiple": 3.0 * x,
+                "exit_reason": "TIME_EXIT",
+                "signal_timestamp_ms": test_start + index * 1000,
+                "exit_timestamp_ms": test_start + index * 1000 + 3600_000,
+            })
+        folds.append({
+            "fold": fold_number + 1,
+            "train": {"advisor_samples": train_samples},
+            "validation": {"advisor_samples": []},
+            "test": {"advisor_samples": test_samples, "oos_signals": 100},
+            "ranges": {
+                "validation": {"end_timestamp": test_start - 2 * 3_600_000},
+                "test": {
+                    "start_timestamp": test_start,
+                    "end_timestamp": test_start + 100 * 3_600_000,
+                },
+            },
+        })
+
+    result = run_strategy_validation._build_fold_isolated_advisor_model(
+        {"folds": folds},
+        dataset,
+        candles,
+        3_600_000,
+        {"fee_rate_per_side": 0.0006, "slippage_bps_per_side": 2.0},
+    )
+
+    assert result["model_status"] == "APPROVED"
+    assert result["valid_walk_forward_folds"] == 3
+    assert result["maximum_training_eligible_samples"] == 250
+    assert result["oos_signals"] == 300
+    assert result["oos_eligible_samples"] == 300
+    assert result["uplift"] > 0
+    assert result["uplift_confidence_interval_95"][0] > 0
+    assert len(result["fold_models"]) == 3
+    assert result["dataset_sha256"]
+
+
+def test_advisor_diagnostics_include_explicit_rejection_reasons_for_missing_model():
+    dataset = {
+        "id": "kucoin:1h:spot:BTC/USDT",
+        "comparison_group_id": "kucoin:spot:BTC/USDT",
+        "exchange": "kucoin",
+        "symbol": "BTC/USDT",
+        "market_type": "spot",
+        "timeframe": "1h",
+        "candle_count": 600,
+        "common_window_start_utc": "2026-01-01T00:00:00+00:00",
+        "common_window_end_utc": "2026-02-01T00:00:00+00:00",
+    }
+    result = {
+        "dataset_id": dataset["id"],
+        "volume_ratio_threshold": 1.0,
+        "feature_ablation": "baseline",
+        "metrics": {"eligible_samples": 0, "excluded_samples": 0, "oos_signals": 0},
+        "advisor_model_approval": {
+            "model_status": "DISABLED",
+            "approval_reasons": [
+                "VALID_WALK_FORWARD_FOLDS_BELOW_3",
+                "OOS_SIGNALS_BELOW_100",
+            ],
+            "maximum_training_eligible_samples": 45,
+            "minimum_training_samples_across_valid_folds": 0,
+            "valid_walk_forward_folds": 0,
+            "oos_signals": 0,
+            "oos_eligible_samples": 0,
+            "top_tercile_mean_r": None,
+            "all_oos_mean_r": None,
+            "uplift": None,
+            "uplift_confidence_interval_95": None,
+            "model_metadata": {"model_version": "advisor-ridge-r-1.0.0"},
+        },
+    }
+    diagnostic = run_strategy_validation._build_advisor_diagnostics(
+        [dataset], [result]
+    )[0]
+    assert diagnostic["model_status"] == "DISABLED"
+    assert diagnostic["approval_reasons"] == [
+        "VALID_WALK_FORWARD_FOLDS_BELOW_3",
+        "OOS_SIGNALS_BELOW_100",
+    ]
+    assert diagnostic["model_version"] == "advisor-ridge-r-1.0.0"
