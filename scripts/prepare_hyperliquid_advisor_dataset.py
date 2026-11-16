@@ -725,11 +725,21 @@ def prepare_dataset(
             "code_sha": code_sha,
             "backtest_config": {
                 "risk_unit_definition": (
-                    "system-normalized R = net realized PnL / "
+                    "system-normalized R = (reconstructed gross fill-price PnL - "
+                    "all signed USDC/USD fees + funding delta.usdc) / "
                     "(max(2*ATR14, 0.5% of entry price) * original coin quantity); "
                     "not the trader's unknown original stop risk"
                 ),
-                "fee_model": "sum of actual Hyperliquid fill fees in USDC/USD",
+                "fee_model": (
+                    "sum the signed fee field from every open and close fill; "
+                    "positive fee is a cost and negative fee is a maker rebate; "
+                    "builderFee is already included in fee"
+                ),
+                "closed_pnl_treatment": (
+                    "retain the exchange closedPnl field for audit only; reconstruct "
+                    "gross price PnL from entry price, closing fill prices, direction "
+                    "and closed quantities to avoid ambiguous fee double counting"
+                ),
                 "slippage_model": "actual public fill prices; no synthetic slippage added",
                 "slippage_bps": 0.0,
                 "fee_rate": 0.0,
@@ -756,7 +766,7 @@ def prepare_dataset(
             "source_raw_dataset_version": raw_payload.get("dataset_version"),
             "manifest": manifest,
             "preparation_policy": {
-                "position_lifecycle": "single entry order, no add/scale-in, fully closed only",
+                "position_lifecycle": "single entry order, no add/scale-in, fully closed only; reconcile startPosition on every fill",
                 "eligible_exit_reasons": sorted(ELIGIBLE_EXIT_REASONS),
                 "ineligible_exit_reasons": [
                     "MANUAL_CLOSE", "UNKNOWN", "LIQUIDATION",

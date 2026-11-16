@@ -669,6 +669,14 @@ def evaluate_approval(
                 f"do not match the sum of per-fold excluded rows {fold_oos_excluded}"
             ),
         })
+    if oos_signals != oos_count + fold_oos_excluded:
+        reasons.append({
+            "code": "OOS_OUTCOME_PARTITION_MISMATCH",
+            "detail": (
+                f"OOS signals {oos_signals} must equal eligible outcomes {oos_count} "
+                f"plus excluded outcomes {fold_oos_excluded}"
+            ),
+        })
     if dict(walk_forward.get("oos_excluded_reasons") or {}) != dict(sorted(fold_oos_excluded_reasons.items())):
         reasons.append({
             "code": "OOS_EXCLUDED_REASON_MISMATCH",

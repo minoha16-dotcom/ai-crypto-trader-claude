@@ -550,3 +550,39 @@ def test_approval_disables_model_when_oos_signals_are_too_time_clustered():
         reason["code"] == "INSUFFICIENT_OOS_TIME_BLOCKS"
         for reason in result["rejection_reasons"]
     )
+
+
+
+def test_approval_rejects_oos_signal_count_not_partitioned_into_eligible_or_excluded():
+    group = {
+        "exchange": "hyperliquid",
+        "symbol": "BTC/USDC",
+        "market_type": "futures",
+        "timeframe": "1h",
+    }
+    walk_forward = {
+        "min_training_samples_per_fold": 250,
+        "fold_count": 3,
+        "oos_signals": 120,
+        "oos_samples": 120,
+        "oos_excluded_samples": 0,
+        "oos_excluded_reasons": {},
+        "input_excluded_samples": 0,
+        "input_excluded_reasons": {},
+        "folds": _approval_fold_reports(),
+        "oos_predictions": _successful_prediction_rows(),
+    }
+    walk_forward["oos_signals"] = 125
+    result = evaluate_approval(
+        group=group,
+        walk_forward=walk_forward,
+        manifest=_manifest(),
+        dataset_sha256="a" * 64,
+    )
+
+    assert result["approved"] is False
+    assert any(
+        reason["code"] == "OOS_SIGNAL_COUNT_MISMATCH"
+        or reason["code"] == "OOS_OUTCOME_PARTITION_MISMATCH"
+        for reason in result["rejection_reasons"]
+    )

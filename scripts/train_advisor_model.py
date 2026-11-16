@@ -8,6 +8,7 @@ its own chronological OOS validation passes every approval gate.
 import argparse
 import hashlib
 import json
+from collections import Counter
 from pathlib import Path
 import sys
 from datetime import datetime, timezone
@@ -91,20 +92,47 @@ def main():
                 },
             })
         except Exception as exc:
+            source_samples = group.get("samples") or []
+            exit_reasons = Counter(
+                str(row.get("exit_reason") or "UNKNOWN").upper()
+                for row in source_samples
+            )
+            eligible_count = sum(
+                count for reason, count in exit_reasons.items()
+                if reason in {"STOP", "STOP_GAP", "TARGET", "TARGET_GAP", "TIME_EXIT"}
+            )
+            disabled_code = "TRAINING_OR_VALIDATION_FAILED"
+            detail = f"{type(exc).__name__}: {exc}"
+            if "insufficient eligible training labels" in str(exc).lower():
+                disabled_code = "INSUFFICIENT_TRAINING_SAMPLES"
+            elif "insufficient signals for walk-forward" in str(exc).lower():
+                disabled_code = "INSUFFICIENT_OOS_SIGNALS"
+            elif "fully matured eligible training labels" in str(exc).lower():
+                disabled_code = "INSUFFICIENT_MATURED_TRAINING_LABELS"
             reports.append({
                 "group": group_key,
                 "approval": {
                     "model_status": "DISABLED",
                     "approved": False,
                     "rejection_reasons": [{
-                        "code": "TRAINING_OR_VALIDATION_FAILED",
-                        "detail": f"{type(exc).__name__}: {exc}",
+                        "code": disabled_code,
+                        "detail": detail,
                     }],
+                    "metrics": {
+                        "input_signals": len(source_samples),
+                        "input_eligible_samples": eligible_count,
+                        "input_excluded_samples": len(source_samples) - eligible_count,
+                        "input_excluded_sample_reasons": {
+                            reason: count
+                            for reason, count in sorted(exit_reasons.items())
+                            if reason not in {"STOP", "STOP_GAP", "TARGET", "TARGET_GAP", "TIME_EXIT"}
+                        },
+                    },
                 },
                 "model_artifact": None,
                 "walk_forward": None,
             })
-            errors.append({"group": group_key, "error": f"{type(exc).__name__}: {exc}"})
+            errors.append({"group": group_key, "error": detail})
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)

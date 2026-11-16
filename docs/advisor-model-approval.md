@@ -67,8 +67,13 @@ python scripts/prepare_hyperliquid_advisor_dataset.py --raw-dataset artifacts/hy
 It fetches read-only Hyperliquid 1h OHLCV, aggregates 4h only from four
 consecutive UTC hourly candles, and computes features from candles fully
 closed before each position entry. It reconstructs only fully closed,
-single-entry, non-scaled linear USDC perp positions. It accounts for realized
-closed PnL, USDC fees and same-coin funding. It labels STOP/TARGET only when
+single-entry, non-scaled linear USDC perp positions. It reconstructs gross price PnL from weighted entry fill price and each closing
+fill price/quantity, then subtracts all signed USDC fees and adds same-coin
+funding. The raw exchange `closedPnl` field is preserved for audit but is not
+used as the training PnL because the official docs describe it as a
+frontend-convenience field and fee-inclusion semantics are not consistent
+enough to safely subtract fees from it again. The preparer validates the
+exchange `startPosition` against its reconstructed position before each fill. It labels STOP/TARGET only when
 the final close fill's order ID matches a historical reduce-only trigger
 order with a usable trigger price. Manual closes, multiple distinct closing
 orders, unknown triggers, liquidations, scaled positions, open positions,
