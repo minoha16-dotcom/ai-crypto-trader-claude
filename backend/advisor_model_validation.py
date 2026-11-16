@@ -608,6 +608,28 @@ def evaluate_approval(
                 f"prediction rows {oos_count}"
             ),
         })
+    fold_oos_excluded = sum(
+        int(row.get("excluded_test_samples", 0) or 0) for row in folds
+    )
+    fold_oos_excluded_reasons: dict[str, int] = {}
+    for fold in folds:
+        for reason, count in (fold.get("excluded_test_reasons") or {}).items():
+            fold_oos_excluded_reasons[reason] = (
+                fold_oos_excluded_reasons.get(reason, 0) + int(count)
+            )
+    if int(walk_forward.get("oos_excluded_samples", -1)) != fold_oos_excluded:
+        reasons.append({
+            "code": "OOS_EXCLUDED_COUNT_MISMATCH",
+            "detail": (
+                f"reported OOS exclusions {walk_forward.get('oos_excluded_samples')} "
+                f"do not match the sum of per-fold excluded rows {fold_oos_excluded}"
+            ),
+        })
+    if dict(walk_forward.get("oos_excluded_reasons") or {}) != dict(sorted(fold_oos_excluded_reasons.items())):
+        reasons.append({
+            "code": "OOS_EXCLUDED_REASON_MISMATCH",
+            "detail": "OOS excluded reason totals do not match the per-fold reason counts",
+        })
     if len(folds) != fold_count:
         reasons.append({
             "code": "WALK_FORWARD_FOLD_COUNT_MISMATCH",
@@ -698,8 +720,8 @@ def evaluate_approval(
             reasons.append({"code": "INVALID_WALK_FORWARD_CHRONOLOGY", "detail": str(exc)})
             break
 
-    excluded_reasons = dict(walk_forward.get("oos_excluded_reasons") or {})
-    excluded_count = int(walk_forward.get("oos_excluded_samples", 0) or 0)
+    excluded_reasons = dict(sorted(fold_oos_excluded_reasons.items()))
+    excluded_count = fold_oos_excluded
     input_excluded_reasons = dict(walk_forward.get("input_excluded_reasons") or {})
     input_excluded_count = int(walk_forward.get("input_excluded_samples", 0) or 0)
     metrics = {

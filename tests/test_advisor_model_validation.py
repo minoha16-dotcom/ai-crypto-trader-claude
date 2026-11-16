@@ -102,7 +102,7 @@ def _successful_prediction_rows(actual_zero=False):
     return rows
 
 
-def _approval_fold_reports(sample_count=40, train_count=250):
+def _approval_fold_reports(sample_count=40, train_count=250, excluded_count=0, excluded_reason=None):
     base = _timestamp_ms(3)
     folds = []
     for fold in range(1, 4):
@@ -113,6 +113,10 @@ def _approval_fold_reports(sample_count=40, train_count=250):
             "training_samples": train_count,
             "test_signal_count": 40,
             "test_samples": sample_count,
+            "excluded_test_samples": excluded_count,
+            "excluded_test_reasons": (
+                {excluded_reason: excluded_count} if excluded_reason else {}
+            ),
             "training_label_end_utc": datetime.fromtimestamp(
                 (start_ms - 60 * 1000) / 1000, tz=timezone.utc
             ).isoformat(),
@@ -196,6 +200,11 @@ def test_period_end_and_liquidation_are_excluded_but_remain_oos_signals():
         "LIQUIDATION_GAP": 6,
         "PERIOD_END": 6,
     }
+    assert result["oos_excluded_samples"] == 12
+    assert result["oos_excluded_reasons"] == {
+        "LIQUIDATION_GAP": 6,
+        "PERIOD_END": 6,
+    }
     assert all(fold["test_signal_count"] == 40 for fold in result["folds"])
     assert all(fold["test_samples"] == 36 for fold in result["folds"])
 
@@ -213,6 +222,10 @@ def test_unknown_exit_reason_is_never_a_training_label():
     )
     assert result["input_excluded_reasons"]["MANUAL_CLOSE"] == 1
     assert result["input_eligible_samples"] == 259
+    assert result["oos_signals"] == 60
+    assert result["oos_samples"] == 59
+    assert result["oos_excluded_samples"] == 1
+    assert result["oos_excluded_reasons"] == {"MANUAL_CLOSE": 1}
 
 
 def test_bootstrap_uplift_is_reproducible_and_positive_for_separated_scores():
@@ -237,8 +250,10 @@ def test_approval_requires_provenance_and_non_lookahead_cohort_cutoff():
         "fold_count": 3,
         "oos_signals": 120,
         "oos_samples": 120,
-        "input_excluded_samples": 0,
-        "input_excluded_reasons": {},
+        "input_excluded_samples": 9,
+        "input_excluded_reasons": {"OUTSIDE_OOS_WINDOW": 9},
+        "oos_excluded_samples": 0,
+        "oos_excluded_reasons": {},
         "folds": _approval_fold_reports(),
         "oos_predictions": rows,
     }
@@ -255,6 +270,8 @@ def test_approval_requires_provenance_and_non_lookahead_cohort_cutoff():
     assert approved["metrics"]["uplift"] > 0
     assert approved["metrics"]["uplift_confidence_interval_95"][0] > 0
     assert approved["metrics"]["top_tercile_samples"] >= 30
+    assert approved["metrics"]["excluded_samples"] == 0
+    assert approved["metrics"]["input_excluded_samples"] == 9
 
     leaking_manifest = dict(manifest)
     leaking_manifest["cohort_selection_as_of_utc"] = "2026-11-10T00:00:00+00:00"
@@ -287,6 +304,8 @@ def test_approval_rejects_top_tercile_without_positive_lower_confidence_bound():
         "oos_samples": 120,
         "input_excluded_samples": 0,
         "input_excluded_reasons": {},
+        "oos_excluded_samples": 0,
+        "oos_excluded_reasons": {},
         "folds": _approval_fold_reports(),
         "oos_predictions": rows,
     }
@@ -430,3 +449,46 @@ def test_end_to_end_model_exports_only_when_all_provenance_and_oos_gates_pass():
     assert result["approval"]["metrics"]["oos_signals"] >= 100
     assert result["approval"]["metrics"]["oos_samples"] >= 100
     assert result["approval"]["metrics"]["uplift_confidence_interval_95"][0] > 0
+
+
+
+def test_approval_reports_oos_exclusions_separately_from_full_dataset_exclusions():
+    group = {
+        "exchange": "hyperliquid",
+        "symbol": "BTC/USDC",
+        "market_type": "futures",
+        "timeframe": "1h",
+    }
+    predictions = _successful_prediction_rows()
+    folds = _approval_fold_reports(
+        sample_count=39,
+        excluded_count=1,
+        excluded_reason="MANUAL_CLOSE",
+    )
+    walk_forward = {
+        "min_training_samples_per_fold": 250,
+        "fold_count": 3,
+        "oos_signals": 120,
+        "oos_samples": 117,
+        "oos_excluded_samples": 3,
+        "oos_excluded_reasons": {"MANUAL_CLOSE": 3},
+        "input_excluded_samples": 20,
+        "input_excluded_reasons": {"PERIOD_END": 10, "UNKNOWN": 10},
+        "folds": folds,
+        "oos_predictions": predictions[:39] + predictions[40:79] + predictions[80:119],
+    }
+
+    result = evaluate_approval(
+        group=group,
+        walk_forward=walk_forward,
+        manifest=_manifest(),
+        dataset_sha256="f" * 64,
+        policy={"bootstrap_resamples": 500},
+    )
+
+    assert result["metrics"]["oos_signals"] == 120
+    assert result["metrics"]["oos_samples"] == 117
+    assert result["metrics"]["eligible_samples"] == 117
+    assert result["metrics"]["excluded_samples"] == 3
+    assert result["metrics"]["excluded_sample_reasons"] == {"MANUAL_CLOSE": 3}
+    assert result["metrics"]["input_excluded_samples"] == 20
