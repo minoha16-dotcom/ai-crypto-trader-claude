@@ -494,3 +494,59 @@ def test_approval_reports_oos_exclusions_separately_from_full_dataset_exclusions
     assert result["metrics"]["excluded_samples"] == 3
     assert result["metrics"]["excluded_sample_reasons"] == {"MANUAL_CLOSE": 3}
     assert result["metrics"]["input_excluded_samples"] == 20
+
+
+
+def test_bootstrap_rejects_oos_samples_concentrated_in_too_few_time_blocks():
+    rows = _successful_prediction_rows()
+    for row in rows:
+        row["signal_timestamp"] = "2026-11-03T00:00:00+00:00"
+        row["exit_timestamp"] = "2026-11-03T00:10:00+00:00"
+
+    assert bootstrap_uplift_interval(rows, resamples=500, seed=7) is None
+
+
+def test_approval_disables_model_when_oos_signals_are_too_time_clustered():
+    group = {
+        "exchange": "hyperliquid",
+        "symbol": "BTC/USDC",
+        "market_type": "futures",
+        "timeframe": "1h",
+    }
+    rows = _successful_prediction_rows()
+    for row in rows:
+        fold_id = row["fold_id"]
+        fold_start = _approval_fold_reports()[fold_id - 1]["test_start_utc"]
+        row["signal_timestamp"] = fold_start
+        signal_ms = int(datetime.fromisoformat(fold_start).timestamp() * 1000)
+        row["exit_timestamp"] = datetime.fromtimestamp(
+            (signal_ms + 10 * 60 * 1000) / 1000,
+            tz=timezone.utc,
+        ).isoformat()
+    walk_forward = {
+        "min_training_samples_per_fold": 250,
+        "fold_count": 3,
+        "oos_signals": 120,
+        "oos_samples": 120,
+        "oos_excluded_samples": 0,
+        "oos_excluded_reasons": {},
+        "input_excluded_samples": 0,
+        "input_excluded_reasons": {},
+        "folds": _approval_fold_reports(),
+        "oos_predictions": rows,
+    }
+
+    result = evaluate_approval(
+        group=group,
+        walk_forward=walk_forward,
+        manifest=_manifest(),
+        dataset_sha256="9" * 64,
+        policy={"bootstrap_resamples": 500},
+    )
+
+    assert result["approved"] is False
+    assert result["metrics"]["oos_time_blocks_per_fold"] == [1, 1, 1]
+    assert any(
+        reason["code"] == "INSUFFICIENT_OOS_TIME_BLOCKS"
+        for reason in result["rejection_reasons"]
+    )

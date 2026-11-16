@@ -187,6 +187,7 @@ Approval requires every condition:
 | Eligible OOS closed outcomes | ≥ 100 |
 | OOS signal observations per fold | ≥ 20 |
 | Eligible OOS outcomes per fold | ≥ 20 |
+| Distinct 6-hour UTC blocks per OOS fold | ≥ 5 |
 | Selected Top-Tercile outcomes | ≥ 30 |
 | Top-Tercile mean R | Greater than all eligible OOS mean R |
 | Uplift 95% confidence interval | Lower bound strictly above 0 |
@@ -201,9 +202,11 @@ Uplift is:
 
 \`mean R(top predicted-R tercile) − mean R(all eligible OOS outcomes)\`.
 
-The confidence interval is a deterministic, fold-stratified bootstrap with
-a fixed seed. The report also stores the positive-R share and its 95% Wilson
-interval. A group is \`DISABLED\` with explicit rejection codes whenever any
+The uplift confidence interval is a deterministic, fold-stratified bootstrap
+over 6-hour UTC signal-time blocks (2,000 resamples by default, fixed seed).
+Each OOS fold must contain at least five distinct 6-hour blocks; the validator
+does not treat a burst of same-period wallet fills as independent observations.
+The report also stores the positive-R share and its 95% Wilson interval. A group is \`DISABLED\` with explicit rejection codes whenever any
 gate fails. Approval of BTC 1h does not approve BTC 4h or any other group.
 
 The final candidate model is fitted on all eligible, matured examples only
