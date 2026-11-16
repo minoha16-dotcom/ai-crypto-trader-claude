@@ -374,3 +374,74 @@ def test_period_summary_counts_eligible_r_samples_and_excluded_exit_reasons():
     }
     assert summary["wilson_ci_positive_r_share_95"][0] < 2.0 / 3.0
     assert summary["wilson_ci_positive_r_share_95"][1] > 2.0 / 3.0
+
+
+
+def test_period_summary_exports_only_feature_complete_eligible_samples():
+    features = {
+        "price": 105.0,
+        "ema20": 103.0,
+        "ema50": 100.0,
+        "rsi14": 65.0,
+        "adx14": 32.0,
+        "volume_ratio": 1.5,
+        "atr_pct": 1.2,
+    }
+    result = {
+        "trades": [
+            {
+                "side": "LONG",
+                "exit_reason": "TARGET",
+                "r_multiple": 1.8,
+                "signal_timestamp": 1_000,
+                "signal_candle_timestamp": 0,
+                "exit_timestamp": 3_000,
+                "signal_features": features,
+                "pnl": 18.0,
+            },
+            {
+                "side": "LONG",
+                "exit_reason": "PERIOD_END",
+                "r_multiple": 0.2,
+                "signal_timestamp": 4_000,
+                "signal_candle_timestamp": 3_000,
+                "exit_timestamp": 5_000,
+                "signal_features": features,
+                "pnl": 2.0,
+            },
+            {
+                "side": "SHORT",
+                "exit_reason": "STOP",
+                "r_multiple": -1.0,
+                "signal_timestamp": 6_000,
+                "signal_candle_timestamp": 5_000,
+                "exit_timestamp": 7_000,
+                "signal_features": {"price": None},
+                "pnl": -10.0,
+            },
+        ],
+        "open_positions": [],
+        "skipped_signals": [],
+        "net_pnl": 10.0,
+        "ending_balance": 1010.0,
+        "ending_equity": 1010.0,
+        "realized_pnl": 10.0,
+        "unrealized_pnl": 0.0,
+        "win_rate_pct": 33.3,
+        "expectancy_r": 0.333,
+        "profit_factor": 2.0,
+        "max_drawdown_pct": 1.0,
+    }
+
+    summary = walk_forward._period_summary(result, 1000.0, 100)
+
+    assert summary["eligible_samples"] == 2
+    assert summary["model_eligible_samples"] == 1
+    assert summary["model_feature_excluded_samples"] == 1
+    assert len(summary["advisor_samples"]) == 1
+    sample = summary["advisor_samples"][0]
+    assert sample["r_multiple"] == pytest.approx(1.8)
+    assert sample["exit_reason"] == "TARGET"
+    assert sample["signal_timestamp_ms"] == 1000
+    assert len(sample["features"]) == 5
+    assert summary["excluded_sample_reasons"] == {"PERIOD_END": 1}
