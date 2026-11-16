@@ -35,7 +35,7 @@ Run the read-only collector with an observation window beginning strictly
 after the leaderboard snapshot:
 
 \`\`\`powershell
-python scripts/fetch_hyperliquid_leader_fills.py --cohort top_pnl --start 2026-11-17T00:00:00Z --end 2026-12-17T00:00:00Z --wallet-limit 100 --out artifacts/hyperliquid-raw-leader-data.json
+python scripts/fetch_hyperliquid_leader_fills.py --cohort top_pnl --start 2026-11-17T00:00:00Z --end 2026-12-17T00:00:00Z --collector-code-sha <collector-git-sha> --wallet-limit 100 --out artifacts/hyperliquid-raw-leader-data.json
 \`\`\`
 
 The collector snapshots the exact raw leaderboard bytes, the separately
@@ -75,9 +75,10 @@ from four consecutive UTC hourly candles and computes features from candles
 fully closed before the first entry fill. It reconstructs only fully closed,
 single-entry, non-scaled linear USDC perp positions. It reconstructs gross price PnL from weighted entry fill price and each closing
 fill price/quantity, then subtracts all signed USDC fees and adds same-coin
-funding. Same-order partial opening fills use the final fill timestamp as the
-signal time while funding accrual starts at the first fill. An opening fill
-after a position reduction invalidates the position lifecycle. The raw exchange `closedPnl` field is preserved for audit but is not
+funding. Same-order partial opening fills update the volume-weighted entry
+price; the signal timestamp and pre-entry features remain anchored to the first
+opening fill, and funding accrual also starts at that first fill. An opening
+fill after a position reduction invalidates the position lifecycle. The raw exchange `closedPnl` field is preserved for audit but is not
 used as the training PnL because the official docs describe it as a
 frontend-convenience field and fee-inclusion semantics are not consistent
 enough to safely subtract fees from it again. The preparer validates the
@@ -139,6 +140,7 @@ include:
   "signal_timestamp": "2026-11-18T10:00:00Z",
   "exit_timestamp": "2026-11-18T14:00:00Z",
   "exit_reason": "TARGET",
+  "position_side": "LONG",
   "features": {
     "trend_composite": 0.4,
     "rsi14": 58.0,
@@ -221,8 +223,8 @@ Uplift is:
 \`mean R(top predicted-R tercile) − mean R(all eligible OOS outcomes)\`.
 
 The uplift confidence interval is a deterministic, fold-stratified bootstrap
-over 6-hour UTC signal-time blocks (2,000 resamples by default, fixed seed).
-Each OOS fold must contain at least five distinct 6-hour blocks; the validator
+over 24-hour UTC signal-time blocks (2,000 resamples by default, fixed seed).
+Each OOS fold must contain at least five distinct 24-hour blocks; the validator
 does not treat a burst of same-period wallet fills as independent observations.
 The report also stores the positive-R share and its 95% Wilson interval. A group is \`DISABLED\` with explicit rejection codes whenever any
 gate fails. Approval of BTC 1h does not approve BTC 4h or any other group.
