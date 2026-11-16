@@ -384,8 +384,8 @@ def test_moved_stop_above_entry_is_still_classified_as_stop():
 
 def test_short_take_profit_uses_buy_side_and_below_condition():
     fills = [
-        _fill("Open Short", 10_000, 100.0, 1.0, 10),
-        _fill("Close Short", 20_000, 90.0, 1.0, 20, pnl=10.0),
+        _fill("Open Short", 10_000, 100.0, 1.0, 10, start_position=0.0),
+        _fill("Close Short", 20_000, 90.0, 1.0, 20, pnl=10.0, start_position=-1.0),
     ]
     target = _trigger_order(
         20,
