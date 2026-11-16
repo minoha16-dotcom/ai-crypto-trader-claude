@@ -213,6 +213,44 @@ and does not claim independent samples across overlapping training windows.
 Any strategy change after reading the report requires a new untouched test
 period. GitHub Actions stores JSON and Markdown outputs as a workflow artifact.
 
+## 5.1 Common UTC comparison and Advisor diagnostics
+
+The multi-timeframe runner compares each group independently by
+Exchange × requested Symbol × Market Type. KuCoin Spot BTC/USDT 1h and 4h
+belong to one comparison group; KuCoin Futures BTC/USDT is a separate group.
+
+For every group, the runner requires one successful dataset for every
+requested timeframe. It computes the intersection of the available candle
+coverage and rounds both ends inward to the least-common-multiple of the
+requested timeframe widths. Only fully closed candles inside that exact UTC
+window are retained. The report records the common UTC start/end and each
+timeframe's actual first candle, last candle open/close, source candle count,
+aligned candle count and coverage percentage.
+
+A multi-timeframe group is rejected in full when a timeframe is missing, the
+common window is empty, any timeframe has fewer than 600 complete candles
+after alignment, timestamps are not aligned to UTC timeframe boundaries, or
+there are gaps/irregular bars inside the common interval. The runner never
+fills or interpolates missing prices. A single-timeframe run is labelled as
+such and is not presented as a cross-timeframe comparison.
+
+The JSON and Markdown reports include per-dataset Advisor diagnostics:
+eligible and excluded closed trades in out-of-sample test folds, exclusion
+counts by exit reason, walk-forward fold count, directional OOS signal count,
+mean net R, positive-R share and its 95% Wilson interval. The eligible label
+exits are STOP, STOP_GAP, TARGET, TARGET_GAP and TIME_EXIT. PERIOD_END and all
+LIQUIDATION exits are excluded.
+
+Important scope distinction: the deployed source still contains the legacy
+local paper-trade similarity Advisor, which uses user-selected closed paper
+trades. This research runner does not convert that similarity score into
+predicted R and does not train or approve an R-multiple ranker. Therefore
+top-tercile mean R, uplift and the uplift confidence interval are explicitly
+N/A, and the R-multiple model status is DISABLED until an approved model
+provides out-of-sample predicted-R scores. The Wilson interval in this report
+refers to the positive-R share across all eligible OOS samples, not ranking
+uplift. Eligible OOS sample counts are not model-training sample counts.
+
 ## 6. Skill, MCP, and backend responsibilities
 
 - **Backend** is authoritative for exchange market data, indicator calculations,

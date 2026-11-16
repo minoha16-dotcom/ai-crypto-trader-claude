@@ -9,6 +9,7 @@ configuration is frozen: this runner does not optimize parameters or claim
 profitability.
 """
 import math
+from collections import Counter
 
 from .backtest import run_backtest
 from .indicators import FEATURE_ABLATIONS
@@ -62,6 +63,32 @@ def _validate_candles(candles, expected_candle_ms=None, max_missing_bars=0):
         previous_timestamp = timestamp
 
 
+def _wilson_interval(successes, sample_size):
+    """95% Wilson interval for the positive-R share."""
+    if sample_size <= 0:
+        return None
+    successes = max(0, min(int(successes), int(sample_size)))
+    n = float(sample_size)
+    p = successes / n
+    z = 1.959963984540054
+    z2 = z * z
+    denominator = 1.0 + z2 / n
+    center = (p + z2 / (2.0 * n)) / denominator
+    radius = (
+        z * math.sqrt((p * (1.0 - p) / n) + z2 / (4.0 * n * n))
+        / denominator
+    )
+    return [
+        round(max(0.0, center - radius), 6),
+        round(min(1.0, center + radius), 6),
+    ]
+
+
+ADVISOR_ELIGIBLE_EXIT_REASONS = {
+    "STOP", "STOP_GAP", "TARGET", "TARGET_GAP", "TIME_EXIT",
+}
+
+
 def _period_summary(result, starting_balance, candle_count):
     trades = result.get("trades", [])
     winners = [trade for trade in trades if float(trade.get("pnl", 0)) > 0]
@@ -70,21 +97,47 @@ def _period_summary(result, starting_balance, candle_count):
     gross_profit = sum(float(trade["pnl"]) for trade in winners)
     gross_loss = abs(sum(float(trade["pnl"]) for trade in losers))
     net_pnl = float(result.get("net_pnl", 0.0))
+
+    eligible_r = []
+    excluded_reasons = Counter()
+    for trade in trades:
+        reason = str(trade.get("exit_reason") or "UNKNOWN").upper()
+        try:
+            r_multiple = float(trade.get("r_multiple"))
+        except (TypeError, ValueError, OverflowError):
+            r_multiple = float("nan")
+        if reason in ADVISOR_ELIGIBLE_EXIT_REASONS and math.isfinite(r_multiple):
+            eligible_r.append(r_multiple)
+        elif reason in ADVISOR_ELIGIBLE_EXIT_REASONS:
+            excluded_reasons["INVALID_R_MULTIPLE"] += 1
+        elif reason.startswith("LIQUIDATION"):
+            excluded_reasons["LIQUIDATION"] += 1
+        else:
+            excluded_reasons[reason] += 1
+
+    eligible_count = len(eligible_r)
+    positive_r_count = sum(value > 0 for value in eligible_r)
+    skipped_signals = result.get("skipped_signals", [])
     return {
         "scored_candles": candle_count,
         "closed_trades": len(trades),
         "winning_trades": len(winners),
         "losing_trades": len(losers),
         "breakeven_trades": len(breakevens),
-        "period_end_closures": sum(
-            1 for trade in trades if trade.get("exit_reason") == "PERIOD_END"
-        ),
-        "liquidations": sum(
-            1 for trade in trades if str(trade.get("exit_reason", "")).startswith("LIQUIDATION")
-        ),
+        "period_end_closures": sum(1 for trade in trades if trade.get("exit_reason") == "PERIOD_END"),
+        "liquidations": sum(1 for trade in trades if str(trade.get("exit_reason", "")).startswith("LIQUIDATION")),
         "funding_paid": sum(float(trade.get("funding_paid", 0) or 0) for trade in trades),
         "open_positions_at_end": len(result.get("open_positions", [])),
-        "skipped_signals": len(result.get("skipped_signals", [])),
+        "skipped_signals": len(skipped_signals),
+        "oos_signals": len(trades) + len(skipped_signals),
+        "eligible_samples": eligible_count,
+        "excluded_samples": sum(excluded_reasons.values()),
+        "eligible_r_sum": sum(eligible_r),
+        "mean_r": sum(eligible_r) / eligible_count if eligible_count else None,
+        "positive_r_count": positive_r_count,
+        "positive_r_share": positive_r_count / eligible_count if eligible_count else None,
+        "wilson_ci_positive_r_share_95": _wilson_interval(positive_r_count, eligible_count),
+        "excluded_sample_reasons": dict(sorted(excluded_reasons.items())),
         "starting_balance": float(starting_balance),
         "ending_balance": float(result.get("ending_balance", starting_balance)),
         "ending_equity": float(result.get("ending_equity", starting_balance)),
@@ -98,9 +151,7 @@ def _period_summary(result, starting_balance, candle_count):
         "max_drawdown_pct": float(result.get("max_drawdown_pct", 0.0)),
         "gross_profit": gross_profit,
         "gross_loss": gross_loss,
-        "volume_ratio_threshold": result.get("assumptions", {}).get(
-            "volume_ratio_threshold"
-        ),
+        "volume_ratio_threshold": result.get("assumptions", {}).get("volume_ratio_threshold"),
     }
 
 
