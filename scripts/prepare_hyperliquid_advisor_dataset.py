@@ -86,54 +86,96 @@ def _fill_direction(fill: dict[str, Any]) -> tuple[str | None, str | None]:
 
 
 def _historical_order_index(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Index top-level and nested child orders without inheriting parent status."""
     index = {}
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        order = row.get("order") if isinstance(row.get("order"), dict) else row
+
+    def visit(raw_order: Any):
+        if not isinstance(raw_order, dict):
+            return
+        nested_order = raw_order.get("order")
+        order = nested_order if isinstance(nested_order, dict) else raw_order
         oid = order.get("oid")
         if oid is not None:
             index[str(oid)] = {
                 **order,
-                "_status": row.get("status"),
-                "_status_timestamp": row.get("statusTimestamp"),
+                "_status": raw_order.get("status") if nested_order is not None else order.get("status"),
+                "_status_timestamp": (
+                    raw_order.get("statusTimestamp")
+                    if nested_order is not None else order.get("statusTimestamp")
+                ),
             }
+        children = order.get("children") or raw_order.get("children") or []
+        if isinstance(children, list):
+            for child in children:
+                visit(child)
+
+    for row in rows:
+        visit(row)
     return index
 
 
 def _classify_trigger_exit(
     position_side: str,
-    entry_price: float,
     exit_price: float,
     close_oid: Any,
+    coin: str,
     order_index: dict[str, dict[str, Any]],
 ) -> str:
+    """Classify from explicit trigger type/direction, not entry-price comparison."""
     if close_oid is None:
         return "MANUAL_CLOSE"
     order = order_index.get(str(close_oid))
     if not order:
         return "MANUAL_CLOSE"
-    is_trigger = bool(order.get("isTrigger")) or bool(order.get("isPositionTpsl"))
-    if not is_trigger or not bool(order.get("reduceOnly")):
+    if not (order.get("isTrigger") is True or order.get("isPositionTpsl") is True):
         return "MANUAL_CLOSE"
+    if order.get("reduceOnly") is not True:
+        return "MANUAL_CLOSE"
+    if str(order.get("coin") or "").upper() != str(coin).upper():
+        return "UNKNOWN"
+
+    expected_order_side = "A" if position_side == "LONG" else "B" if position_side == "SHORT" else None
+    if expected_order_side is None or str(order.get("side") or "").upper() != expected_order_side:
+        return "UNKNOWN"
+
+    order_type = str(order.get("orderType") or "").strip().lower()
+    if order_type in {"stop market", "stop limit"}:
+        label = "STOP"
+    elif order_type in {"take market", "take limit", "take profit market", "take profit limit"}:
+        label = "TARGET"
+    else:
+        return "UNKNOWN"
+
+    condition = str(order.get("triggerCondition") or "").strip().lower()
+    if condition.startswith("price below"):
+        condition_direction = "BELOW"
+    elif condition.startswith("price above"):
+        condition_direction = "ABOVE"
+    else:
+        return "UNKNOWN"
+    expected_direction = (
+        ("BELOW" if label == "STOP" else "ABOVE")
+        if position_side == "LONG"
+        else ("ABOVE" if label == "STOP" else "BELOW")
+    )
+    if condition_direction != expected_direction:
+        return "UNKNOWN"
+
     try:
         trigger_price = _finite(order.get("triggerPx"), "triggerPx")
+        exit_price = _finite(exit_price, "exit_price")
     except ValueError:
         return "UNKNOWN"
-    if trigger_price <= 0:
+    if trigger_price <= 0 or exit_price <= 0:
         return "UNKNOWN"
 
     if position_side == "LONG":
-        if trigger_price < entry_price:
+        if label == "STOP":
             return "STOP_GAP" if exit_price < trigger_price else "STOP"
-        if trigger_price > entry_price:
-            return "TARGET_GAP" if exit_price > trigger_price else "TARGET"
-    elif position_side == "SHORT":
-        if trigger_price > entry_price:
-            return "STOP_GAP" if exit_price > trigger_price else "STOP"
-        if trigger_price < entry_price:
-            return "TARGET_GAP" if exit_price < trigger_price else "TARGET"
-    return "UNKNOWN"
+        return "TARGET_GAP" if exit_price > trigger_price else "TARGET"
+    if label == "STOP":
+        return "STOP_GAP" if exit_price > trigger_price else "STOP"
+    return "TARGET_GAP" if exit_price < trigger_price else "TARGET"
 
 
 def _funding_for_position(
@@ -145,15 +187,17 @@ def _funding_for_position(
     total = 0.0
     for row in funding_rows:
         if not isinstance(row, dict):
-            continue
+            return 0.0, False
         try:
             timestamp = int(row.get("time"))
         except (TypeError, ValueError, OverflowError):
-            continue
+            return 0.0, False
         if timestamp < entry_ms or timestamp > exit_ms:
             continue
         delta = row.get("delta") if isinstance(row.get("delta"), dict) else {}
-        row_coin = str(row.get("coin") or delta.get("coin") or "")
+        row_coin = str(row.get("coin") or delta.get("coin") or "").strip()
+        if not row_coin:
+            return 0.0, False
         if row_coin.upper() != coin.upper():
             continue
         try:
@@ -256,6 +300,7 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
                     "entry_quantity": quantity,
                     "remaining_quantity": quantity,
                     "entry_timestamp": timestamp,
+                    "entry_start_timestamp": timestamp,
                     "open_oid": str(oid) if oid is not None else None,
                     "fees": 0.0,
                     "closed_pnl_reported": 0.0,
@@ -276,6 +321,12 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
                 and active["side"] == side
             ):
                 # Multiple fills from the same opening order are one entry.
+                # A later opening fill after a reduction invalidates this risk path.
+                if active.get("close_quantity", 0.0) > 0:
+                    active["invalid_reason"] = (
+                        active.get("invalid_reason") or "ENTRY_FILL_AFTER_POSITION_REDUCTION"
+                    )
+                active["entry_timestamp"] = max(active["entry_timestamp"], timestamp)
                 new_quantity = active["entry_quantity"] + quantity
                 active["entry_price"] = (
                     active["entry_price"] * active["entry_quantity"]
@@ -335,7 +386,7 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
                 funding_paid, funding_ok = _funding_for_position(
                     funding,
                     coin,
-                    active["entry_timestamp"],
+                    active.get("entry_start_timestamp", active["entry_timestamp"]),
                     active["exit_timestamp"],
                 )
                 active["funding_paid"] = funding_paid
@@ -349,9 +400,9 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
                     else:
                         exit_reason = _classify_trigger_exit(
                             active["side"],
-                            active["entry_price"],
                             active["last_exit_price"],
                             active["last_close_oid"],
+                            coin,
                             orders,
                         )
                 if active.get("invalid_reason"):
@@ -524,6 +575,12 @@ def position_to_sample(
         return None, str(exc) or "FEATURE_GENERATION_FAILED"
 
     raw_reason = str(position.get("exit_reason") or "UNKNOWN")
+    position_side = str(position.get("side") or "").strip().upper()
+    if position_side not in {"LONG", "SHORT"}:
+        return None, "INVALID_POSITION_SIDE"
+    direction = 1.0 if position_side == "LONG" else -1.0
+    features["trend_composite"] = float(features["trend_composite"]) * direction
+    features["rsi14"] = 50.0 + (float(features["rsi14"]) - 50.0) * direction
     lifecycle_issue = str(position.get("invalid_reason") or "")
     reason = lifecycle_issue or raw_reason
     sample_id = hashlib.sha256(
@@ -543,6 +600,7 @@ def position_to_sample(
         "signal_timestamp": _iso_utc(position["entry_timestamp"]),
         "exit_timestamp": _iso_utc(position["exit_timestamp"]),
         "exit_reason": reason,
+        "position_side": position_side,
         "features": features,
     }
     if lifecycle_issue:
@@ -600,16 +658,22 @@ def prepare_dataset(
     timeframes: tuple[str, ...] = DEFAULT_TIMEFRAMES,
 ) -> dict[str, Any]:
     raw_manifest = raw_payload.get("manifest") or {}
-    if not raw_manifest.get("source_snapshot_sha256"):
-        raise ValueError("raw dataset is missing its source snapshot hash")
-    if not raw_manifest.get("source_metadata_sha256"):
-        raise ValueError("raw dataset is missing its metadata snapshot hash")
-    if not raw_manifest.get("cohort_selection_as_of_utc"):
-        raise ValueError("raw dataset is missing its cohort selection cutoff")
-    if not raw_manifest.get("data_start_utc") or not raw_manifest.get("data_end_utc"):
-        raise ValueError("raw dataset is missing the observation window")
+    for field in (
+        "source_snapshot_sha256",
+        "source_metadata_sha256",
+        "cohort_selection_as_of_utc",
+        "data_start_utc",
+        "data_end_utc",
+    ):
+        if not raw_manifest.get(field):
+            raise ValueError(f"raw dataset is missing {field}")
     if not code_sha:
-        raise ValueError("--code-sha is required for a reproducible prepared dataset")
+        raise ValueError("--code-sha is required for reproducibility")
+    if not timeframes or len(set(timeframes)) != len(timeframes):
+        raise ValueError("timeframes must be non-empty and unique")
+    unsupported = sorted(set(timeframes) - {"1h", "4h"})
+    if unsupported:
+        raise ValueError("unsupported timeframe(s): " + ", ".join(unsupported))
 
     data_start_ms = int(datetime.fromisoformat(
         raw_manifest["data_start_utc"].replace("Z", "+00:00")
@@ -617,12 +681,16 @@ def prepare_dataset(
     data_end_ms = int(datetime.fromisoformat(
         raw_manifest["data_end_utc"].replace("Z", "+00:00")
     ).timestamp() * 1000)
+    if data_end_ms <= data_start_ms:
+        raise ValueError("invalid observation window")
 
     groups: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     reconstruction_exclusions = Counter()
     feature_exclusions = Counter()
     wallet_count = 0
     position_count = 0
+    positions_by_symbol: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
     exchange = ccxt.hyperliquid({
         "enableRateLimit": True,
         "timeout": 60000,
@@ -630,7 +698,9 @@ def prepare_dataset(
     })
     try:
         exchange.load_markets()
-        candles_cache: dict[str, list[list[float]]] = {}
+
+        # Collect all positions before requesting candles: leaderboard rank
+        # order is unrelated to position entry chronology.
         for wallet in raw_payload.get("wallets") or []:
             wallet_count += 1
             if not raw_wallet_history_complete(wallet):
@@ -647,7 +717,7 @@ def prepare_dataset(
                 ):
                     reconstruction_exclusions["POSITION_OUTSIDE_OBSERVATION_WINDOW"] += 1
                     continue
-                coin = position["coin"]
+                coin = str(position["coin"])
                 try:
                     symbol = _market_symbol(exchange, coin)
                     market = exchange.market(symbol)
@@ -657,55 +727,56 @@ def prepare_dataset(
                 except (ValueError, TypeError, OverflowError):
                     reconstruction_exclusions["UNSUPPORTED_MARKET_OR_CONTRACT_SIZE"] += 1
                     continue
-                if symbol not in candles_cache:
-                    start = max(
-                        0,
-                        int(position["entry_timestamp"]) - 300 * HOUR_MS,
-                    )
-                    end = data_end_ms + HOUR_MS
-                    candles_cache[symbol] = fetch_hourly_candles(
-                        exchange, symbol, start, end
-                    )
-                hourly = candles_cache[symbol]
+                positions_by_symbol[symbol].append({
+                    **position,
+                    "wallet_address": wallet["address"],
+                    "symbol": symbol,
+                })
+
+        candles_cache: dict[str, list[list[float]]] = {}
+        for symbol, symbol_positions in sorted(positions_by_symbol.items()):
+            earliest_entry = min(int(row["entry_timestamp"]) for row in symbol_positions)
+            candles_cache[symbol] = fetch_hourly_candles(
+                exchange,
+                symbol,
+                max(0, earliest_entry - 300 * HOUR_MS),
+                data_end_ms + HOUR_MS,
+            )
+
+        for symbol, symbol_positions in sorted(positions_by_symbol.items()):
+            hourly = candles_cache[symbol]
+            for position in sorted(
+                symbol_positions,
+                key=lambda row: (
+                    int(row["entry_timestamp"]),
+                    int(row["exit_timestamp"]),
+                    row["wallet_address"],
+                ),
+            ):
                 for timeframe in timeframes:
-                    if timeframe == "1h":
-                        tf_candles = hourly
-                    elif timeframe == "4h":
-                        tf_candles = aggregate_four_hour(hourly)
-                    else:
-                        raise ValueError(f"unsupported timeframe: {timeframe}")
+                    tf_candles = hourly if timeframe == "1h" else aggregate_four_hour(hourly)
                     try:
-                        features = features_before_entry(
-                            tf_candles,
-                            int(position["entry_timestamp"]),
-                            timeframe,
-                        )
-                        atr_features = float(
-                            analyze(
-                                [
-                                    row for row in tf_candles
-                                    if int(row[0]) + (
-                                        HOUR_MS if timeframe == "1h" else FOUR_HOURS_MS
-                                    ) <= int(position["entry_timestamp"])
-                                ][-max(120, FEATURE_CONTIGUOUS_CANDLES):],
-                                volume_ratio_threshold=0.0,
-                            )["atr14"]
-                        )
+                        atr_features = _position_atr(position, tf_candles, timeframe)
                     except (ValueError, IndexError):
-                        feature_exclusions[f"{symbol}:{timeframe}:MISSING_PRE_ENTRY_FEATURES"] += 1
+                        feature_exclusions[
+                            f"{symbol}:{timeframe}:MISSING_PRE_ENTRY_FEATURES"
+                        ] += 1
                         continue
 
                     candidate = dict(position)
                     candidate["atr14"] = atr_features
                     sample, problem = position_to_sample(
                         candidate,
-                        wallet_address=wallet["address"],
+                        wallet_address=position["wallet_address"],
                         candles=tf_candles,
                         timeframe=timeframe,
                     )
                     if sample is None:
-                        feature_exclusions[f"{symbol}:{timeframe}:{problem or 'UNKNOWN'}"] += 1
+                        feature_exclusions[
+                            f"{symbol}:{timeframe}:{problem or 'UNKNOWN'}"
+                        ] += 1
                         continue
+
                     group_key = ("hyperliquid", symbol, "futures", timeframe)
                     group = groups.setdefault(group_key, {
                         "exchange": "hyperliquid",
@@ -716,6 +787,12 @@ def prepare_dataset(
                         "provenance": {},
                         "excluded_samples": 0,
                     })
+                    sample.update({
+                        "exchange": "hyperliquid",
+                        "symbol": symbol,
+                        "market_type": "futures",
+                        "timeframe": timeframe,
+                    })
                     group["samples"].append(sample)
                     if sample["exit_reason"] not in ELIGIBLE_EXIT_REASONS:
                         group["excluded_samples"] += 1
@@ -723,24 +800,23 @@ def prepare_dataset(
                             f"{symbol}:{timeframe}:{sample['exit_reason']}"
                         ] += 1
 
-        source_url = raw_manifest.get("source_url")
-        source_metadata_url = raw_manifest.get("source_metadata_url")
-        source_license = raw_manifest.get("source_license")
         manifest = {
             "source_provider": raw_manifest.get("source_provider"),
-            "source_url": source_url,
-            "source_metadata_url": source_metadata_url,
-            "source_license": source_license,
+            "source_url": raw_manifest.get("source_url"),
+            "source_metadata_url": raw_manifest.get("source_metadata_url"),
+            "source_license": raw_manifest.get("source_license"),
             "source_snapshot_utc": raw_manifest.get("source_snapshot_utc"),
             "leaderboard_retrieved_at_utc": raw_manifest.get("leaderboard_retrieved_at_utc"),
             "source_snapshot_sha256": raw_manifest.get("source_snapshot_sha256"),
             "source_metadata_sha256": raw_manifest.get("source_metadata_sha256"),
+            "raw_dataset_sha256": raw_manifest.get("raw_dataset_sha256"),
             "cohort_selection_as_of_utc": raw_manifest.get("cohort_selection_as_of_utc"),
             "data_start_utc": raw_manifest.get("data_start_utc"),
             "data_end_utc": raw_manifest.get("data_end_utc"),
             "model_version": MODEL_VERSION,
             "feature_schema_version": FEATURE_SCHEMA_VERSION,
             "code_sha": code_sha,
+            "preparation_code_sha": code_sha,
             "backtest_config": {
                 "risk_unit_definition": (
                     "system-normalized R = (reconstructed gross fill-price PnL - "
@@ -749,21 +825,29 @@ def prepare_dataset(
                     "not the trader's unknown original stop risk"
                 ),
                 "fee_model": (
-                    "sum the signed fee field from every open and close fill; "
-                    "positive fee is a cost and negative fee is a maker rebate; "
-                    "builderFee is already included in fee"
+                    "sum signed fee from every open and close fill; positive fee is a cost "
+                    "and negative fee is a maker rebate; builderFee is included in fee"
                 ),
                 "closed_pnl_treatment": (
-                    "retain the exchange closedPnl field for audit only; reconstruct "
-                    "gross price PnL from entry price, closing fill prices, direction "
-                    "and closed quantities to avoid ambiguous fee double counting"
+                    "retain exchange closedPnl for audit only; reconstruct gross price PnL "
+                    "from entry price, closing fill prices, direction and closed quantities"
                 ),
                 "slippage_model": "actual public fill prices; no synthetic slippage added",
                 "slippage_bps": 0.0,
                 "fee_rate": 0.0,
                 "funding_included": True,
-                "entry_rule": "first non-scaled Open Long/Open Short fill, partial fills from the same oid volume-weighted",
-                "exit_rule": "last full-close fill matched to a reduceOnly trigger order with a trigger price; otherwise excluded",
+                "entry_rule": (
+                    "first non-scaled Open Long/Open Short fill; partial fills from the same "
+                    "opening oid use volume-weighted entry and final fill time; funding starts at first fill"
+                ),
+                "exit_rule": (
+                    "single fully closing reduceOnly trigger order; Stop/Take type and "
+                    "direction-compatible trigger condition determine label; manual/ambiguous exits excluded"
+                ),
+                "feature_directionality": (
+                    "trend_composite and RSI14 transformed to position-relative LONG/SHORT "
+                    "orientation; ADX14, Volume Ratio and ATR% are direction-neutral"
+                ),
             },
         }
         prepared_groups = []
@@ -779,26 +863,35 @@ def prepare_dataset(
             prepared_groups.append(group)
 
         return {
-            "dataset_version": 1,
+            "dataset_version": 2,
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
             "source_raw_dataset_version": raw_payload.get("dataset_version"),
             "manifest": manifest,
             "preparation_policy": {
-                "position_lifecycle": "single entry order, no add/scale-in, fully closed only; reconcile startPosition on every fill",
+                "position_lifecycle": (
+                    "single entry order, no add/scale-in, fully closed only; reconcile startPosition; "
+                    "signal time is final fill of the opening oid and funding starts at first fill"
+                ),
                 "contract_multiplier": "only linear Hyperliquid perps with CCXT contractSize exactly 1.0 are included",
                 "eligible_exit_reasons": sorted(ELIGIBLE_EXIT_REASONS),
                 "ineligible_exit_reasons": [
-                    "MANUAL_CLOSE", "UNKNOWN", "LIQUIDATION",
-                    "UNKNOWN_RISK", "PERIOD_END",
+                    "MANUAL_CLOSE", "UNKNOWN", "LIQUIDATION", "UNKNOWN_RISK", "PERIOD_END",
                 ],
-                "feature_time": "last fully closed OHLCV candle strictly before or at position entry",
+                "trigger_classification": (
+                    "STOP/TARGET from orderType plus direction-compatible triggerCondition; "
+                    "no entry-price test, so moved/trailing stops do not become targets"
+                ),
+                "feature_time": "last fully closed OHLCV candle before final entry fill",
+                "feature_directionality": "trend_composite and RSI14 are position-relative",
                 "hourly_source": "Hyperliquid public CCXT OHLCV 1h",
                 "four_hour_source": "aggregate only four consecutive UTC 1h candles; no fill/interpolation",
-                "funding": "sum delta.usdc events for same coin during position lifetime",
+                "funding": "sum valid same-coin delta.usdc rows from first opening fill to final close; malformed rows invalidate label",
+                "ohlcv_coverage": "fetch from earliest reconstructed position per symbol, independent of wallet ranking",
             },
             "coverage": {
                 "wallets_seen": wallet_count,
                 "positions_reconstructed": position_count,
+                "symbols_with_candle_history": len(candles_cache),
                 "groups_created": len(prepared_groups),
                 "samples_created": sum(len(group["samples"]) for group in prepared_groups),
                 "reconstruction_exclusions": dict(sorted(reconstruction_exclusions.items())),

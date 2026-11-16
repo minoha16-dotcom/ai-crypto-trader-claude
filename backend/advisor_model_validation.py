@@ -16,8 +16,8 @@ import re
 from typing import Any
 
 
-MODEL_VERSION = "1.0.0"
-FEATURE_SCHEMA_VERSION = "advisor-r5-v1"
+MODEL_VERSION = "1.1.0"
+FEATURE_SCHEMA_VERSION = "advisor-r5-v2"
 MODEL_FAMILY = "ridge_linear_r"
 FEATURE_KEYS = (
     "trend_composite",
@@ -96,8 +96,10 @@ def _feature_vector(features: dict[str, Any]) -> list[float]:
     volume_ratio = max(0.0, _finite_number(features["volume_ratio"], "volume_ratio"))
     atr_pct = max(0.0, _finite_number(features["atr_pct"], "atr_pct"))
 
-    # EMA alignment and price-vs-EMA20 must be merged upstream into one
-    # trend_composite feature; they are not treated as independent votes.
+    # In schema r5-v2, trend_composite and RSI14 are position-relative:
+    # positive values consistently indicate conditions supportive of LONG or
+    # SHORT positions. EMA alignment and price-vs-EMA20 are merged upstream
+    # into one trend_composite feature.
     return [
         trend,
         (rsi - 50.0) / 50.0,
@@ -210,6 +212,9 @@ def _validate_samples(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if sample_id in seen_ids:
             raise ValueError(f"duplicate sample_id: {sample_id}")
         seen_ids.add(sample_id)
+        position_side = str(row.get("position_side") or "").strip().upper()
+        if position_side not in {"LONG", "SHORT"}:
+            raise ValueError(f"sample {index} must declare position_side as LONG or SHORT")
         exit_reason = str(row.get("exit_reason") or "UNKNOWN").strip().upper()
         eligible = exit_reason in ELIGIBLE_EXIT_REASONS
         r_multiple = _finite_number(row.get("r_multiple"), "r_multiple") if eligible else None
@@ -218,6 +223,7 @@ def _validate_samples(samples: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "signal_timestamp_ms": signal_ms,
             "exit_timestamp_ms": exit_ms,
             "exit_reason": exit_reason,
+            "position_side": position_side,
             "eligible": eligible,
             "r_multiple": r_multiple,
             "features": dict(row["features"]),
@@ -633,6 +639,8 @@ def _manifest_rejection_reasons(
         "source_snapshot_utc",
         "source_snapshot_sha256",
         "source_metadata_sha256",
+        "raw_dataset_sha256",
+        "preparation_code_sha",
         "cohort_selection_as_of_utc",
         "data_start_utc",
         "data_end_utc",
@@ -654,6 +662,9 @@ def _manifest_rejection_reasons(
     metadata_hash = str(provenance.get("source_metadata_sha256") or "").lower()
     if metadata_hash and not SHA256_RE.fullmatch(metadata_hash):
         reasons.append({"code": "INVALID_SOURCE_METADATA_SHA256", "detail": "source_metadata_sha256 must be 64 hexadecimal characters"})
+    raw_dataset_hash = str(provenance.get("raw_dataset_sha256") or "").lower()
+    if raw_dataset_hash and not SHA256_RE.fullmatch(raw_dataset_hash):
+        reasons.append({"code": "INVALID_RAW_DATASET_SHA256", "detail": "raw_dataset_sha256 must be 64 hexadecimal characters"})
 
     if not SHA256_RE.fullmatch(str(dataset_sha256 or "").lower()):
         reasons.append({"code": "INVALID_DATASET_SHA256", "detail": "the exact training dataset file SHA-256 is required"})
@@ -661,6 +672,12 @@ def _manifest_rejection_reasons(
     code_sha = str(provenance.get("code_sha") or "").lower()
     if code_sha and not GIT_SHA_RE.fullmatch(code_sha):
         reasons.append({"code": "INVALID_CODE_SHA", "detail": "code_sha must be a Git commit SHA"})
+    preparation_code_sha = str(provenance.get("preparation_code_sha") or "").lower()
+    if preparation_code_sha and not GIT_SHA_RE.fullmatch(preparation_code_sha):
+        reasons.append({
+            "code": "INVALID_PREPARATION_CODE_SHA",
+            "detail": "preparation_code_sha must be a Git commit SHA",
+        })
     model_version = str(provenance.get("model_version") or "")
     feature_version = str(provenance.get("feature_schema_version") or "")
     if model_version and model_version != MODEL_VERSION:
@@ -685,8 +702,20 @@ def _manifest_rejection_reasons(
             reasons.append({"code": "MISSING_FUNDING_POLICY", "detail": "backtest_config.funding_included must be true or false"})
         if "slippage_bps" not in config:
             reasons.append({"code": "MISSING_SLIPPAGE_BPS", "detail": "backtest_config.slippage_bps is required"})
+        else:
+            try:
+                if _finite_number(config["slippage_bps"], "slippage_bps") < 0:
+                    raise ValueError("slippage_bps must be non-negative")
+            except ValueError as exc:
+                reasons.append({"code": "INVALID_SLIPPAGE_BPS", "detail": str(exc)})
         if "fee_rate" not in config and not config.get("fee_model"):
             reasons.append({"code": "MISSING_FEE_MODEL", "detail": "a reproducible fee model is required"})
+        elif "fee_rate" in config:
+            try:
+                if _finite_number(config["fee_rate"], "fee_rate") < 0:
+                    raise ValueError("fee_rate must be non-negative")
+            except ValueError as exc:
+                reasons.append({"code": "INVALID_FEE_RATE", "detail": str(exc)})
 
     try:
         snapshot_ms = _timestamp_ms(provenance.get("source_snapshot_utc"), "source_snapshot_utc")
@@ -1046,7 +1075,8 @@ def evaluate_approval(
                 "source_provider", "source_url", "source_license",
                 "source_snapshot_utc", "leaderboard_retrieved_at_utc",
                 "source_snapshot_sha256", "source_metadata_sha256",
-                "raw_dataset_sha256", "cohort_selection_as_of_utc",
+                "raw_dataset_sha256", "preparation_code_sha",
+                "cohort_selection_as_of_utc",
                 "data_start_utc", "data_end_utc", "dataset_sha256",
                 "model_version", "feature_schema_version", "code_sha",
                 "backtest_config",
@@ -1063,6 +1093,22 @@ def train_validate_group(
     """Train, evaluate, and return an approved final model only when all gates pass."""
     policy = {**DEFAULT_POLICY, **(policy or {})}
     samples = group.get("samples") or []
+    expected_group = {
+        "exchange": str(group.get("exchange") or ""),
+        "symbol": str(group.get("symbol") or ""),
+        "market_type": str(group.get("market_type") or ""),
+        "timeframe": str(group.get("timeframe") or ""),
+    }
+    if not all(expected_group.values()):
+        raise ValueError("group must declare exchange, symbol, market_type and timeframe")
+    for index, sample in enumerate(samples):
+        if not isinstance(sample, dict):
+            raise ValueError(f"sample {index} must be an object")
+        for field, expected in expected_group.items():
+            if str(sample.get(field) or "") != expected:
+                raise ValueError(
+                    f"sample {index} has {field}={sample.get(field)!r}; expected {expected!r}"
+                )
     ordered_samples = _validate_samples(samples)
 
     provenance = dict(manifest or {})
