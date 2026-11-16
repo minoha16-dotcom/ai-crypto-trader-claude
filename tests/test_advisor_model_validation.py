@@ -276,3 +276,40 @@ def test_train_validate_exports_no_model_when_any_approval_gate_fails():
         reason["code"] == "COHORT_SELECTION_LOOKAHEAD"
         for reason in result["approval"]["rejection_reasons"]
     )
+
+
+
+def test_train_validate_rejects_samples_outside_declared_manifest_window():
+    group = {
+        "exchange": "hyperliquid",
+        "symbol": "BTC/USDC",
+        "market_type": "futures",
+        "timeframe": "1h",
+        "samples": _samples(260),
+        "provenance": {
+            "cohort_selection_as_of_utc": "2026-11-01T00:00:00+00:00",
+            "data_start_utc": "2026-11-02T00:00:00+00:00",
+            "data_end_utc": "2026-11-15T00:00:00+00:00",
+        },
+    }
+    result = train_validate_group(
+        group=group,
+        manifest=_manifest(0),
+        dataset_sha256=hashlib.sha256(b"dataset").hexdigest(),
+        policy={
+            "min_training_samples_per_fold": 200,
+            "min_walk_forward_folds": 3,
+            "max_walk_forward_folds": 3,
+            "min_oos_samples_per_fold": 20,
+            "min_oos_samples": 1,
+            "min_oos_signals": 1,
+            "min_top_tercile_samples": 1,
+            "bootstrap_resamples": 500,
+        },
+    )
+
+    assert result["model"] is None
+    assert any(
+        reason["code"] == "SAMPLE_OUTSIDE_MANIFEST_DATA_WINDOW"
+        for reason in result["approval"]["rejection_reasons"]
+    )

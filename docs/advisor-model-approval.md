@@ -49,6 +49,29 @@ total positions), but its public portfolio metrics alone are not individual
 trade-level feature/label data. It is therefore not the primary supervised
 training source.
 
+
+## Raw public leader-trade snapshot
+
+The initial raw-data adapter can download the UnderHyper leaderboard JSON and
+retrieve each selected wallet's public Hyperliquid fills and funding events:
+
+\`\`\`powershell
+python scripts/fetch_hyperliquid_leader_fills.py --start 2026-11-17T00:00:00Z --end 2026-12-17T00:00:00Z --wallet-limit 200 --out artifacts/hyperliquid-raw-leader-data.json
+\`\`\`
+
+The observation window must start strictly after the leaderboard snapshot;
+the adapter rejects retrospective sampling from a cohort selected using later
+performance. It uses read-only public endpoints and no account keys. Saturated
+time windows are recursively split. A wallet is marked incomplete if any
+response cannot be fully retrieved or the documented 10,000 recent-fill
+history cap is reached. Incomplete wallets must be excluded from model data.
+
+This raw snapshot is not yet model-ready. A subsequent preparation step must
+reconstruct full position lifecycles, join account-level funding, obtain
+historical candle features at the opening timestamp, and calculate the
+declared system-normalized R label. It must include losses and breakeven trades
+from every selected wallet. A raw close PnL by itself is not an R-multiple.
+
 ## Frozen per-group dataset contract
 
 The CLI consumes one immutable JSON file with a top-level \`manifest\` and a

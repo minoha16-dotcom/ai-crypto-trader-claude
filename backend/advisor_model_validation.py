@@ -453,6 +453,18 @@ def _manifest_rejection_reasons(
     code_sha = str(provenance.get("code_sha") or "").lower()
     if code_sha and not GIT_SHA_RE.fullmatch(code_sha):
         reasons.append({"code": "INVALID_CODE_SHA", "detail": "code_sha must be a Git commit SHA"})
+    model_version = str(provenance.get("model_version") or "")
+    feature_version = str(provenance.get("feature_schema_version") or "")
+    if model_version and model_version != MODEL_VERSION:
+        reasons.append({
+            "code": "UNSUPPORTED_MODEL_VERSION",
+            "detail": f"expected model_version {MODEL_VERSION}; received {model_version}",
+        })
+    if feature_version and feature_version != FEATURE_SCHEMA_VERSION:
+        reasons.append({
+            "code": "FEATURE_SCHEMA_VERSION_MISMATCH",
+            "detail": f"expected feature_schema_version {FEATURE_SCHEMA_VERSION}; received {feature_version}",
+        })
 
     config = provenance.get("backtest_config")
     if not isinstance(config, dict):
@@ -546,6 +558,19 @@ def evaluate_approval(
         reasons.append({
             "code": "INSUFFICIENT_OOS_SAMPLES",
             "detail": f"minimum is {policy['min_oos_samples']}; observed {oos_count}",
+        })
+
+    per_fold_training_counts = [int(row.get("training_samples", 0)) for row in folds]
+    if (
+        len(per_fold_training_counts) < int(policy["min_walk_forward_folds"])
+        or any(count < int(policy["min_training_samples_per_fold"]) for count in per_fold_training_counts)
+    ):
+        reasons.append({
+            "code": "PER_FOLD_TRAINING_COUNT_MISMATCH",
+            "detail": (
+                f"every fold must report at least {policy['min_training_samples_per_fold']} "
+                f"training rows; observed {per_fold_training_counts}"
+            ),
         })
 
     per_fold_counts = [int(row.get("test_samples", 0)) for row in folds]
@@ -676,14 +701,44 @@ def train_validate_group(
 ) -> dict[str, Any]:
     """Train, evaluate, and return an approved final model only when all gates pass."""
     policy = {**DEFAULT_POLICY, **(policy or {})}
+    samples = group.get("samples") or []
     walk_forward = walk_forward_predict(
-        group.get("samples") or [],
+        samples,
         min_training_samples=int(policy["min_training_samples_per_fold"]),
         min_folds=int(policy["min_walk_forward_folds"]),
         max_folds=int(policy["max_walk_forward_folds"]),
         min_test_samples_per_fold=int(policy["min_oos_samples_per_fold"]),
         ridge_alpha=float(policy["ridge_alpha"]),
     )
+    # Validate every row, not only the final test rows, against the immutable
+    # cohort and observation window. This prevents a manually assembled JSON
+    # file from hiding look-ahead data outside the OOS prediction list.
+    provenance = dict(manifest or {})
+    provenance.update(group.get("provenance") or {})
+    window_issues = []
+    try:
+        cohort_ms = _timestamp_ms(provenance.get("cohort_selection_as_of_utc"), "cohort_selection_as_of_utc")
+        data_start_ms = _timestamp_ms(provenance.get("data_start_utc"), "data_start_utc")
+        data_end_ms = _timestamp_ms(provenance.get("data_end_utc"), "data_end_utc")
+        for row in _validate_samples(samples):
+            if row["signal_timestamp_ms"] <= cohort_ms:
+                window_issues.append({
+                    "code": "SAMPLE_PRECEDES_COHORT_CUTOFF",
+                    "detail": f"sample {row['sample_id']} is not after the cohort-selection cutoff",
+                })
+                break
+            if row["signal_timestamp_ms"] < data_start_ms or row["exit_timestamp_ms"] > data_end_ms:
+                window_issues.append({
+                    "code": "SAMPLE_OUTSIDE_MANIFEST_DATA_WINDOW",
+                    "detail": f"sample {row['sample_id']} falls outside the declared data window",
+                })
+                break
+    except ValueError as exc:
+        window_issues.append({
+            "code": "INVALID_GROUP_DATA_WINDOW",
+            "detail": str(exc),
+        })
+
     # The walk-forward runner's evaluated signals are closed-trade samples. Keep
     # this field explicit so reports do not confuse it with unexecuted scanner rows.
     walk_forward["oos_signals"] = len(walk_forward["oos_predictions"])
@@ -694,6 +749,10 @@ def train_validate_group(
         dataset_sha256=dataset_sha256,
         policy=policy,
     )
+    if window_issues:
+        approval["rejection_reasons"].extend(window_issues)
+        approval["approved"] = False
+        approval["model_status"] = "DISABLED"
     result = {
         "approval": approval,
         "walk_forward": {
