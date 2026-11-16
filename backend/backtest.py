@@ -360,6 +360,18 @@ def run_backtest(
             "funding_events": funding_events,
             "entry_index": i + 1,
             "entry_timestamp": candles[i + 1][0],
+            # The signal is known only after candle i closes. Candle i+1 opens
+            # at that same UTC instant, so this is the no-lookahead decision time.
+            "signal_index": i,
+            "signal_timestamp": candles[i + 1][0],
+            "signal_candle_timestamp": candles[i][0],
+            "signal_features": {
+                name: metrics.get(name)
+                for name in (
+                    "price", "ema20", "ema50", "rsi14", "adx14",
+                    "volume_ratio", "atr_pct",
+                )
+            },
         }
         exit_reference = None
         exit_reason = None
