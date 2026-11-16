@@ -166,11 +166,11 @@ def test_collector_to_independent_group_approval_report_end_to_end(monkeypatch, 
         def __init__(self):
             self.markets = {
                 "BTC/USDC:USDC": {
-                    "id": "BTC", "contract": True, "swap": True,
+                    "id": "BTC", "symbol": "BTC/USDC:USDC", "contract": True, "swap": True,
                     "linear": True, "settle": "USDC", "contractSize": 1.0,
                 },
                 "ETH/USDC:USDC": {
-                    "id": "ETH", "contract": True, "swap": True,
+                    "id": "ETH", "symbol": "ETH/USDC:USDC", "contract": True, "swap": True,
                     "linear": True, "settle": "USDC", "contractSize": 1.0,
                 },
             }
