@@ -8,6 +8,7 @@ Hyperliquid source data. This output is raw evidence, not model-ready training
 data.
 """
 import argparse
+import base64
 import hashlib
 import json
 import math
@@ -356,6 +357,15 @@ def main():
         required=True,
         help="Git commit SHA of this public-data collector",
     )
+    parser.add_argument(
+        "--snapshot-only",
+        action="store_true",
+        help="Freeze the leaderboard cohort now, before the observation window starts; do not collect fills yet.",
+    )
+    parser.add_argument(
+        "--snapshot-file",
+        help="Reuse a previously frozen --snapshot-only file when collecting the completed observation window.",
+    )
     parser.add_argument("--wallet-limit", type=int, default=100)
     parser.add_argument("--pause-seconds", type=float, default=0.0)
     parser.add_argument("--timeout", type=float, default=60.0)
@@ -371,26 +381,168 @@ def main():
         raise SystemExit("--pause-seconds cannot be negative")
     if not re.fullmatch(r"[0-9a-fA-F]{7,40}", args.collector_code_sha):
         raise SystemExit("--collector-code-sha must be a 7-40 character Git SHA")
+    if args.snapshot_only and args.snapshot_file:
+        raise SystemExit("--snapshot-only and --snapshot-file cannot be used together")
 
-    (
-        raw_leaderboard, raw_metadata, metadata, addresses, snapshot_as_of
-    ) = _load_leaderboard(
-        args.leaderboard_url,
-        args.metadata_url,
-        args.timeout,
-        cohort=args.cohort,
+    snapshot_file_sha256 = None
+    cohort_snapshot_code_sha = None
+    source_provider = "Hyperliquid public leaderboard + Info API; UnderHyper snapshot metadata"
+    license_note = (
+        "Hyperliquid public leaderboard and Info API data; the raw endpoint does not "
+        "state a separate CC BY grant. UnderHyper metadata page is CC BY 4.0 with "
+        "attribution, but that license is not assumed to cover Hyperliquid raw data."
     )
-    snapshot_ms = _timestamp_ms(snapshot_as_of, "leaderboard.as_of")
-    retrieved_at_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    cohort_selection_ms = _cohort_selection_cutoff_ms(snapshot_ms, retrieved_at_ms)
+
+    if args.snapshot_file:
+        snapshot_path = Path(args.snapshot_file)
+        snapshot_bytes = snapshot_path.read_bytes()
+        snapshot_file_sha256 = hashlib.sha256(snapshot_bytes).hexdigest()
+        snapshot_document = json.loads(snapshot_bytes.decode("utf-8"))
+        if snapshot_document.get("snapshot_only") is not True:
+            raise SystemExit("--snapshot-file must be created by a prior --snapshot-only run")
+        snapshot_manifest = snapshot_document.get("manifest") or {}
+        source_snapshots = snapshot_document.get("source_snapshots") or {}
+        try:
+            raw_leaderboard = base64.b64decode(
+                source_snapshots["leaderboard_base64"], validate=True
+            )
+            raw_metadata = base64.b64decode(
+                source_snapshots["metadata_base64"], validate=True
+            )
+            metadata = json.loads(raw_metadata.decode("utf-8"))
+            snapshot_ms = _timestamp_ms(
+                snapshot_manifest.get("source_snapshot_utc"), "source_snapshot_utc"
+            )
+            retrieved_at_ms = _timestamp_ms(
+                snapshot_manifest.get("leaderboard_retrieved_at_utc"),
+                "leaderboard_retrieved_at_utc",
+            )
+            cohort_selection_ms = _timestamp_ms(
+                snapshot_manifest.get("cohort_selection_as_of_utc"),
+                "cohort_selection_as_of_utc",
+            )
+        except (KeyError, ValueError, TypeError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"invalid frozen cohort snapshot: {exc}") from exc
+
+        if hashlib.sha256(raw_leaderboard).hexdigest() != snapshot_manifest.get("source_snapshot_sha256"):
+            raise SystemExit("frozen leaderboard bytes do not match source_snapshot_sha256")
+        if hashlib.sha256(raw_metadata).hexdigest() != snapshot_manifest.get("source_metadata_sha256"):
+            raise SystemExit("frozen metadata bytes do not match source_metadata_sha256")
+        expected_cutoff = _cohort_selection_cutoff_ms(snapshot_ms, retrieved_at_ms)
+        if cohort_selection_ms != expected_cutoff:
+            raise SystemExit("frozen cohort-selection cutoff does not match source snapshot/retrieval timestamps")
+
+        frozen_start_ms = _timestamp_ms(snapshot_manifest.get("data_start_utc"), "snapshot.data_start_utc")
+        frozen_end_ms = _timestamp_ms(snapshot_manifest.get("data_end_utc"), "snapshot.data_end_utc")
+        if start_ms != frozen_start_ms or end_ms != frozen_end_ms:
+            raise SystemExit(
+                "collection dates must exactly match the dates stored in the frozen cohort snapshot"
+            )
+
+        cohort = str(snapshot_manifest.get("cohort_selection_method") or "")
+        if cohort not in ("top_pnl", "top_volume"):
+            raise SystemExit("frozen cohort snapshot has an invalid cohort selection method")
+        addresses = extract_wallet_addresses(
+            json.loads(raw_leaderboard.decode("utf-8")),
+            cohort=cohort,
+        )
+        saved_wallets = snapshot_document.get("wallets") or []
+        saved_addresses = [
+            str(row.get("address") or "").lower()
+            for row in saved_wallets
+            if isinstance(row, dict)
+        ]
+        if not saved_addresses or any(not ADDRESS_RE.fullmatch(address) for address in saved_addresses):
+            raise SystemExit("frozen cohort snapshot contains missing or invalid wallet addresses")
+        if saved_addresses != addresses[:len(saved_addresses)]:
+            raise SystemExit("frozen wallet list does not match the preserved leaderboard ranking")
+        cohort_snapshot_code_sha = str(snapshot_manifest.get("cohort_snapshot_code_sha") or "")
+        if not re.fullmatch(r"[0-9a-fA-F]{7,40}", cohort_snapshot_code_sha):
+            raise SystemExit("frozen cohort snapshot is missing a valid cohort_snapshot_code_sha")
+        source_url = str(snapshot_manifest.get("source_url") or "")
+        metadata_url = str(snapshot_manifest.get("source_metadata_url") or "")
+        cohort_method = cohort
+        selected = saved_addresses[:args.wallet_limit]
+        if not source_url.startswith(("https://", "http://")) or not metadata_url.startswith(("https://", "http://")):
+            raise SystemExit("frozen cohort snapshot is missing source URLs")
+    else:
+        (
+            raw_leaderboard, raw_metadata, metadata, addresses, snapshot_as_of
+        ) = _load_leaderboard(
+            args.leaderboard_url,
+            args.metadata_url,
+            args.timeout,
+            cohort=args.cohort,
+        )
+        snapshot_ms = _timestamp_ms(snapshot_as_of, "leaderboard.as_of")
+        retrieved_at_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        cohort_selection_ms = _cohort_selection_cutoff_ms(snapshot_ms, retrieved_at_ms)
+        cohort = args.cohort
+        cohort_method = args.cohort
+        source_url = args.leaderboard_url
+        metadata_url = args.metadata_url
+        selected = addresses[:args.wallet_limit]
+
     if start_ms <= cohort_selection_ms:
         raise SystemExit(
-            "The observation start must be strictly later than the actual cohort "
+            "The observation start must be strictly later than the frozen cohort "
             "selection/download time. Historical backfills from a later-selected "
             "winner cohort are look-ahead-biased and cannot be approved."
         )
 
-    selected = addresses[:args.wallet_limit]
+    if args.snapshot_only:
+        snapshot_document = {
+            "snapshot_version": 1,
+            "snapshot_only": True,
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            "manifest": {
+                "source_provider": source_provider,
+                "source_url": source_url,
+                "source_metadata_url": metadata_url,
+                "source_license": license_note,
+                "source_snapshot_utc": _iso_utc(snapshot_ms),
+                "leaderboard_retrieved_at_utc": _iso_utc(retrieved_at_ms),
+                "source_snapshot_sha256": hashlib.sha256(raw_leaderboard).hexdigest(),
+                "source_metadata_sha256": hashlib.sha256(raw_metadata).hexdigest(),
+                "cohort_selection_as_of_utc": _iso_utc(cohort_selection_ms),
+                "data_start_utc": _iso_utc(start_ms),
+                "data_end_utc": _iso_utc(end_ms),
+                "cohort_snapshot_code_sha": args.collector_code_sha.lower(),
+                "cohort_selection_method": cohort_method,
+                "cohort_metric_window": "month",
+                "cohort_accounts_available": len(addresses),
+                "wallets_selected": len(selected),
+                "read_only_public_data": True,
+                "snapshot_only": True,
+                "not_model_ready": True,
+            },
+            "source_snapshots": {
+                "leaderboard_base64": base64.b64encode(raw_leaderboard).decode("ascii"),
+                "metadata_base64": base64.b64encode(raw_metadata).decode("ascii"),
+            },
+            "wallets": [
+                {"address": address, "rank": index}
+                for index, address in enumerate(selected, start=1)
+            ],
+            "limitations": [
+                "This file freezes cohort selection only; it contains no fills, funding or model-ready labels.",
+                "Do not regenerate or replace this file after data_start_utc.",
+                "Preserve this exact file for the later --snapshot-file collection run.",
+                "The source leaderboard is a cohort discovery signal, not proof of trading skill or future performance.",
+                "The raw Hyperliquid source endpoint does not state a separate explicit redistribution license.",
+            ],
+        }
+        output_path = Path(args.out)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_bytes = (
+            json.dumps(snapshot_document, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+        ).encode("utf-8")
+        output_path.write_bytes(output_bytes)
+        print(f"SNAPSHOT {output_path}")
+        print(f"SNAPSHOT_FILE_SHA256 {hashlib.sha256(output_bytes).hexdigest()}")
+        print(f"FROZEN_WALLETS {len(selected)}")
+        return 0
+
     wallets = []
     for index, address in enumerate(selected, start=1):
         try:
@@ -455,18 +607,13 @@ def main():
     source_hash = hashlib.sha256(raw_leaderboard).hexdigest()
     metadata_hash = hashlib.sha256(raw_metadata).hexdigest()
     complete_wallets = sum(1 for row in wallets if row["complete"])
-    license_note = (
-        "Hyperliquid public leaderboard and Info API data; the raw endpoint does not "
-        "state a separate CC BY grant. UnderHyper metadata page is CC BY 4.0 with "
-        "attribution, but that license is not assumed to cover Hyperliquid raw data."
-    )
     report = {
         "dataset_version": 2,
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "manifest": {
-            "source_provider": "Hyperliquid public leaderboard + Info API; UnderHyper snapshot metadata",
-            "source_url": args.leaderboard_url,
-            "source_metadata_url": args.metadata_url,
+            "source_provider": source_provider,
+            "source_url": source_url,
+            "source_metadata_url": metadata_url,
             "source_license": license_note,
             "source_snapshot_utc": _iso_utc(snapshot_ms),
             "leaderboard_retrieved_at_utc": _iso_utc(retrieved_at_ms),
@@ -476,6 +623,9 @@ def main():
             "data_start_utc": _iso_utc(start_ms),
             "data_end_utc": _iso_utc(end_ms),
             "collector_code_sha": args.collector_code_sha.lower(),
+            "cohort_snapshot_code_sha": cohort_snapshot_code_sha,
+            "cohort_snapshot_file_sha256": snapshot_file_sha256,
+            "collector_run_at_utc": datetime.now(timezone.utc).isoformat(),
             "fills_endpoint": INFO_URL,
             "fills_request_type": "userFillsByTime",
             "funding_request_type": "userFunding",
@@ -488,7 +638,7 @@ def main():
             "max_recent_fills_per_wallet": MAX_RETAINED_HISTORY,
             "info_rate_limit_weight_budget_per_minute": INFO_WEIGHT_BUDGET_PER_MINUTE,
             "info_weight_policy": "base request weight 20 plus ceil(response rows/20); response-weighted client pacing below the documented 1200/minute IP ceiling",
-            "cohort_selection_method": args.cohort,
+            "cohort_selection_method": cohort_method,
             "cohort_metric_window": "month",
             "cohort_accounts_available": len(addresses),
             "wallets_selected": len(selected),
@@ -512,6 +662,7 @@ def main():
             "Hyperliquid userTwapSliceFills is a separate latest-2,000 endpoint; a full page is incomplete because the native endpoint cannot paginate older slices.",
             "The raw leaderboard endpoint has no separate explicit reuse license statement; review terms before redistribution.",
             "The fills endpoint does not state each trader's original stop-risk distance. Model labels must use a declared system-normalized risk unit.",
+            "A fresh leaderboard cohort must never replace the frozen cohort after the observation window has started.",
         ],
     }
     output_path = Path(args.out)
