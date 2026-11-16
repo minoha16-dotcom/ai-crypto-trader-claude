@@ -8,13 +8,17 @@ from scripts.prepare_hyperliquid_advisor_dataset import (
 )
 
 
-def _fill(direction, timestamp, price, size, oid, pnl=None, fee=0.1):
+def _fill(direction, timestamp, price, size, oid, pnl=None, fee=0.1, start_position=None):
     return {
         "coin": "BTC",
         "dir": direction,
         "time": timestamp,
         "px": str(price),
         "sz": str(size),
+        "startPosition": str(
+            start_position if start_position is not None
+            else (0.0 if direction.startswith("Open") else size)
+        ),
         "oid": oid,
         "closedPnl": None if pnl is None else str(pnl),
         "fee": str(fee),
@@ -84,7 +88,8 @@ def test_reconstructs_full_trigger_closed_long_and_accounts_for_fees_funding():
     assert position["side"] == "LONG"
     assert position["entry_price"] == 100.0
     assert position["entry_quantity"] == 2.0
-    assert position["closed_pnl"] == 20.0
+    assert position["closed_pnl_reported"] == pytest.approx(20.0)
+    assert position["gross_pnl_reconstructed"] == pytest.approx(20.0)
     assert position["fees"] == pytest.approx(0.2)
     assert position["funding_paid"] == pytest.approx(0.2)
     assert position["exit_reason"] == "TARGET_GAP"
@@ -106,8 +111,8 @@ def test_reconstruct_manual_close_as_excluded_not_as_a_target_or_stop():
 def test_reconstruct_different_close_orders_as_manual_not_single_trigger():
     fills = [
         _fill("Open Long", 10_000, 100.0, 2.0, 10),
-        _fill("Close Long", 20_000, 110.0, 1.0, 20, pnl=10.0),
-        _fill("Close Long", 30_000, 109.0, 1.0, 21, pnl=9.0),
+        _fill("Close Long", 20_000, 110.0, 1.0, 20, pnl=10.0, start_position=2.0),
+        _fill("Close Long", 30_000, 109.0, 1.0, 21, pnl=9.0, start_position=1.0),
     ]
     wallet = _wallet(
         fills,
@@ -123,8 +128,8 @@ def test_reconstruct_different_close_orders_as_manual_not_single_trigger():
 def test_scaled_position_is_excluded_instead_of_inventing_single_entry_risk():
     fills = [
         _fill("Open Long", 10_000, 100.0, 1.0, 10),
-        _fill("Add Long", 15_000, 105.0, 1.0, 11),
-        _fill("Close Long", 20_000, 103.0, 2.0, 20, pnl=1.0),
+        _fill("Add Long", 15_000, 105.0, 1.0, 11, start_position=1.0),
+        _fill("Close Long", 20_000, 103.0, 2.0, 20, pnl=1.0, start_position=2.0),
     ]
     wallet = _wallet(fills, [_trigger_order(20, 102.0)])
 
@@ -186,7 +191,8 @@ def test_position_sample_uses_system_normalized_r_and_keeps_manual_exit_unlabell
         "entry_timestamp": 120 * 60 * 60 * 1000,
         "exit_timestamp": 121 * 60 * 60 * 1000,
         "exit_reason": "TARGET",
-        "closed_pnl": 20.0,
+        "closed_pnl_reported": 19.9,
+        "gross_pnl_reconstructed": 20.0,
         "fees": 0.2,
         "funding_paid": 0.2,
         "atr14": 1.5,
@@ -270,3 +276,46 @@ def test_reconstructable_but_invalid_scaled_position_is_retained_as_excluded_sig
     assert sample["exit_reason"] == "SCALED_POSITION"
     assert sample["exclusion_reason"] == "SCALED_POSITION"
     assert "r_multiple" not in sample
+
+
+
+def test_start_position_mismatch_blocks_training_label():
+    fills = [
+        _fill("Open Long", 10_000, 100.0, 1.0, 10, start_position=0.0),
+        _fill("Close Long", 20_000, 110.0, 1.0, 20, pnl=10.0, start_position=2.0),
+    ]
+    positions, exclusions = reconstruct_closed_positions(
+        _wallet(fills, [_trigger_order(20, 108.0)])
+    )
+
+    assert len(positions) == 1
+    assert positions[0]["invalid_reason"] == "START_POSITION_MISMATCH"
+    assert positions[0]["exit_reason"] == "UNKNOWN"
+    assert exclusions["START_POSITION_MISMATCH"] == 1
+
+
+def test_r_label_does_not_double_subtract_fees_from_exchange_closed_pnl():
+    position = {
+        "coin": "BTC",
+        "side": "LONG",
+        "entry_price": 100.0,
+        "entry_quantity": 2.0,
+        "entry_timestamp": 120 * 60 * 60 * 1000,
+        "exit_timestamp": 121 * 60 * 60 * 1000,
+        "exit_reason": "TARGET",
+        "closed_pnl_reported": 19.9,
+        "gross_pnl_reconstructed": 20.0,
+        "fees": 0.2,
+        "funding_paid": 0.2,
+        "atr14": 1.5,
+    }
+    sample, problem = position_to_sample(
+        position,
+        wallet_address="0x" + "a" * 40,
+        candles=_hourly_candles(130),
+        timeframe="1h",
+    )
+
+    assert problem is None
+    # 20 gross - 0.2 signed fees + 0.2 funding = 20 net; 6 quote risk.
+    assert sample["r_multiple"] == pytest.approx(20.0 / 6.0)

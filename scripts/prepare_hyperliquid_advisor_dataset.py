@@ -211,6 +211,27 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
         action, side = _fill_direction(fill)
         active = current.get(coin)
         oid = fill.get("oid")
+        try:
+            start_position = _finite(fill.get("startPosition"), "startPosition")
+        except ValueError:
+            start_position = None
+
+        start_position_issue = None
+        if action == "open" and active is None:
+            if start_position is None or abs(start_position) > 1e-8:
+                start_position_issue = "OPEN_START_POSITION_NOT_ZERO"
+        elif active is not None:
+            expected_start = (
+                active["remaining_quantity"]
+                if active["side"] == "LONG"
+                else -active["remaining_quantity"]
+            )
+            tolerance = max(1e-8, abs(expected_start) * 1e-6)
+            if (
+                start_position is None
+                or abs(start_position - expected_start) > tolerance
+            ):
+                start_position_issue = "START_POSITION_MISMATCH"
 
         if action == "open" and side:
             if active is None:
@@ -223,13 +244,14 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
                     "entry_timestamp": timestamp,
                     "open_oid": str(oid) if oid is not None else None,
                     "fees": 0.0,
-                    "closed_pnl": 0.0,
+                    "closed_pnl_reported": 0.0,
+                    "gross_pnl_reconstructed": 0.0,
                     "close_quantity": 0.0,
                     "last_close_oid": None,
                     "close_oids": set(),
                     "last_exit_price": None,
                     "exit_timestamp": None,
-                    "invalid_reason": None,
+                    "invalid_reason": start_position_issue,
                     "liquidated": False,
                 }
                 current[coin] = active
@@ -249,12 +271,14 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
                 active["remaining_quantity"] += quantity
             else:
                 active["invalid_reason"] = active.get("invalid_reason") or "MULTIPLE_ENTRY_ORDERS_OR_SCALE_IN"
+            if start_position_issue:
+                active["invalid_reason"] = active.get("invalid_reason") or start_position_issue
             add_fee(active, fill)
             continue
 
         if action == "add":
             if active:
-                active["invalid_reason"] = active.get("invalid_reason") or "SCALED_POSITION"
+                active["invalid_reason"] = active.get("invalid_reason") or start_position_issue or "SCALED_POSITION"
             else:
                 reasons["ORPHAN_SCALE_IN"] += 1
             continue
@@ -263,6 +287,8 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
             if active is None:
                 reasons["ORPHAN_CLOSE_OR_LIQUIDATION"] += 1
                 continue
+            if start_position_issue:
+                active["invalid_reason"] = active.get("invalid_reason") or start_position_issue
             if action == "close" and side != active["side"]:
                 active["invalid_reason"] = active.get("invalid_reason") or "CLOSE_SIDE_MISMATCH"
             if action == "liquidation":
@@ -270,11 +296,17 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
             if quantity > active["remaining_quantity"] + max(1e-9, active["entry_quantity"] * 1e-7):
                 active["invalid_reason"] = active.get("invalid_reason") or "CLOSE_EXCEEDS_OPEN_QUANTITY"
             try:
-                closed_pnl = _finite(fill.get("closedPnl"), "closedPnl")
+                exchange_closed_pnl = _finite(fill.get("closedPnl"), "closedPnl")
             except ValueError:
-                active["invalid_reason"] = active.get("invalid_reason") or "MISSING_OR_INVALID_CLOSED_PNL"
-                closed_pnl = 0.0
-            active["closed_pnl"] += closed_pnl
+                exchange_closed_pnl = 0.0
+            # The server's closedPnl is retained only for audit because public
+            # documentation describes it as a frontend convenience field and
+            # fee-inclusion semantics differ from the raw fee field.
+            active["closed_pnl_reported"] += exchange_closed_pnl
+            direction_sign = 1.0 if active["side"] == "LONG" else -1.0
+            active["gross_pnl_reconstructed"] += (
+                direction_sign * (price - active["entry_price"]) * quantity
+            )
             active["close_quantity"] += quantity
             active["remaining_quantity"] = max(0.0, active["remaining_quantity"] - quantity)
             active["last_close_oid"] = oid
@@ -318,7 +350,7 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
             continue
 
         if active is not None:
-            active["invalid_reason"] = "UNRECOGNIZED_FILL_DIRECTION"
+            active["invalid_reason"] = active.get("invalid_reason") or start_position_issue or "UNRECOGNIZED_FILL_DIRECTION"
         else:
             reasons["UNRECOGNIZED_FILL_DIRECTION"] += 1
 
@@ -515,7 +547,7 @@ def position_to_sample(
             )
             initial_risk = risk_distance * float(position["entry_quantity"])
             net_pnl = (
-                float(position["closed_pnl"])
+                float(position["gross_pnl_reconstructed"])
                 - float(position["fees"])
                 + float(position["funding_paid"])
             )
