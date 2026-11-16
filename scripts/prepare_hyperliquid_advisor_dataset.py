@@ -164,6 +164,20 @@ def _funding_for_position(
     return total, True
 
 
+def raw_wallet_history_complete(wallet: dict[str, Any]) -> bool:
+    """Require explicit completeness flags; an empty verified order list is valid."""
+    if not wallet.get("complete"):
+        return False
+    fills = wallet.get("fill_history") or {}
+    funding = wallet.get("funding_history") or {}
+    orders = wallet.get("historical_orders_status") or {}
+    return bool(
+        fills.get("complete")
+        and funding.get("complete")
+        and orders.get("complete_within_documented_limit")
+    )
+
+
 def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Reconstruct only fully closed single-entry, non-scaled linear positions."""
     reasons: Counter[str] = Counter()
@@ -619,7 +633,7 @@ def prepare_dataset(
         candles_cache: dict[str, list[list[float]]] = {}
         for wallet in raw_payload.get("wallets") or []:
             wallet_count += 1
-            if not wallet.get("complete") or not wallet.get("historical_orders"):
+            if not raw_wallet_history_complete(wallet):
                 reconstruction_exclusions["INCOMPLETE_RAW_WALLET"] += 1
                 continue
             positions, exclusions = reconstruct_closed_positions(wallet)

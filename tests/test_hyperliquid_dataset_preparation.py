@@ -319,3 +319,37 @@ def test_r_label_does_not_double_subtract_fees_from_exchange_closed_pnl():
     assert problem is None
     # 20 gross - 0.2 signed fees + 0.2 funding = 20 net; 6 quote risk.
     assert sample["r_multiple"] == pytest.approx(20.0 / 6.0)
+
+
+
+def test_empty_historical_order_list_is_valid_when_endpoint_reports_complete():
+    from scripts.prepare_hyperliquid_advisor_dataset import raw_wallet_history_complete
+
+    wallet = {
+        "complete": True,
+        "fills": [],
+        "funding": [],
+        "historical_orders": [],
+        "fill_history": {"complete": True},
+        "funding_history": {"complete": True},
+        "historical_orders_status": {
+            "rows": 0,
+            "history_limit_reached": False,
+            "complete_within_documented_limit": True,
+        },
+    }
+
+    assert raw_wallet_history_complete(wallet) is True
+
+
+def test_wallet_without_historical_order_completeness_flag_is_not_accepted():
+    from scripts.prepare_hyperliquid_advisor_dataset import raw_wallet_history_complete
+
+    wallet = {
+        "complete": True,
+        "fill_history": {"complete": True},
+        "funding_history": {"complete": True},
+        "historical_orders": [],
+    }
+
+    assert raw_wallet_history_complete(wallet) is False
