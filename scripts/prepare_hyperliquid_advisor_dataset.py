@@ -41,8 +41,8 @@ ELIGIBLE_EXIT_REASONS = {
 }
 MAX_OHLCV_PAGES = 400
 OHLCV_PAGE_SIZE = 500
-MIN_FEATURE_CANDLES = 60
-FEATURE_CONTIGUOUS_CANDLES = 60
+MIN_FEATURE_CANDLES = 120
+FEATURE_CONTIGUOUS_CANDLES = 120
 ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 
 
@@ -214,10 +214,12 @@ def raw_wallet_history_complete(wallet: dict[str, Any]) -> bool:
         return False
     fills = wallet.get("fill_history") or {}
     funding = wallet.get("funding_history") or {}
+    twap = wallet.get("twap_history") or {}
     orders = wallet.get("historical_orders_status") or {}
     return bool(
         fills.get("complete")
         and funding.get("complete")
+        and twap.get("complete")
         and orders.get("complete_within_documented_limit")
     )
 
@@ -227,7 +229,14 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
     reasons: Counter[str] = Counter()
     if not wallet.get("complete"):
         return [], {"RAW_WALLET_INCOMPLETE": len(wallet.get("fills") or []) or 1}
-    fills = wallet.get("fills") or []
+    fills = list(wallet.get("fills") or [])
+    for wrapper in wallet.get("twap_slice_fills") or []:
+        if not isinstance(wrapper, dict) or not isinstance(wrapper.get("fill"), dict):
+            return [], {"MALFORMED_TWAP_SLICE_FILL": 1}
+        twap_fill = dict(wrapper["fill"])
+        twap_fill["twapId"] = wrapper.get("twapId")
+        twap_fill["_fill_source"] = "userTwapSliceFills"
+        fills.append(twap_fill)
     funding = wallet.get("funding") or []
     orders = _historical_order_index(wallet.get("historical_orders") or [])
     positions = []
@@ -521,6 +530,11 @@ def aggregate_four_hour(hourly: list[list[float]]) -> list[list[float]]:
     return output
 
 
+def _position_signal_timestamp(position: dict[str, Any]) -> int:
+    """Use the first actual opening fill as the signal/feature timestamp."""
+    return int(position.get("entry_start_timestamp") or position["entry_timestamp"])
+
+
 def features_before_entry(
     candles: list[list[float]],
     entry_timestamp: int,
@@ -569,7 +583,7 @@ def position_to_sample(
 ) -> tuple[dict[str, Any] | None, str | None]:
     try:
         features = features_before_entry(
-            candles, int(position["entry_timestamp"]), timeframe
+            candles, _position_signal_timestamp(position), timeframe
         )
     except (ValueError, KeyError) as exc:
         return None, str(exc) or "FEATURE_GENERATION_FAILED"
@@ -589,7 +603,7 @@ def position_to_sample(
             + "|"
             + str(position["coin"])
             + "|"
-            + str(position["entry_timestamp"])
+            + str(_position_signal_timestamp(position))
             + "|"
             + str(position["exit_timestamp"])
         ).encode("utf-8")
@@ -597,7 +611,7 @@ def position_to_sample(
 
     sample = {
         "sample_id": sample_id,
-        "signal_timestamp": _iso_utc(position["entry_timestamp"]),
+        "signal_timestamp": _iso_utc(_position_signal_timestamp(position)),
         "exit_timestamp": _iso_utc(position["exit_timestamp"]),
         "exit_reason": reason,
         "position_side": position_side,
@@ -642,7 +656,7 @@ def _position_atr(position: dict[str, Any], candles: list[list[float]], timefram
     timeframe_ms = HOUR_MS if timeframe == "1h" else FOUR_HOURS_MS
     closed = [
         row for row in candles
-        if int(row[0]) + timeframe_ms <= int(position["entry_timestamp"])
+        if int(row[0]) + timeframe_ms <= _position_signal_timestamp(position)
     ]
     if len(closed) < MIN_FEATURE_CANDLES:
         raise ValueError("INSUFFICIENT_PRE_ENTRY_CANDLES")
@@ -870,7 +884,7 @@ def prepare_dataset(
             "preparation_policy": {
                 "position_lifecycle": (
                     "single entry order, no add/scale-in, fully closed only; reconcile startPosition; "
-                    "signal time is final fill of the opening oid and funding starts at first fill"
+                    "signal/features are anchored to first fill of the opening oid; funding also starts there"
                 ),
                 "contract_multiplier": "only linear Hyperliquid perps with CCXT contractSize exactly 1.0 are included",
                 "eligible_exit_reasons": sorted(ELIGIBLE_EXIT_REASONS),
@@ -881,12 +895,15 @@ def prepare_dataset(
                     "STOP/TARGET from orderType plus direction-compatible triggerCondition; "
                     "no entry-price test, so moved/trailing stops do not become targets"
                 ),
-                "feature_time": "last fully closed OHLCV candle before final entry fill",
+                "feature_time": "last fully closed OHLCV candle before first entry fill",
                 "feature_directionality": "trend_composite and RSI14 are position-relative",
                 "hourly_source": "Hyperliquid public CCXT OHLCV 1h",
-                "four_hour_source": "aggregate only four consecutive UTC 1h candles; no fill/interpolation",
+                "four_hour_source": "aggregate only four consecutive UTC 1h candles; no fill/interpolation; require 120 contiguous feature bars",
                 "funding": "sum valid same-coin delta.usdc rows from first opening fill to final close; malformed rows invalidate label",
-                "ohlcv_coverage": "fetch from earliest reconstructed position per symbol, independent of wallet ranking",
+                "ohlcv_coverage": (
+                    "fetch from earliest first fill per symbol with 120 contiguous 4h candles of warmup, "
+                    "independent of wallet ranking"
+                ),
             },
             "coverage": {
                 "wallets_seen": wallet_count,
