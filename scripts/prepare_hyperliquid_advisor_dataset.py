@@ -226,6 +226,7 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
                     "closed_pnl": 0.0,
                     "close_quantity": 0.0,
                     "last_close_oid": None,
+                    "close_oids": set(),
                     "last_exit_price": None,
                     "exit_timestamp": None,
                     "invalid_reason": None,
@@ -277,6 +278,8 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
             active["close_quantity"] += quantity
             active["remaining_quantity"] = max(0.0, active["remaining_quantity"] - quantity)
             active["last_close_oid"] = oid
+            if oid is not None:
+                active["close_oids"].add(str(oid))
             active["last_exit_price"] = price
             active["exit_timestamp"] = timestamp
             add_fee(active, fill)
@@ -295,13 +298,16 @@ def reconstruct_closed_positions(wallet: dict[str, Any]) -> tuple[list[dict[str,
                 if active.get("liquidated"):
                     exit_reason = "LIQUIDATION"
                 else:
-                    exit_reason = _classify_trigger_exit(
-                        active["side"],
-                        active["entry_price"],
-                        active["last_exit_price"],
-                        active["last_close_oid"],
-                        orders,
-                    )
+                    if len(active.get("close_oids") or []) != 1:
+                        exit_reason = "MANUAL_CLOSE"
+                    else:
+                        exit_reason = _classify_trigger_exit(
+                            active["side"],
+                            active["entry_price"],
+                            active["last_exit_price"],
+                            active["last_close_oid"],
+                            orders,
+                        )
                 if active.get("invalid_reason"):
                     exit_reason = "UNKNOWN"
                 positions.append({

@@ -155,13 +155,21 @@ def _post_info(body, timeout):
         },
         method="POST",
     )
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except HTTPError as exc:
-        raise RuntimeError(f"Hyperliquid Info API returned HTTP {exc.code}") from exc
-    except URLError as exc:
-        raise RuntimeError(f"Hyperliquid Info API connection failed: {exc.reason}") from exc
+    for attempt in range(4):
+        try:
+            with urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except HTTPError as exc:
+            if exc.code in (429, 500, 502, 503, 504) and attempt < 3:
+                time.sleep(min(8.0, 0.5 * (2 ** attempt)))
+                continue
+            raise RuntimeError(f"Hyperliquid Info API returned HTTP {exc.code}") from exc
+        except URLError as exc:
+            if attempt < 3:
+                time.sleep(min(8.0, 0.5 * (2 ** attempt)))
+                continue
+            raise RuntimeError(f"Hyperliquid Info API connection failed: {exc.reason}") from exc
+    raise RuntimeError("Hyperliquid Info API exhausted retry attempts")
 
 
 def _fetch_time_range(
@@ -292,11 +300,13 @@ def main():
         cohort=args.cohort,
     )
     snapshot_ms = _timestamp_ms(snapshot_as_of, "leaderboard.as_of")
-    if start_ms <= snapshot_ms:
+    retrieved_at_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    cohort_selection_ms = max(snapshot_ms, retrieved_at_ms)
+    if start_ms <= cohort_selection_ms:
         raise SystemExit(
-            "The observation start must be strictly later than the leader-selection "
-            "snapshot. Historical backfills from a later-selected winner cohort are "
-            "look-ahead-biased and cannot be approved."
+            "The observation start must be strictly later than the actual cohort "
+            "selection/download time. Historical backfills from a later-selected "
+            "winner cohort are look-ahead-biased and cannot be approved."
         )
 
     selected = addresses[:args.wallet_limit]
@@ -311,6 +321,8 @@ def main():
                 address, "userFunding", start_ms, end_ms,
                 timeout=args.timeout, pause_seconds=args.pause_seconds,
             )
+            if args.pause_seconds > 0:
+                time.sleep(args.pause_seconds)
             historical_orders, orders_status = _fetch_historical_orders(
                 address, timeout=args.timeout
             )
@@ -367,9 +379,10 @@ def main():
             "source_metadata_url": args.metadata_url,
             "source_license": license_note,
             "source_snapshot_utc": _iso_utc(snapshot_ms),
+            "leaderboard_retrieved_at_utc": _iso_utc(retrieved_at_ms),
             "source_snapshot_sha256": source_hash,
             "source_metadata_sha256": metadata_hash,
-            "cohort_selection_as_of_utc": _iso_utc(snapshot_ms),
+            "cohort_selection_as_of_utc": _iso_utc(cohort_selection_ms),
             "data_start_utc": _iso_utc(start_ms),
             "data_end_utc": _iso_utc(end_ms),
             "fills_endpoint": INFO_URL,
