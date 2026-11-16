@@ -19,7 +19,12 @@ def test_wallet_extractor_only_accepts_full_public_hex_addresses():
         ],
     }
 
-    assert extract_wallet_addresses(payload) == [
+    payload["top_pnl"] = [
+        {"ethAddress": "0x" + "b" * 40, "pnl30d": "500"},
+        {"address": "0x" + "a" * 40, "pnl30d": "200"},
+        {"address": "0x" + "c" * 40, "pnl30d": "-10"},
+    ]
+    assert extract_wallet_addresses(payload, cohort="top_pnl") == [
         "0x" + "b" * 40,
         "0x" + "a" * 40,
     ]
@@ -98,3 +103,33 @@ def test_range_fetch_marks_the_exchange_history_cap(monkeypatch):
 
     assert status["history_limit_reached"] is True
     assert status["complete"] is False
+
+
+
+def test_wallet_extractor_never_mixes_volume_cohort_into_top_pnl():
+    payload = {
+        "top_by_volume": [
+            {"address": "0x" + "a" * 40, "volume30d": "999"},
+        ],
+        "top_by_pnl": [
+            {"address": "0x" + "b" * 40, "pnl30d": "123"},
+        ],
+    }
+
+    assert extract_wallet_addresses(payload, cohort="top_pnl") == ["0x" + "b" * 40]
+    assert extract_wallet_addresses(payload, cohort="top_volume") == ["0x" + "a" * 40]
+
+
+def test_wallet_extractor_rejects_unknown_json_layout_instead_of_scraping_all_addresses():
+    payload = {
+        "unrelated": [{"address": "0x" + "a" * 40}],
+    }
+    with pytest.raises(ValueError, match="refusing to select arbitrary wallet addresses"):
+        extract_wallet_addresses(payload, cohort="top_pnl")
+
+
+def test_user_funding_uses_the_smaller_time_range_page_limit(monkeypatch):
+    from scripts.fetch_hyperliquid_leader_fills import MAX_PAGE_SIZE_BY_TYPE
+
+    assert MAX_PAGE_SIZE_BY_TYPE["userFillsByTime"] == 2000
+    assert MAX_PAGE_SIZE_BY_TYPE["userFunding"] == 500

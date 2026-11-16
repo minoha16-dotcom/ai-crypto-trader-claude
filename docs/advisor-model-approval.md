@@ -56,10 +56,14 @@ The initial raw-data adapter can download the UnderHyper leaderboard JSON and
 retrieve each selected wallet's public Hyperliquid fills and funding events:
 
 \`\`\`powershell
-python scripts/fetch_hyperliquid_leader_fills.py --start 2026-11-17T00:00:00Z --end 2026-12-17T00:00:00Z --wallet-limit 200 --out artifacts/hyperliquid-raw-leader-data.json
+python scripts/fetch_hyperliquid_leader_fills.py --cohort top_pnl --start 2026-11-17T00:00:00Z --end 2026-12-17T00:00:00Z --wallet-limit 100 --out artifacts/hyperliquid-raw-leader-data.json
 \`\`\`
 
-The observation window must start strictly after the leaderboard snapshot;
+The collector defaults to the leaderboard's top 30-day PnL cohort, not the
+high-volume cohort (which may contain market makers and automated strategies).
+It preserves the PnL table's ranking order and rejects unknown leaderboard JSON
+layouts rather than scraping arbitrary addresses. The observation window must
+start strictly after the leaderboard snapshot;
 the adapter rejects retrospective sampling from a cohort selected using later
 performance. It uses read-only public endpoints and no account keys. Saturated
 time windows are recursively split. A wallet is marked incomplete if any

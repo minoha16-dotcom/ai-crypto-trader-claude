@@ -20,7 +20,7 @@ from urllib.request import Request, urlopen
 LEADERBOARD_URL = "https://underhyper.com/data/leaderboard.json"
 INFO_URL = "https://api.hyperliquid.xyz/info"
 ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
-MAX_PAGE_SIZE = 2000
+MAX_PAGE_SIZE_BY_TYPE = {"userFillsByTime": 2000, "userFunding": 500}
 MAX_RETAINED_HISTORY = 10000
 USER_AGENT = "ai-crypto-trader-research/1.0 (read-only public data)"
 
@@ -60,35 +60,102 @@ def _load_leaderboard(url, timeout):
     return raw, payload, addresses, as_of
 
 
-def extract_wallet_addresses(payload):
-    """Find full public wallet addresses without assuming one JSON row layout."""
-    found = []
-    seen = set()
+def extract_wallet_addresses(payload, cohort="top_pnl"):
+    """Extract a ranked cohort only from its explicitly named leaderboard array.
+
+    Never fall back to arbitrary addresses elsewhere in the JSON: that could
+    mix volume-ranked market makers with the PnL-ranked cohort.
+    """
+    if cohort not in ("top_pnl", "top_volume"):
+        raise ValueError("cohort must be top_pnl or top_volume")
+
     address_keys = {
         "address", "ethaddress", "wallet", "walletaddress",
         "leaderaddress", "useraddress",
     }
+    cohort_tokens = (
+        ("pnl", "profit", "profitable")
+        if cohort == "top_pnl"
+        else ("volume", "active", "traded")
+    )
+    excluded_tokens = (
+        ("volume", "active")
+        if cohort == "top_pnl"
+        else ("pnl", "profit", "profitable")
+    )
 
-    def add(value):
-        normalized = value.lower()
-        if normalized not in seen:
-            seen.add(normalized)
-            found.append(normalized)
+    candidates = []
 
-    def walk(value):
+    def collect_rows(value):
+        rows = value if isinstance(value, list) else [value]
+        output = []
+        for row in rows:
+            if isinstance(row, str) and ADDRESS_RE.fullmatch(row):
+                output.append((row.lower(), None))
+                continue
+            if not isinstance(row, dict):
+                continue
+            address = None
+            for key, item in row.items():
+                normalized = str(key).replace("_", "").replace("-", "").lower()
+                if normalized in address_keys and isinstance(item, str) and ADDRESS_RE.fullmatch(item):
+                    address = item.lower()
+                    break
+            if not address:
+                for key in row:
+                    if isinstance(key, str) and ADDRESS_RE.fullmatch(key):
+                        address = key.lower()
+                        break
+            if address:
+                metric = None
+                for key, item in row.items():
+                    normalized = str(key).replace("_", "").replace("-", "").lower()
+                    if any(token in normalized for token in cohort_tokens):
+                        try:
+                            metric = float(str(item).replace(",", "").replace("$", ""))
+                        except (TypeError, ValueError, OverflowError):
+                            continue
+                        break
+                output.append((address, metric))
+        return output
+
+    def walk(value, path=()):
         if isinstance(value, dict):
             for key, item in value.items():
-                if isinstance(key, str) and ADDRESS_RE.fullmatch(key):
-                    add(key)
-                normalized_key = str(key).replace("_", "").replace("-", "").lower()
-                if normalized_key in address_keys and isinstance(item, str) and ADDRESS_RE.fullmatch(item):
-                    add(item)
-                walk(item)
+                walk(item, path + (str(key).lower(),))
         elif isinstance(value, list):
-            for item in value:
-                walk(item)
+            if len(path) and any(
+                token in "/".join(path) for token in cohort_tokens
+            ) and not any(
+                token in "/".join(path) for token in excluded_tokens
+            ):
+                rows = collect_rows(value)
+                if rows:
+                    candidates.append(rows)
+            # Also descend: some datasets nest the two ranked cohorts inside a parent.
+            for index, item in enumerate(value):
+                if isinstance(item, (dict, list)):
+                    walk(item, path + (str(index),))
 
     walk(payload)
+    if not candidates:
+        raise ValueError(
+            f"leaderboard JSON does not expose an identifiable {cohort} ranked cohort; "
+            "refusing to select arbitrary wallet addresses"
+        )
+
+    # Prefer the most specific matching named array, preserving source rank order.
+    rows = max(candidates, key=len)
+    found = []
+    seen = set()
+    for address, metric in rows:
+        if cohort == "top_pnl" and metric is not None and metric <= 0:
+            continue
+        if address not in seen:
+            seen.add(address)
+            found.append(address)
+    if not found:
+        raise ValueError(f"the {cohort} leaderboard cohort contains no usable wallet addresses")
     return found
 
 
@@ -142,7 +209,8 @@ def _fetch_time_range(
         request_count += 1
         if not isinstance(response, list):
             raise RuntimeError(f"{request_type} returned a non-list response")
-        if len(response) < MAX_PAGE_SIZE:
+        page_size = MAX_PAGE_SIZE_BY_TYPE.get(request_type, 500)
+        if len(response) < page_size:
             results.extend(response)
             return
         if depth >= max_depth or end - start <= 1000:
@@ -192,7 +260,13 @@ def main():
     parser.add_argument("--end", required=True, help="Observation end (UTC ISO-8601 or Unix ms)")
     parser.add_argument("--out", default="artifacts/hyperliquid-raw-leader-data.json")
     parser.add_argument("--leaderboard-url", default=LEADERBOARD_URL)
-    parser.add_argument("--wallet-limit", type=int, default=200)
+    parser.add_argument(
+        "--cohort",
+        choices=("top_pnl", "top_volume"),
+        default="top_pnl",
+        help="Use the PnL-ranked cohort by default; volume-ranked accounts are mostly market makers.",
+    )
+    parser.add_argument("--wallet-limit", type=int, default=100)
     parser.add_argument("--pause-seconds", type=float, default=6.0)
     parser.add_argument("--timeout", type=float, default=30.0)
     args = parser.parse_args()
@@ -206,9 +280,10 @@ def main():
     if args.pause_seconds < 0:
         raise SystemExit("--pause-seconds cannot be negative")
 
-    raw_leaderboard, leaderboard, addresses, snapshot_as_of = _load_leaderboard(
+    raw_leaderboard, leaderboard, _all_addresses, snapshot_as_of = _load_leaderboard(
         args.leaderboard_url, args.timeout
     )
+    addresses = extract_wallet_addresses(leaderboard, cohort=args.cohort)
     snapshot_ms = _timestamp_ms(snapshot_as_of, "leaderboard.as_of")
     if start_ms <= snapshot_ms:
         raise SystemExit(
@@ -278,8 +353,10 @@ def main():
             "fills_endpoint": INFO_URL,
             "fills_request_type": "userFillsByTime",
             "funding_request_type": "userFunding",
-            "max_fills_per_response": MAX_PAGE_SIZE,
+            "max_fills_per_response": MAX_PAGE_SIZE_BY_TYPE["userFillsByTime"],
+            "max_funding_rows_per_response": MAX_PAGE_SIZE_BY_TYPE["userFunding"],
             "max_recent_fills_per_wallet": MAX_RETAINED_HISTORY,
+            "cohort_selection_method": args.cohort,
             "wallets_selected": len(selected),
             "wallets_complete": complete_wallets,
             "wallets_incomplete": len(selected) - complete_wallets,
