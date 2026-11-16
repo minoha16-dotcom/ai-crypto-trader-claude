@@ -25,6 +25,8 @@ ADDRESS_RE = re.compile(r"^0x[a-fA-F0-9]{40}$")
 MAX_PAGE_SIZE_BY_TYPE = {"userFillsByTime": 2000, "userFunding": 500}
 MAX_RETAINED_HISTORY = 10000
 MAX_HISTORICAL_ORDERS = 2000
+INFO_WEIGHT_BUDGET_PER_MINUTE = 900
+INFO_BASE_REQUEST_WEIGHT = 20
 USER_AGENT = "ai-crypto-trader-research/1.1 (read-only public data)"
 
 
@@ -148,6 +150,19 @@ def _load_leaderboard(
     return raw_leaderboard, raw_metadata, metadata, addresses, as_of
 
 
+def _info_request_weight(response):
+    """Conservative estimate: base request weight plus one per 20 returned rows."""
+    if isinstance(response, list):
+        return INFO_BASE_REQUEST_WEIGHT + math.ceil(len(response) / 20)
+    return INFO_BASE_REQUEST_WEIGHT
+
+
+def _weighted_pacing_delay(response, budget_per_minute=INFO_WEIGHT_BUDGET_PER_MINUTE):
+    if budget_per_minute <= 0:
+        raise ValueError("budget_per_minute must be positive")
+    return _info_request_weight(response) * 60.0 / float(budget_per_minute)
+
+
 def _post_info(body, timeout):
     encoded = json.dumps(body, separators=(",", ":")).encode("utf-8")
     request = Request(
@@ -163,7 +178,11 @@ def _post_info(body, timeout):
     for attempt in range(4):
         try:
             with urlopen(request, timeout=timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
+                payload = json.loads(response.read().decode("utf-8"))
+            # Hyperliquid documents a 1,200 weight/minute per-IP limit. Keep
+            # collection below that ceiling to leave room for other API use.
+            time.sleep(_weighted_pacing_delay(payload))
+            return payload
         except HTTPError as exc:
             if exc.code in (429, 500, 502, 503, 504) and attempt < 3:
                 time.sleep(min(8.0, 0.5 * (2 ** attempt)))
@@ -292,7 +311,7 @@ def main():
         help="Rank the published month PnL window by default; volume is an explicit separate cohort.",
     )
     parser.add_argument("--wallet-limit", type=int, default=100)
-    parser.add_argument("--pause-seconds", type=float, default=1.0)
+    parser.add_argument("--pause-seconds", type=float, default=0.0)
     parser.add_argument("--timeout", type=float, default=60.0)
     args = parser.parse_args()
 
@@ -407,6 +426,8 @@ def main():
             "max_fills_per_response": MAX_PAGE_SIZE_BY_TYPE["userFillsByTime"],
             "max_funding_rows_per_response": MAX_PAGE_SIZE_BY_TYPE["userFunding"],
             "max_recent_fills_per_wallet": MAX_RETAINED_HISTORY,
+            "info_rate_limit_weight_budget_per_minute": INFO_WEIGHT_BUDGET_PER_MINUTE,
+            "info_weight_policy": "base request weight 20 plus ceil(response rows/20); response-weighted client pacing below the documented 1200/minute IP ceiling",
             "cohort_selection_method": args.cohort,
             "cohort_metric_window": "month",
             "cohort_accounts_available": len(addresses),

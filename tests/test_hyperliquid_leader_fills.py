@@ -9,6 +9,9 @@ from scripts.fetch_hyperliquid_leader_fills import (
     extract_wallet_addresses,
     _fetch_historical_orders,
     _cohort_selection_cutoff_ms,
+    _info_request_weight,
+    _weighted_pacing_delay,
+    _post_info,
 )
 
 
@@ -233,3 +236,29 @@ def test_historical_orders_endpoint_accepts_a_non_saturated_order_history(monkey
 
     assert len(rows) == 1
     assert status["complete_within_documented_limit"] is True
+
+
+
+def test_weighted_request_pacing_scales_with_response_size():
+    assert _info_request_weight([]) == 20
+    assert _info_request_weight([{}] * 500) == 45
+    assert _info_request_weight([{}] * 2000) == 120
+    assert _weighted_pacing_delay([{}] * 2000) == pytest.approx(8.0)
+
+
+def test_info_request_sleeps_for_weight_of_returned_rows(monkeypatch):
+    sleeps = []
+
+    monkeypatch.setattr(
+        "scripts.fetch_hyperliquid_leader_fills.urlopen",
+        lambda *args, **kwargs: _FakeResponse([{"time": index} for index in range(2000)]),
+    )
+    monkeypatch.setattr(
+        "scripts.fetch_hyperliquid_leader_fills.time.sleep",
+        lambda seconds: sleeps.append(seconds),
+    )
+
+    result = _post_info({"type": "userFillsByTime"}, timeout=1)
+
+    assert len(result) == 2000
+    assert sleeps == [pytest.approx(8.0)]

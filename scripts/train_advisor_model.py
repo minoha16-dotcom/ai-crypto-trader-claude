@@ -22,7 +22,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", required=True, help="Frozen JSON dataset with manifest and groups")
     parser.add_argument("--out-dir", default="artifacts/advisor-models")
-    parser.add_argument("--code-sha", default=None, help="Git commit SHA for provenance")
+    parser.add_argument("--code-sha", required=True, help="Git commit SHA of the training/approval code")
     args = parser.parse_args()
 
     dataset_path = Path(args.dataset)
@@ -30,8 +30,10 @@ def main():
     dataset_sha256 = hashlib.sha256(raw_bytes).hexdigest()
     payload = json.loads(raw_bytes.decode("utf-8"))
     manifest = payload.get("manifest") or {}
-    if args.code_sha:
-        manifest["code_sha"] = args.code_sha
+    manifest["preparation_code_sha"] = (
+        manifest.get("preparation_code_sha") or manifest.get("code_sha") or ""
+    )
+    manifest["code_sha"] = args.code_sha
 
     reports = []
     models = []
@@ -150,13 +152,21 @@ def main():
         "source_snapshot_utc": manifest.get("source_snapshot_utc"),
         "source_snapshot_sha256": manifest.get("source_snapshot_sha256"),
         "source_metadata_sha256": manifest.get("source_metadata_sha256"),
-        "code_sha": manifest.get("code_sha"),
+        "raw_dataset_sha256": manifest.get("raw_dataset_sha256"),
+        "preparation_code_sha": manifest.get("preparation_code_sha"),
+        "training_code_sha": manifest.get("code_sha"),
         "groups_requested": len(groups),
         "groups_approved": sum(1 for row in reports if (row.get("approval") or {}).get("approved")),
         "groups_disabled": sum(1 for row in reports if not (row.get("approval") or {}).get("approved")),
         "groups": reports,
         "training_errors": errors,
     }
+    approved_model_files = {model_file for model_file, _ in models}
+    # Remove stale approved artifacts when a group no longer passes this run.
+    for existing in out_dir.glob("advisor-model-*.json"):
+        if existing.is_file() and existing.name not in approved_model_files:
+            existing.unlink()
+
     report_path = out_dir / "advisor-model-approval.json"
     report_path.write_text(
         json.dumps(report, indent=2, ensure_ascii=False, allow_nan=False) + "\n",

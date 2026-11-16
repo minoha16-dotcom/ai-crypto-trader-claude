@@ -40,6 +40,8 @@ python scripts/fetch_hyperliquid_leader_fills.py --cohort top_pnl --start 2026-1
 
 The collector snapshots the exact raw leaderboard bytes, the separately
 timestamped UnderHyper metadata, wallet rankings, public fills and funding.
+Info API requests are paced by estimated response weight at a 900 weight/minute
+budget, below Hyperliquid's documented 1,200 weight/minute per-IP ceiling.
 It preserves the raw source SHA-256, metadata SHA-256, observation dates,
 endpoint names, page limits and per-wallet completeness flags. Saturated
 time ranges are recursively split. It marks a wallet incomplete if a response
@@ -64,12 +66,15 @@ After the observation window closes, run the conservative preparer:
 python scripts/prepare_hyperliquid_advisor_dataset.py --raw-dataset artifacts/hyperliquid-raw-leader-data.json --out artifacts/advisor-training-dataset.json --code-sha <git-commit-sha> --timeframes 1h,4h
 \`\`\`
 
-It fetches read-only Hyperliquid 1h OHLCV, aggregates 4h only from four
-consecutive UTC hourly candles, and computes features from candles fully
-closed before each position entry. It reconstructs only fully closed,
+It first reconstructs all positions and then fetches read-only Hyperliquid 1h
+OHLCV from the earliest position per symbol, independent of wallet ranking
+order. It aggregates 4h only from four consecutive UTC hourly candles and
+computes features from candles fully closed before the final entry fill. It reconstructs only fully closed,
 single-entry, non-scaled linear USDC perp positions. It reconstructs gross price PnL from weighted entry fill price and each closing
 fill price/quantity, then subtracts all signed USDC fees and adds same-coin
-funding. The raw exchange `closedPnl` field is preserved for audit but is not
+funding. Same-order partial opening fills use the final fill timestamp as the
+signal time while funding accrual starts at the first fill. An opening fill
+after a position reduction invalidates the position lifecycle. The raw exchange `closedPnl` field is preserved for audit but is not
 used as the training PnL because the official docs describe it as a
 frontend-convenience field and fee-inclusion semantics are not consistent
 enough to safely subtract fees from it again. The preparer validates the
@@ -165,8 +170,11 @@ Required manifest fields:
   \`slippage_model\`, \`slippage_bps\`, \`funding_included\`,
   \`entry_rule\`, and \`exit_rule\`
 
-The CLI also hashes the exact frozen training-dataset file. It records this
-hash with the source snapshot hashes and complete backtest configuration. No
+The training CLI requires its own Git SHA and preserves the separate
+preparation-code SHA. It also hashes the exact frozen training dataset and
+records the raw snapshot hash, preparation-code SHA, training-code SHA and
+complete backtest configuration. A rerun removes stale model artifacts for
+groups that no longer pass. No
 samples may be pooled across different exchange, symbol, market type or
 timeframe groups.
 
