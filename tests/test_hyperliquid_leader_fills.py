@@ -32,7 +32,7 @@ def test_range_fetch_splits_a_saturated_window(monkeypatch):
         calls.append(body)
         start = body["startTime"]
         end = body["endTime"]
-        if end - start > 10:
+        if end - start > 1000:
             return [{"time": index} for index in range(2000)]
         return [{"time": start}, {"time": end}]
 
@@ -44,7 +44,7 @@ def test_range_fetch_splits_a_saturated_window(monkeypatch):
         "0x" + "a" * 40,
         "userFillsByTime",
         0,
-        100,
+        10_000,
         timeout=1,
         pause_seconds=0,
     )
