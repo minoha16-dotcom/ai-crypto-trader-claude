@@ -153,6 +153,7 @@ def main():
         "source_snapshot_sha256": manifest.get("source_snapshot_sha256"),
         "source_metadata_sha256": manifest.get("source_metadata_sha256"),
         "raw_dataset_sha256": manifest.get("raw_dataset_sha256"),
+        "collector_code_sha": manifest.get("collector_code_sha"),
         "preparation_code_sha": manifest.get("preparation_code_sha"),
         "training_code_sha": manifest.get("code_sha"),
         "approval_scope": "RESEARCH_ONLY_EXTERNAL_TRADER_POSITION_OUTCOMES",

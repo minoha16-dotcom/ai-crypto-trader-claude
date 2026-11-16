@@ -65,7 +65,7 @@ later than that cutoff.
 After the observation window closes, run the conservative preparer:
 
 \`\`\`powershell
-python scripts/prepare_hyperliquid_advisor_dataset.py --raw-dataset artifacts/hyperliquid-raw-leader-data.json --out artifacts/advisor-training-dataset.json --code-sha <git-commit-sha> --timeframes 1h,4h
+python scripts/prepare_hyperliquid_advisor_dataset.py --raw-dataset artifacts/hyperliquid-raw-leader-data.json --out artifacts/advisor-training-dataset.json --code-sha <preparation-git-sha> --timeframes 1h,4h
 \`\`\`
 
 It first reconstructs all positions and then fetches read-only Hyperliquid 1h
@@ -234,7 +234,7 @@ approval result is \`APPROVED\`.
 ## Run
 
 \`\`\`powershell
-python scripts/train_advisor_model.py --dataset artifacts/advisor-training-dataset.json --out-dir artifacts/advisor-models --code-sha <git-commit-sha>
+python scripts/train_advisor_model.py --dataset artifacts/advisor-training-dataset.json --out-dir artifacts/advisor-models --code-sha <training-git-sha>
 \`\`\`
 
 The command always writes \`advisor-model-approval.json\`. A per-group model

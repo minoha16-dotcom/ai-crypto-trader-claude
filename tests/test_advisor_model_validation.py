@@ -64,6 +64,7 @@ def _manifest(_unused=0):
         "source_snapshot_sha256": "a" * 64,
         "source_metadata_sha256": "b" * 64,
         "raw_dataset_sha256": "c" * 64,
+        "collector_code_sha": "cafebabe1234567",
         "preparation_code_sha": "feedface1234567",
         "cohort_selection_as_of_utc": "2026-11-01T00:00:00+00:00",
         "data_start_utc": "2026-11-02T00:00:00+00:00",
