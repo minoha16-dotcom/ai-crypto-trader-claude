@@ -454,7 +454,7 @@ def test_end_to_end_model_exports_only_when_all_provenance_and_oos_gates_pass():
         "symbol": "BTC/USDC",
         "market_type": "futures",
         "timeframe": "1h",
-        "samples": _samples(500),
+        "samples": _samples(650),
     }
     result = train_validate_group(
         group=group,
