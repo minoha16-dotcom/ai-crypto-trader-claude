@@ -638,6 +638,7 @@ def _manifest_rejection_reasons(
         "source_url",
         "source_license",
         "source_snapshot_utc",
+        "leaderboard_retrieved_at_utc",
         "source_snapshot_sha256",
         "source_metadata_sha256",
         "raw_dataset_sha256",
@@ -727,6 +728,10 @@ def _manifest_rejection_reasons(
 
     try:
         snapshot_ms = _timestamp_ms(provenance.get("source_snapshot_utc"), "source_snapshot_utc")
+        retrieved_ms = _timestamp_ms(
+            provenance.get("leaderboard_retrieved_at_utc"),
+            "leaderboard_retrieved_at_utc",
+        )
         cohort_ms = _timestamp_ms(provenance.get("cohort_selection_as_of_utc"), "cohort_selection_as_of_utc")
         data_start_ms = _timestamp_ms(provenance.get("data_start_utc"), "data_start_utc")
         data_end_ms = _timestamp_ms(provenance.get("data_end_utc"), "data_end_utc")
@@ -734,6 +739,11 @@ def _manifest_rejection_reasons(
             reasons.append({
                 "code": "COHORT_SELECTION_PRECEDES_SOURCE_SNAPSHOT",
                 "detail": "source snapshot must exist no later than the cohort-selection cutoff",
+            })
+        if retrieved_ms > cohort_ms:
+            reasons.append({
+                "code": "COHORT_SELECTION_PRECEDES_ACTUAL_RETRIEVAL",
+                "detail": "cohort selection cutoff must be no earlier than actual leaderboard retrieval",
             })
         if cohort_ms >= data_start_ms:
             reasons.append({

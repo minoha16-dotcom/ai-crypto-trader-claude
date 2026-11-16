@@ -61,12 +61,13 @@ def _manifest(_unused=0):
             "UnderHyper metadata is CC BY 4.0 and is not assumed to license raw Hyperliquid data."
         ),
         "source_snapshot_utc": "2026-11-01T00:00:00+00:00",
+        "leaderboard_retrieved_at_utc": "2026-11-01T00:01:00+00:00",
         "source_snapshot_sha256": "a" * 64,
         "source_metadata_sha256": "b" * 64,
         "raw_dataset_sha256": "c" * 64,
         "collector_code_sha": "cafebabe1234567",
         "preparation_code_sha": "feedface1234567",
-        "cohort_selection_as_of_utc": "2026-11-01T00:00:00+00:00",
+        "cohort_selection_as_of_utc": "2026-11-01T00:01:00+00:00",
         "data_start_utc": "2026-11-02T00:00:00+00:00",
         "data_end_utc": "2026-12-15T00:00:00+00:00",
         "model_version": "1.2.0",
@@ -717,5 +718,38 @@ def test_approval_disables_group_when_feature_preparation_coverage_is_too_low():
     assert result["metrics"]["preparation_coverage_pct"] == 50.0
     assert any(
         reason["code"] == "LOW_PREPARATION_FEATURE_COVERAGE"
+        for reason in result["rejection_reasons"]
+    )
+
+
+
+def test_approval_rejects_cohort_cutoff_earlier_than_actual_leaderboard_retrieval():
+    group = {
+        "exchange": "hyperliquid",
+        "symbol": "BTC/USDC",
+        "market_type": "futures",
+        "timeframe": "1h",
+    }
+    manifest = _manifest()
+    manifest["leaderboard_retrieved_at_utc"] = "2026-11-03T00:00:00Z"
+    manifest["cohort_selection_as_of_utc"] = "2026-11-01T00:01:00Z"
+    result = evaluate_approval(
+        group=group,
+        walk_forward={
+            "min_training_samples_per_fold": 250,
+            "fold_count": 3,
+            "oos_signals": 120,
+            "oos_samples": 120,
+            "oos_excluded_samples": 0,
+            "oos_excluded_reasons": {},
+            "folds": _approval_fold_reports(),
+            "oos_predictions": _successful_prediction_rows(),
+        },
+        manifest=manifest,
+        dataset_sha256="b" * 64,
+    )
+    assert result["approved"] is False
+    assert any(
+        reason["code"] == "COHORT_SELECTION_PRECEDES_ACTUAL_RETRIEVAL"
         for reason in result["rejection_reasons"]
     )
