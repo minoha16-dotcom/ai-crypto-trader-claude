@@ -199,7 +199,8 @@ def fit_ridge_on_targets(
     }
 
 
-def predict_r_multiple(model, sample):
+def predict_target(model, sample):
+    """Predict the model's declared target; the caller must preserve its unit."""
     vector = sample.get("features")
     if vector is None:
         vector = features_from_signal(sample)
@@ -215,5 +216,12 @@ def predict_r_multiple(model, sample):
         for weight, value in zip(weights, clean)
     )
     if not math.isfinite(prediction):
-        raise ValueError("model returned a non-finite R prediction")
+        raise ValueError("model returned a non-finite prediction")
     return prediction
+
+
+def predict_r_multiple(model, sample):
+    """Predict true strategy net R only; reject non-R auxiliary models."""
+    if model.get("target") != "net_r_multiple":
+        raise ValueError("model target is not net_r_multiple")
+    return predict_target(model, sample)
