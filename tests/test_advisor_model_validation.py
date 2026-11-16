@@ -202,7 +202,7 @@ def test_period_end_and_liquidation_are_excluded_but_remain_oos_signals():
 
 def test_unknown_exit_reason_is_never_a_training_label():
     samples = _samples(260)
-    samples[0]["exit_reason"] = "MANUAL_CLOSE"
+    samples[200]["exit_reason"] = "MANUAL_CLOSE"
     result = walk_forward_predict(
         samples,
         min_training_samples=200,
