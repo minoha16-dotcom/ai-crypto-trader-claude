@@ -316,3 +316,52 @@ def test_futures_backtest_liquidates_before_stop_or_target(monkeypatch):
 def test_spot_backtest_rejects_leverage():
     with pytest.raises(ValueError, match="Spot backtests do not support leverage"):
         run_backtest(rising_candles(60), leverage=2)
+
+
+
+def test_backtest_stores_signal_time_and_only_closed_candle_features(monkeypatch):
+    calls = {"count": 0}
+
+    def fake_analyze(history, volume_ratio_threshold=None):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return {
+                "signal": "LONG",
+                "price": 100.0,
+                "ema20": 99.0,
+                "ema50": 98.0,
+                "rsi14": 62.0,
+                "adx14": 31.0,
+                "volume_ratio": 1.4,
+                "atr_pct": 0.8,
+                "atr14": 2.0,
+            }
+        return {
+            "signal": "WAIT",
+            "price": 100.0,
+            "ema20": 99.0,
+            "ema50": 98.0,
+            "rsi14": 62.0,
+            "adx14": 31.0,
+            "volume_ratio": 1.4,
+            "atr_pct": 0.8,
+            "atr14": 2.0,
+        }
+
+    monkeypatch.setattr(backtest, "analyze", fake_analyze)
+    result = run_backtest(exit_on_target_candles())
+    trade = result["trades"][0]
+
+    assert trade["signal_index"] == 49
+    assert trade["signal_candle_timestamp"] == 49 * 3_600_000
+    assert trade["signal_timestamp"] == 50 * 3_600_000
+    assert trade["entry_timestamp"] == 50 * 3_600_000
+    assert trade["signal_features"] == {
+        "price": 100.0,
+        "ema20": 99.0,
+        "ema50": 98.0,
+        "rsi14": 62.0,
+        "adx14": 31.0,
+        "volume_ratio": 1.4,
+        "atr_pct": 0.8,
+    }
