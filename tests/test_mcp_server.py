@@ -25,6 +25,7 @@ def test_mcp_backtest_tool_routes_to_backtest_api(monkeypatch):
         "market_type": "futures",
         "timeframe": "4h",
         "limit": 500,
+        "mtf_confirmation": True,
     }
 
 
@@ -141,9 +142,9 @@ def test_mcp_walk_forward_tool_forwards_parameters_and_volume_threshold(monkeypa
         validation_bars=150,
         test_bars=100,
         step_bars=100,
-        warmup_bars=50,
+        warmup_bars=200,
         purge_bars=20,
-        embargo_bars=50,
+        embargo_bars=200,
         max_holding_bars=20,
         window_mode="expanding",
         max_folds=4,
@@ -158,7 +159,7 @@ def test_mcp_walk_forward_tool_forwards_parameters_and_volume_threshold(monkeypa
     assert captured["params"]["symbol"] == "BTC/USDT"
     assert captured["params"]["window_mode"] == "expanding"
     assert captured["params"]["purge_bars"] == 20
-    assert captured["params"]["embargo_bars"] == 50
+    assert captured["params"]["embargo_bars"] == 200
     assert captured["params"]["max_holding_bars"] == 20
     assert captured["params"]["volume_ratio_threshold"] == 0.8
     assert captured["params"]["max_missing_bars"] == 1
