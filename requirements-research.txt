@@ -1,0 +1,3 @@
+# Optional dependencies for offline Hyperliquid archive research.
+# Not installed in the production Render service.
+polars>=1.0,<2
