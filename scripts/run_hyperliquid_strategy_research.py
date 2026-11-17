@@ -1,7 +1,7 @@
 """Fetch point-in-time Hyperliquid candles from Vike and run per-group WF reports.
 
 Requires VIKE_API_KEY in the local environment. Never commit the key or data files.
-The default 2026-08-17..2026-11-17 UTC interval is scored; preceding candles
+The default 90-day 2026-08-19..2026-11-17 UTC interval is scored; preceding candles
 are warm-up only. The runner compares frozen one-factor LONG rule variants. This is research-only for Hyperliquid until a live adapter exists.
 """
 import argparse
@@ -21,7 +21,7 @@ from backend.strategy_research import evaluate_strategy_group, build_approval_ar
 
 
 API = "https://data.vike.io/v1/hyperliquid"
-DEFAULT_START = "2026-10-18T00:00:00Z"
+DEFAULT_START = "2026-08-19T00:00:00Z"
 DEFAULT_END = "2026-11-17T00:00:00Z"
 DEFAULT_SYMBOLS = ("BTC", "ETH", "SOL", "HYPE")
 
@@ -177,7 +177,7 @@ def main():
                     {"train_bars": 250, "validation_bars": 100,
                      "test_bars": args.test_bars, "step_bars": args.step_bars}
                     if timeframe != "4h"
-                    else {"train_bars": 60, "validation_bars": 20,
+                    else {"train_bars": 60, "validation_bars": 22,
                           "test_bars": 30, "step_bars": 30}
                 )
                 report = evaluate_strategy_group(
