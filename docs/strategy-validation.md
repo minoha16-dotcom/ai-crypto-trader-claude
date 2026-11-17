@@ -302,11 +302,27 @@ The key is read only from the process environment; never commit it, put it in
 script writes a report and a **research-only** candidate artifact. It does not
 overwrite the active scanner approval file.
 
-Important scope distinction: this runner downloads market OHLCV and evaluates
-the current fixed technical strategy. It does not yet download the archived
-fills of the 100 point-in-time selected Hyperliquid wallets, rebuild their
-open positions, or reconcile wallet funding. Those wallet-level labels are a
-separate data-ingestion task and must not be represented as collected or used
-for model training by this OHLCV run. Hyperliquid is also not one of the
-application's configured live exchange adapters, so its research reports
-cannot enable live scanner signals.
+A separate \`scripts/collect_hyperliquid_top100.py\` collector handles wallet-level
+research. It uses the \`pnl_cohort\` label as of 2026-10-15 23:00 UTC (the
+2026-10-16 00:00 UTC positions snapshot), ranks only cohort-labelled wallets
+by realized PnL over the preceding 30 UTC days, and requires exactly 100
+positive-PnL wallets. It then downloads their 2026-10-16 through 2026-11-16
+fills, the latest pre-period position snapshot per wallet/asset, and their
+wallet-specific funding payments. It writes a manifest and local Parquet/JSON
+files; the opening snapshot seeds later fill replay.
+
+Install the optional research dependency and run the collector before the
+OHLCV walk-forward runner:
+
+\`\`\`powershell
+python -m pip install -r requirements-research.txt
+$env:VIKE_API_KEY = "your Vike key"
+python scripts/collect_hyperliquid_top100.py
+python scripts/run_hyperliquid_strategy_research.py
+\`\`\`
+
+The two datasets are collected separately: the top-100 wallet fills/funding
+are not yet consumed as training labels by the fixed-rule walk-forward
+evaluator. They must be replayed and reconciled before they can be described as
+a trained model. Hyperliquid is not one of the application's configured live
+exchange adapters, so its research reports cannot enable live scanner signals.
