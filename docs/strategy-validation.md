@@ -74,7 +74,7 @@ message; they are not persisted as technical WAIT signals.
 
 The 500-candle requirement is a warm-up/data-quality policy, not evidence that
 a strategy is profitable. It provides history beyond the 200-period EMA
-planned for the next strategy phase. Exchange-specific timestamp alignment
+used by the current strategy rules. Exchange-specific timestamp alignment
 must be verified before adding further timeframes; weekly candles use the
 Monday UTC boundary.
 
