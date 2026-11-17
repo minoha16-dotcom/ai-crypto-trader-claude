@@ -14,17 +14,65 @@ on:
         default: "15m"
         type: string
 
-# This small default-branch entry makes the workflow visible in Actions.
-# When dispatching, select feature/scan-data-validation-v1 so GitHub runs
-# the full research workflow definition from that branch.
 permissions:
   contents: read
+  actions: write
 
 jobs:
-  dispatch-entry:
+  research:
+    # This workflow is dispatchable from the default branch. The job checks
+    # out the exact selected branch so it runs that branch's research code.
     runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      VIKE_API_KEY: ${{ secrets.VIKE_API_KEY }}
+      PYTHONUNBUFFERED: "1"
+      RESEARCH_SYMBOLS: ${{ inputs.symbols }}
+      RESEARCH_TIMEFRAMES: ${{ inputs.timeframes }}
     steps:
-      - name: Explain branch selection
+      - name: Check out selected branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Validate Vike secret is configured
+        shell: bash
         run: |
-          echo "Select feature/scan-data-validation-v1 in the Run workflow branch selector."
-          echo "The full Hyperliquid research job is defined on that branch."
+          if [ -z "${VIKE_API_KEY}" ]; then
+            echo "::error::Repository secret VIKE_API_KEY is missing or empty."
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.18"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-research.txt
+
+      - name: Install research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-research.txt
+
+      - name: Collect Hyperliquid OHLCV and run per-group Walk-Forward
+        run: |
+          python scripts/run_hyperliquid_strategy_research.py \
+            --start "2026-10-16T00:00:00Z" \
+            --end "2026-11-16T00:00:00Z" \
+            --symbols "${RESEARCH_SYMBOLS}" \
+            --timeframes "${RESEARCH_TIMEFRAMES}"
+
+      - name: Upload research reports (no API key)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyperliquid-strategy-research-${{ github.run_id }}
+          path: |
+            data/strategy-research/hyperliquid/reports.json
+            data/strategy-research/hyperliquid/approval-candidate.json
+            data/strategy-research/hyperliquid/*.json
+          if-no-files-found: warn
+          retention-days: 14
