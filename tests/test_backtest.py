@@ -247,3 +247,38 @@ def test_backtest_can_force_close_remaining_position_at_period_end(monkeypatch):
 def test_backtest_rejects_invalid_maximum_holding_horizon(value):
     with pytest.raises(ValueError, match="max_holding_bars"):
         run_backtest(rising_candles(60), max_holding_bars=value)
+
+
+def test_backtest_records_each_wait_rejection_with_context(monkeypatch):
+    def rejected(_history):
+        return {
+            "signal": "WAIT",
+            "direction": "neutral",
+            "filter_reasons": ["REGIME_RANGING", "VOLUME_BELOW_AVERAGE"],
+            "price": 100.0,
+            "atr14": 2.0,
+            "adx14": 12.0,
+            "plus_di14": 18.0,
+            "minus_di14": 20.0,
+            "ema20": 99.0,
+            "ema50": 100.0,
+            "ema200": 101.0,
+            "rsi14": 45.0,
+            "atr_pct": 2.0,
+            "volume_ratio": 0.7,
+            "volume_ratio_threshold": 1.0,
+            "net_reward_risk": 1.2,
+        }
+
+    monkeypatch.setattr(backtest, "analyze", rejected)
+    result = run_backtest(rising_candles(60), start_index=55)
+
+    assert len(result["skipped_signals"]) == 2 * 4
+    assert {row["reason"] for row in result["skipped_signals"]} == {
+        "REGIME_RANGING", "VOLUME_BELOW_AVERAGE"
+    }
+    first = result["skipped_signals"][0]
+    assert first["stage"] == "signal_eligibility"
+    assert first["timestamp"] == rising_candles(60)[55][0]
+    assert first["side"] == "NEUTRAL"
+    assert first["indicators"]["adx14"] == 12.0
