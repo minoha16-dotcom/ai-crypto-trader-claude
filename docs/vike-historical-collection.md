@@ -71,7 +71,7 @@ password manager or by loading your local .env. Do not print the secret.
 ~~~powershell
 $sha = git rev-parse HEAD
 
-python scripts/fetch_vike_hyperliquid_dataset.py --snapshot-only --start 2026-10-16T00:00:00Z --end 2026-11-16T00:00:00Z --cohort-label "3x_smart" --wallet-limit 200 --collector-code-sha $sha --out artifacts/vike-cohort-snapshot.json
+python scripts/fetch_vike_hyperliquid_dataset.py --snapshot-only --start 2026-10-16T00:00:00Z --end 2026-11-16T00:00:00Z --cohort-label "3x_smart" --wallet-limit 1000 --collector-code-sha $sha --out artifacts/vike-cohort-snapshot.json
 
 python scripts/fetch_vike_hyperliquid_dataset.py --snapshot-file artifacts/vike-cohort-snapshot.json --start 2026-10-16T00:00:00Z --end 2026-11-16T00:00:00Z --history-warmup-days 17 --collector-code-sha $sha --out artifacts/hyperliquid-vike-raw-dataset.json
 
