@@ -326,7 +326,7 @@ async def market_candles(
 
 
 @app.get("/api/backtest")
-async def backtest(exchange=settings.default_exchange, symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000, volume_ratio_threshold: float | None = None):
+async def backtest(exchange=settings.default_exchange, symbol="BTC/USDT", market_type="spot", timeframe="1h", limit: int = 1000, volume_ratio_threshold: float | None = None, mtf_confirmation: bool = True):
     if exchange not in EXCHANGE_IDS:
         raise HTTPException(400, "Unsupported exchange")
     if market_type not in ("spot", "futures"):
@@ -350,7 +350,7 @@ async def backtest(exchange=settings.default_exchange, symbol="BTC/USDT", market
         # The final exchange candle may still be forming; never use it for signals.
         closed_candles = candles[:-1]
         higher_timeframe_candles = None
-        if timeframe == "15m":
+        if timeframe == "15m" and mtf_confirmation:
             raw_higher = await registry.ohlcv(
                 exchange, resolved_symbol, settings.signal_higher_timeframe,
                 MIN_SCAN_CANDLES + 1, market_type,
@@ -388,6 +388,7 @@ async def backtest(exchange=settings.default_exchange, symbol="BTC/USDT", market
                     "candle_timeframe": "15m",
                     "higher_timeframe_candles": higher_timeframe_candles,
                     "higher_timeframe": settings.signal_higher_timeframe,
+                    "require_mtf_confirmation": mtf_confirmation,
                 } if timeframe == "15m" else {})
             ),
         }
@@ -427,6 +428,7 @@ async def walk_forward(
     max_folds: int = 10,
     volume_ratio_threshold: float | None = None,
     max_missing_bars: int = 0,
+    mtf_confirmation: bool = True,
 ):
     """Run a chronological, paper-only walk-forward evaluation on public OHLCV."""
     if exchange not in EXCHANGE_IDS:
@@ -455,7 +457,7 @@ async def walk_forward(
                 "candle_data": candle_meta,
             })
         higher_timeframe_candles = None
-        if timeframe == "15m":
+        if timeframe == "15m" and mtf_confirmation:
             raw_higher = await registry.ohlcv(
                 exchange, resolved_symbol, settings.signal_higher_timeframe,
                 MIN_SCAN_CANDLES + 1, market_type,
@@ -485,6 +487,7 @@ async def walk_forward(
             candle_timeframe="15m" if timeframe == "15m" else None,
             higher_timeframe_candles=higher_timeframe_candles,
             higher_timeframe=settings.signal_higher_timeframe,
+            require_mtf_confirmation=mtf_confirmation,
         )
         return {
             "exchange": exchange,
