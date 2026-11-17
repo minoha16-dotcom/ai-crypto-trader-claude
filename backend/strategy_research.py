@@ -75,7 +75,7 @@ def _bootstrap_top_tercile_uplift(trades, seed, replicates=BOOTSTRAP_REPLICATES)
 
 def count_qualified_examples(candles, timeframe, higher_timeframe_candles=None,
                              higher_timeframe="4h", require_mtf_confirmation=True,
-                             cooldown_bars=20):
+                             cooldown_bars=20, start_index=199):
     """Count separated, eligible signal events; avoid counting every adjacent bar."""
     interval_ms = timeframe_milliseconds(timeframe)
     higher_interval_ms = None
@@ -88,8 +88,8 @@ def count_qualified_examples(candles, timeframe, higher_timeframe_candles=None,
             int(float(row[0])) + higher_interval_ms for row in higher_timeframe_candles
         ]
     qualified = 0
-    next_allowed_index = 199
-    for index in range(199, len(candles)):
+    next_allowed_index = max(199, int(start_index))
+    for index in range(next_allowed_index, len(candles)):
         if index < next_allowed_index:
             continue
         metrics = analyze(candles[:index + 1])
@@ -132,7 +132,7 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
     ).hexdigest()
     qualified = count_qualified_examples(
         candles, timeframe, higher_timeframe_candles, higher_timeframe,
-        timeframe == "15m",
+        timeframe == "15m", start_index=warmup_bars,
     )
     wf = run_walk_forward_backtest(
         candles,
@@ -205,7 +205,7 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
                 (float(candles[-1][0]) + interval_ms) / 1000, tz=timezone.utc
             ).isoformat(),
         },
-        "data": {"candle_count": len(candles), "interval_ms": interval_ms},
+        "data": {"candle_count": max(0, len(candles) - warmup_bars), "warmup_candles": warmup_bars, "interval_ms": interval_ms},
         "qualified_examples": qualified,
         "walk_forward_folds": wf["fold_count"],
         "oos_trade_count": oos_count,
