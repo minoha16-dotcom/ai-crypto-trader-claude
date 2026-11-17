@@ -68,7 +68,7 @@ jobs:
           RESEARCH_TIMEFRAMES: ${{ inputs.timeframes || '15m,4h' }}
         run: |
           python scripts/run_hyperliquid_strategy_research.py \
-            --start "2026-10-18T00:00:00Z" \
+            --start "2026-08-19T00:00:00Z" \
             --end "2026-11-17T00:00:00Z" \
             --symbols "${RESEARCH_SYMBOLS}" \
             --timeframes "${RESEARCH_TIMEFRAMES}" \
