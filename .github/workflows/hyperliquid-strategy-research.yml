@@ -1,0 +1,30 @@
+name: Hyperliquid Strategy Research
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Comma-separated Hyperliquid perp symbols"
+        required: true
+        default: "BTC,ETH,SOL,HYPE"
+        type: string
+      timeframes:
+        description: "Comma-separated timeframes"
+        required: true
+        default: "15m"
+        type: string
+
+# This small default-branch entry makes the workflow visible in Actions.
+# When dispatching, select feature/scan-data-validation-v1 so GitHub runs
+# the full research workflow definition from that branch.
+permissions:
+  contents: read
+
+jobs:
+  dispatch-entry:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain branch selection
+        run: |
+          echo "Select feature/scan-data-validation-v1 in the Run workflow branch selector."
+          echo "The full Hyperliquid research job is defined on that branch."
