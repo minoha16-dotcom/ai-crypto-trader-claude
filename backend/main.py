@@ -23,6 +23,7 @@ from .position_monitor import run_position_monitor
 from .metrics import position_pnl, position_risk
 from .advisor import analyze_closed_trade_history
 from .version import APP_VERSION
+from .data_validation import validate_scan_candles, MIN_SCAN_CANDLES
 
 
 @asynccontextmanager
@@ -348,6 +349,16 @@ async def backtest(exchange=settings.default_exchange, symbol="BTC/USDT", market
         )
         # The final exchange candle may still be forming; never use it for signals.
         closed_candles = candles[:-1]
+        higher_timeframe_candles = None
+        if timeframe == "15m":
+            raw_higher = await registry.ohlcv(
+                exchange, resolved_symbol, settings.signal_higher_timeframe,
+                MIN_SCAN_CANDLES + 1, market_type,
+            )
+            higher_timeframe_candles = validate_scan_candles(
+                raw_higher, settings.signal_higher_timeframe,
+                min_candles=MIN_SCAN_CANDLES,
+            )
         if len(closed_candles) < 52:
             return JSONResponse(status_code=422, content={
                 "detail": "Exchange returned too few closed candles for a backtest.",
@@ -372,7 +383,12 @@ async def backtest(exchange=settings.default_exchange, symbol="BTC/USDT", market
             "candle_shortfall": candle_meta["shortfall"],
             **await run_in_threadpool(
                 run_backtest, closed_candles, settings.paper_starting_balance, instrument,
-                volume_ratio_threshold
+                volume_ratio_threshold,
+                **({
+                    "candle_timeframe": "15m",
+                    "higher_timeframe_candles": higher_timeframe_candles,
+                    "higher_timeframe": settings.signal_higher_timeframe,
+                } if timeframe == "15m" else {})
             ),
         }
     except ExchangeRateLimitCooldown:
@@ -438,6 +454,16 @@ async def walk_forward(
                 "timeframe": timeframe,
                 "candle_data": candle_meta,
             })
+        higher_timeframe_candles = None
+        if timeframe == "15m":
+            raw_higher = await registry.ohlcv(
+                exchange, resolved_symbol, settings.signal_higher_timeframe,
+                MIN_SCAN_CANDLES + 1, market_type,
+            )
+            higher_timeframe_candles = validate_scan_candles(
+                raw_higher, settings.signal_higher_timeframe,
+                min_candles=MIN_SCAN_CANDLES,
+            )
         result = await run_in_threadpool(
             run_walk_forward_backtest,
             closed_candles,
@@ -456,6 +482,9 @@ async def walk_forward(
             volume_ratio_threshold=volume_ratio_threshold,
             expected_candle_ms=_WALK_FORWARD_TIMEFRAME_MS[timeframe],
             max_missing_bars=max_missing_bars,
+            candle_timeframe="15m" if timeframe == "15m" else None,
+            higher_timeframe_candles=higher_timeframe_candles,
+            higher_timeframe=settings.signal_higher_timeframe,
         )
         return {
             "exchange": exchange,
