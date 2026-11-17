@@ -111,6 +111,10 @@ def main():
 
     symbols = [item.strip().upper() for item in args.symbols.split(",") if item.strip()]
     timeframes = [item.strip() for item in args.timeframes.split(",") if item.strip()]
+    if not symbols:
+        parser.error("--symbols must contain at least one Hyperliquid symbol")
+    if not timeframes:
+        parser.error("--timeframes must contain at least one timeframe")
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     reports = []
