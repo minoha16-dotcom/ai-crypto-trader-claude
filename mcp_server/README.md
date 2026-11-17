@@ -105,7 +105,8 @@ private; do not publish it to a public directory.
 - "Show the latest trading opportunities."
 - "Get KuCoin BTC/USDT Spot instrument precision and order limits."
 - "Backtest BTC/USDT Futures on OKX using 4h candles with Volume Ratio thresholds 0.8, 1.0, and 1.2."
-- "Run a rolling walk-forward evaluation for BTC/USDT Spot on KuCoin with 250 training, 100 validation, and 100 test candles."
+- "Compare BTC/USDT Spot on KuCoin 15m with 4h confirmation against the 15m-only baseline using mtf_confirmation=false."
+- "Run a rolling walk-forward evaluation for BTC/USDT Spot on KuCoin with 250 training, 100 validation, 100 test candles, and 200 warmup candles."
 - "Open a paper LONG on BTC/USDT with entry 60000 and stop 59000."
 - "Close paper trade 1 at exit price 61000."
 

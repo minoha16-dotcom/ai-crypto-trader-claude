@@ -175,6 +175,7 @@ async def run_backtest(
     timeframe: Literal["5m", "15m", "30m", "1h", "2h", "4h", "1d"] = "1h",
     limit: int = 1000,
     volume_ratio_threshold: float | None = None,
+    mtf_confirmation: bool = True,
 ) -> dict:
     """Run the backend's historical OHLCV paper backtest; does not submit orders."""
     symbol = symbol.strip().upper()
@@ -195,6 +196,7 @@ async def run_backtest(
     }
     if volume_ratio_threshold is not None:
         params["volume_ratio_threshold"] = volume_ratio_threshold
+    params["mtf_confirmation"] = mtf_confirmation
     return await _api("GET", "/api/backtest", params=params)
 
 
@@ -209,7 +211,7 @@ async def run_walk_forward(
     validation_bars: int = 100,
     test_bars: int = 100,
     step_bars: int = 100,
-    warmup_bars: int = 50,
+    warmup_bars: int = 200,
     purge_bars: int = 20,
     embargo_bars: int | None = None,
     max_holding_bars: int = 20,
@@ -217,6 +219,7 @@ async def run_walk_forward(
     max_folds: int = 10,
     volume_ratio_threshold: float | None = None,
     max_missing_bars: int = 0,
+    mtf_confirmation: bool = True,
 ) -> dict:
     """Run chronological paper-only walk-forward evaluation; never submits orders."""
     symbol = symbol.strip().upper()
@@ -228,8 +231,8 @@ async def run_walk_forward(
         not math.isfinite(volume_ratio_threshold) or volume_ratio_threshold < 0
     ):
         raise ValueError("volume_ratio_threshold must be finite and non-negative.")
-    if isinstance(warmup_bars, bool) or not isinstance(warmup_bars, int) or warmup_bars < 50:
-        raise ValueError("warmup_bars must be an integer of at least 50.")
+    if isinstance(warmup_bars, bool) or not isinstance(warmup_bars, int) or warmup_bars < 200:
+        raise ValueError("warmup_bars must be an integer of at least 200 for EMA200.")
     if (
         isinstance(max_holding_bars, bool)
         or not isinstance(max_holding_bars, int)
@@ -266,6 +269,7 @@ async def run_walk_forward(
         "window_mode": window_mode,
         "max_folds": max_folds,
         "max_missing_bars": max_missing_bars,
+        "mtf_confirmation": mtf_confirmation,
     }
     if embargo_bars is not None:
         params["embargo_bars"] = embargo_bars

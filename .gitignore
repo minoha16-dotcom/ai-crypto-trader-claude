@@ -19,3 +19,6 @@ __pycache__/
 *.log
 coverage.xml
 htmlcov/
+
+# Downloaded market data and offline strategy research outputs
+data/strategy-research/

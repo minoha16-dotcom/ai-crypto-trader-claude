@@ -25,6 +25,7 @@ def test_mcp_backtest_tool_routes_to_backtest_api(monkeypatch):
         "market_type": "futures",
         "timeframe": "4h",
         "limit": 500,
+        "mtf_confirmation": True,
     }
 
 
@@ -141,9 +142,9 @@ def test_mcp_walk_forward_tool_forwards_parameters_and_volume_threshold(monkeypa
         validation_bars=150,
         test_bars=100,
         step_bars=100,
-        warmup_bars=50,
+        warmup_bars=200,
         purge_bars=20,
-        embargo_bars=50,
+        embargo_bars=200,
         max_holding_bars=20,
         window_mode="expanding",
         max_folds=4,
@@ -158,7 +159,9 @@ def test_mcp_walk_forward_tool_forwards_parameters_and_volume_threshold(monkeypa
     assert captured["params"]["symbol"] == "BTC/USDT"
     assert captured["params"]["window_mode"] == "expanding"
     assert captured["params"]["purge_bars"] == 20
-    assert captured["params"]["embargo_bars"] == 50
+    assert captured["params"]["warmup_bars"] == 200
+    assert captured["params"]["mtf_confirmation"] is True
+    assert captured["params"]["embargo_bars"] == 200
     assert captured["params"]["max_holding_bars"] == 20
     assert captured["params"]["volume_ratio_threshold"] == 0.8
     assert captured["params"]["max_missing_bars"] == 1
@@ -193,3 +196,20 @@ def test_mcp_walk_forward_tool_uses_backend_default_when_exchange_is_omitted(mon
 def test_mcp_walk_forward_rejects_unsafe_boundary_configuration(kwargs, message):
     with pytest.raises(ValueError, match=message):
         asyncio.run(server.run_walk_forward(**kwargs))
+
+
+
+def test_mcp_backtest_forwards_15m_baseline_toggle(monkeypatch):
+    captured = {}
+
+    async def fake_api(method, path, *, params=None, payload=None):
+        captured.update(method=method, path=path, params=params)
+        return {"trade_count": 0}
+
+    monkeypatch.setattr(server, "_api", fake_api)
+    asyncio.run(server.run_backtest(
+        "okx", "BTC/USDT", "spot", "15m", 1000,
+        mtf_confirmation=False,
+    ))
+    assert captured["path"] == "/api/backtest"
+    assert captured["params"]["mtf_confirmation"] is False

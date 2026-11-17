@@ -6,6 +6,7 @@ opens beyond the stop. If stop and target both trade inside one candle, stop
 is assumed first. This remains a bar-based simulation, not exchange execution.
 """
 import math
+from bisect import bisect_right
 from datetime import datetime, timezone
 
 from .config import settings
@@ -15,7 +16,8 @@ from .contracts import (
     contract_risk_amount,
     normalize_amount,
 )
-from .indicators import analyze
+from .indicators import analyze, market_context
+from .data_validation import timeframe_milliseconds
 from .metrics import validate_trading_configuration
 
 
@@ -64,6 +66,10 @@ def run_backtest(
     start_index=49,
     max_holding_bars=None,
     close_open_at_end=False,
+    candle_timeframe=None,
+    higher_timeframe_candles=None,
+    higher_timeframe="4h",
+    require_mtf_confirmation=True,
 ):
     if len(candles) < 52:
         raise ValueError("At least 52 candles are required for next-open backtesting")
@@ -72,6 +78,33 @@ def run_backtest(
         if not math.isfinite(volume_ratio_threshold) or volume_ratio_threshold < 0:
             raise ValueError("volume_ratio_threshold must be finite and non-negative")
     _validate_candles(candles)
+    lower_interval_ms = higher_interval_ms = None
+    higher_end_times = []
+    if candle_timeframe is not None:
+        lower_interval_ms = timeframe_milliseconds(candle_timeframe)
+    if candle_timeframe == "15m" and require_mtf_confirmation:
+        if not isinstance(higher_timeframe_candles, (list, tuple)):
+            raise ValueError("15m backtests require higher-timeframe OHLCV data")
+        if len(higher_timeframe_candles) < 200:
+            raise ValueError("At least 200 closed higher-timeframe candles are required")
+        _validate_candles(higher_timeframe_candles)
+        higher_interval_ms = timeframe_milliseconds(higher_timeframe)
+        previous_timestamp = None
+        for index, candle in enumerate(higher_timeframe_candles):
+            raw_timestamp = float(candle[0])
+            if not math.isfinite(raw_timestamp) or not raw_timestamp.is_integer():
+                raise ValueError(f"Higher-timeframe candle {index} has an invalid timestamp")
+            timestamp = int(raw_timestamp)
+            if timestamp <= 0 or timestamp % higher_interval_ms != 0:
+                raise ValueError(f"Higher-timeframe candle {index} is not timeframe-aligned")
+            if previous_timestamp is not None:
+                delta = timestamp - previous_timestamp
+                if delta != higher_interval_ms:
+                    raise ValueError(
+                        f"Higher-timeframe data gap or ordering error at candle {index}"
+                    )
+            previous_timestamp = timestamp
+            higher_end_times.append(timestamp + higher_interval_ms)
     if isinstance(start_index, bool) or not isinstance(start_index, int):
         raise ValueError("start_index must be an integer")
     if start_index < 49 or start_index >= len(candles) - 1:
@@ -136,6 +169,29 @@ def run_backtest(
         if side not in ("LONG", "SHORT"):
             i += 1
             continue
+        if candle_timeframe == "15m" and require_mtf_confirmation:
+            decision_close_ms = int(float(candles[i][0])) + lower_interval_ms
+            eligible_higher_count = bisect_right(higher_end_times, decision_close_ms)
+            if eligible_higher_count < 200:
+                skipped_signals.append({
+                    "index": i, "reason": "MTF_HIGHER_TIMEFRAME_WARMUP_NOT_READY"
+                })
+                i += 1
+                continue
+            higher_context = market_context(
+                higher_timeframe_candles[:eligible_higher_count]
+            )
+            required_direction = "bullish" if side == "LONG" else "bearish"
+            if (
+                higher_context["regime"] != "trending"
+                or higher_context["direction"] != required_direction
+            ):
+                skipped_signals.append({
+                    "index": i, "reason": "MTF_DIRECTION_NOT_CONFIRMED",
+                    "higher_timeframe_context": higher_context,
+                })
+                i += 1
+                continue
 
         entry_day = _utc_day(candles[i + 1][0])
         daily_start_equity.setdefault(entry_day, equity)
@@ -167,6 +223,21 @@ def run_backtest(
         stop = raw_entry - distance if side == "LONG" else raw_entry + distance
         reward_distance = distance * float(settings.reward_risk_ratio)
         target = raw_entry + reward_distance if side == "LONG" else raw_entry - reward_distance
+        estimated_round_trip_cost = raw_entry * (
+            2.0 * fee_rate + 2.0 * slippage
+        )
+        net_reward = reward_distance - estimated_round_trip_cost
+        net_risk = distance + estimated_round_trip_cost
+        net_rr = net_reward / net_risk if net_risk > 0 else 0.0
+        if net_rr < float(settings.signal_min_net_rr):
+            skipped_signals.append({
+                "index": i,
+                "reason": "NET_REWARD_RISK_BELOW_MINIMUM",
+                "net_reward_risk": net_rr,
+                "minimum_net_reward_risk": float(settings.signal_min_net_rr),
+            })
+            i += 1
+            continue
         if stop <= 0:
             skipped_signals.append({"index": i, "reason": "Calculated stop is not positive"})
             i += 1
@@ -259,6 +330,7 @@ def run_backtest(
             "notional": notional,
             "entry_index": i + 1,
             "entry_timestamp": candles[i + 1][0],
+            "signal_score": float(metrics.get("score", 0.0)),
         }
         exit_reference = None
         exit_reason = None
@@ -468,6 +540,8 @@ def run_backtest(
                 else "reported as unrealized; not added to realized balance"
             ),
             "max_holding_bars": max_holding_bars,
+            "mtf_confirmation": bool(candle_timeframe == "15m" and require_mtf_confirmation),
+            "higher_timeframe": higher_timeframe if candle_timeframe == "15m" and require_mtf_confirmation else None,
             "fee_rate_per_side": fee_rate,
             "slippage_bps_per_side": float(settings.slippage_bps),
             "funding": "not modeled",

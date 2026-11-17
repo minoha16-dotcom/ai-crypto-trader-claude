@@ -11,6 +11,7 @@ profitability.
 import math
 
 from .backtest import run_backtest
+from .data_validation import timeframe_milliseconds
 
 
 def _integer(name, value, minimum=0):
@@ -96,6 +97,16 @@ def _period_summary(result, starting_balance, candle_count):
         "volume_ratio_threshold": result.get("assumptions", {}).get(
             "volume_ratio_threshold"
         ),
+        "oos_trades": [
+            {
+                "r_multiple": float(trade.get("r_multiple", 0.0)),
+                "signal_score": float(trade.get("signal_score", 0.0)),
+                "entry_timestamp": trade.get("entry_timestamp"),
+                "exit_timestamp": trade.get("exit_timestamp"),
+                "pnl": float(trade.get("pnl", 0.0)),
+            }
+            for trade in trades
+        ],
     }
 
 
@@ -113,11 +124,21 @@ def _range(candles, start, end):
 def _evaluate_period(
     candles, start, end, warmup_bars, starting_balance,
     instrument, volume_ratio_threshold, max_holding_bars,
+    candle_timeframe=None, higher_timeframe_candles=None, higher_timeframe="4h",
+    require_mtf_confirmation=True,
 ):
     history_start = start - warmup_bars
     period_candles = candles[history_start:end]
     # run_backtest starts scoring at this index; all earlier rows are indicator
     # context only and cannot generate a trade in the evaluated period.
+    backtest_options = {}
+    if candle_timeframe == "15m":
+        backtest_options = {
+            "candle_timeframe": candle_timeframe,
+            "higher_timeframe_candles": higher_timeframe_candles,
+            "higher_timeframe": higher_timeframe,
+            "require_mtf_confirmation": require_mtf_confirmation,
+        }
     result = run_backtest(
         period_candles,
         starting_balance=starting_balance,
@@ -126,6 +147,7 @@ def _evaluate_period(
         start_index=warmup_bars,
         max_holding_bars=max_holding_bars,
         close_open_at_end=True,
+        **backtest_options,
     )
     return _period_summary(result, starting_balance, end - start)
 
@@ -137,7 +159,7 @@ def run_walk_forward_backtest(
     validation_bars=100,
     test_bars=100,
     step_bars=100,
-    warmup_bars=50,
+    warmup_bars=200,
     purge_bars=20,
     embargo_bars=None,
     max_holding_bars=20,
@@ -148,6 +170,10 @@ def run_walk_forward_backtest(
     volume_ratio_threshold=None,
     expected_candle_ms=None,
     max_missing_bars=0,
+    candle_timeframe=None,
+    higher_timeframe_candles=None,
+    higher_timeframe="4h",
+    require_mtf_confirmation=True,
 ):
     """Evaluate a fixed strategy in non-overlapping chronological test folds.
 
@@ -163,7 +189,7 @@ def run_walk_forward_backtest(
     validation_bars = _integer("validation_bars", validation_bars, 3)
     test_bars = _integer("test_bars", test_bars, 2)
     step_bars = _integer("step_bars", step_bars, 1)
-    warmup_bars = _integer("warmup_bars", warmup_bars, 50)
+    warmup_bars = _integer("warmup_bars", warmup_bars, 200)
     purge_bars = _integer("purge_bars", purge_bars, 0)
     max_holding_bars = _integer("max_holding_bars", max_holding_bars, 1)
     if embargo_bars is None:
@@ -201,6 +227,13 @@ def run_walk_forward_backtest(
             raise ValueError("volume_ratio_threshold must be finite and non-negative")
 
     _validate_candles(candles, expected_candle_ms, max_missing_bars)
+    if candle_timeframe == "15m" and require_mtf_confirmation:
+        if not isinstance(higher_timeframe_candles, (list, tuple)):
+            raise ValueError("15m walk-forward requires higher-timeframe OHLCV data")
+        higher_interval_ms = timeframe_milliseconds(higher_timeframe)
+        _validate_candles(higher_timeframe_candles, higher_interval_ms, 0)
+        if len(higher_timeframe_candles) < 200:
+            raise ValueError("At least 200 closed higher-timeframe candles are required")
     candle_count = len(candles)
     folds = []
     offset = 0
@@ -230,14 +263,18 @@ def run_walk_forward_backtest(
         train_result = _evaluate_period(
             candles, train_start, train_end, warmup_bars, starting_balance,
             instrument, volume_ratio_threshold, max_holding_bars,
+            candle_timeframe, higher_timeframe_candles, higher_timeframe,
+            require_mtf_confirmation,
         )
         validation_result = _evaluate_period(
             candles, validation_start, validation_end, warmup_bars, starting_balance,
             instrument, volume_ratio_threshold, max_holding_bars,
+            candle_timeframe, higher_timeframe_candles, higher_timeframe,
         )
         test_result = _evaluate_period(
             candles, test_start, test_end, warmup_bars, starting_balance,
             instrument, volume_ratio_threshold, max_holding_bars,
+            candle_timeframe, higher_timeframe_candles, higher_timeframe,
         )
 
         folds.append({
@@ -318,6 +355,8 @@ def run_walk_forward_backtest(
             "test_windows_overlap": False,
             "period_balances_reset_independently": True,
             "strategy_parameters": "fixed from backend Settings; no automatic tuning",
+            "mtf_confirmation": bool(candle_timeframe == "15m" and require_mtf_confirmation),
+            "higher_timeframe": higher_timeframe if candle_timeframe == "15m" and require_mtf_confirmation else None,
             "train_validation_role": (
                 "diagnostic in-sample and validation measurements; no parameter "
                 "selection is performed by this runner"

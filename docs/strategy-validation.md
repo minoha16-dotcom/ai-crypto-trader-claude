@@ -15,7 +15,7 @@ The runner's boundary policy is explicit and enforced:
   the bar that reaches this maximum, unless its stop or target exits first.
 - `purge_bars` must be at least `max_holding_bars`; its default is 20.
 - `embargo_bars` defaults to the greater of `warmup_bars` and
-  `max_holding_bars` (50 bars with the default warm-up of 50). A smaller
+  `max_holding_bars` (200 bars with the default EMA200 warm-up of 200). A smaller
   explicit value is rejected.
 - Every train, validation, and test simulation is independent and starts with
   a fresh balance. Any remaining position is force-closed at that period's
@@ -53,8 +53,76 @@ portfolio equity curve.
 Example:
 
 ```text
-GET /api/walk-forward?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1500&train_bars=250&validation_bars=100&test_bars=100&step_bars=100&warmup_bars=50&purge_bars=20&embargo_bars=50&max_holding_bars=20&window_mode=rolling&max_folds=10
+GET /api/walk-forward?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1500&train_bars=250&validation_bars=100&test_bars=100&step_bars=100&warmup_bars=200&purge_bars=20&embargo_bars=200&max_holding_bars=20&window_mode=rolling&max_folds=10
 ```
+
+
+## 0.1 Live scan data gate (Phase 1)
+
+The live scanner now requests 501 OHLCV rows and passes them through a
+fail-closed validation gate before indicator analysis. It retains the latest
+500 fully closed candles; a candle is closed only when its open timestamp plus
+the timeframe duration is no later than the current UTC clock. The forming
+candle is never analyzed.
+
+The gate rejects malformed/non-finite OHLCV, non-positive prices, negative
+volume, inconsistent high/low values, non-integral or misaligned timestamps,
+duplicate/out-of-order timestamps, and any missing timeframe interval. It
+also rejects fewer than 500 closed candles. Rejections are returned per
+symbol with `status=DATA_REJECTED`, a stable `reason_code`, and a diagnostic
+message; they are not persisted as technical WAIT signals.
+
+The 500-candle requirement is a warm-up/data-quality policy, not evidence that
+a strategy is profitable. It provides history beyond the 200-period EMA
+used by the current strategy rules. Exchange-specific timestamp alignment
+must be verified before adding further timeframes; weekly candles use the
+Monday UTC boundary.
+
+
+## 0.2 Strategy rules and live approval gate (Phases 2–5)
+
+The scanner and backtest feature engine now expose Wilder ADX, +DI/-DI,
+EMA20/50/200, RSI14, ATR14, ATR percent, and Volume Ratio. ADX below the
+configured threshold (20 by default) classifies the regime as ranging and
+blocks trend-following candidates. Direction is bullish only when +DI > -DI,
+EMA20 > EMA50, and close > EMA200; bearish requires the exact inverse.
+Insufficient EMA200 history is neutral. Hard gates are evaluated before
+scoring; the fixed 0–100 score only ranks candidates that pass those gates.
+
+The score has frozen initial weights: trend strength 25%, directional RSI
+20%, volume 15%, EMA alignment 20%, and price alignment 20%. These are
+engineering defaults, not empirically optimized weights. They must remain
+unchanged during the first OOS evaluation.
+
+A 15m LONG/SHORT candidate must also agree with the latest fully closed 4h
+candle. The 4h context must be trending and have the same bullish/bearish
+direction. Neutral, ranging, opposite-direction, or invalid higher-timeframe
+data blocks the candidate. Other scan timeframes do not yet apply this 15m/4h
+filter; compare 15m alone against 15m+4h in controlled walk-forward research
+before considering a different production default. The backtest and Walk-Forward APIs expose `mtf_confirmation=false` for the 15m-only baseline; production scanning does not expose this bypass.
+
+The trade plan uses a stop distance of max(2×ATR, 0.5% of price) and the
+configured gross reward/risk target. Both live analysis and the historical
+backtest apply a minimum estimated net reward/risk after round-trip taker fees
+and slippage. The backtest recalculates the plan from its simulated next-open
+entry; live scan values are indicative plans based on the last closed candle.
+Funding, spread dynamics, and order-book impact are still not modeled.
+
+Live signal emission is fail-closed by `backend/strategy_approval.json`.
+The committed artifact is `research_only` and contains no approved groups.
+An exact Exchange × Symbol × Market Type × Timeframe group requires:
+- at least 200 qualified examples for that independent group;
+- at least three valid walk-forward folds;
+- non-zero OOS trades and positive net expectancy after modeled costs;
+- a positive, adequately powered confidence interval for the pre-registered
+  uplift comparison;
+- a saved validation report ID, matching strategy version and configuration
+  fingerprint, and a non-expired approval entry.
+
+The approval loader rejects missing/invalid artifacts, unapproved groups,
+mismatched strategy/configuration fingerprints, missing report IDs, and expired
+approvals. The research runner still evaluates fixed rules; it does not train
+or tune a predictive model. No group is approved by this code change.
 
 ## 1. Objective and non-goals
 
@@ -155,9 +223,9 @@ Measure redundancy using only training data in each fold:
    out-of-sample information, not merely because it improves the training
    score.
 
-Do not add MACD or EMA 200 to engine-driven claims until they are implemented,
-tested, and exposed in the backend feature payload. Skills may discuss them as
-optional external chart indicators only when the source data is supplied.
+MACD remains outside the backend signal engine. EMA200 and +DI/-DI are now
+implemented and exposed in the backend feature payload; their predictive value
+is not established until the pre-registered OOS experiments are completed.
 
 ## 5. Skill, MCP, and backend responsibilities
 
@@ -193,3 +261,68 @@ consistent fee/risk assumptions with the existing paper engine.
 
 No threshold or strategy should be labelled validated until all pre-registered
 folds and ablations have been run and their out-of-sample results reviewed.
+
+
+## 4. Automated per-group research reports
+
+`scripts/run_hyperliquid_strategy_research.py` downloads historical Hyperliquid
+perpetual OHLCV from Vike's `/ohlcv/export` endpoint and evaluates each exact
+`Exchange × Symbol × Market Type × Timeframe` group independently. The default
+research window is **2026-10-16 00:00 UTC through 2026-11-16 00:00 UTC**. It
+downloads 200 lower-timeframe warm-up bars before the scoring window; for 15m
+groups it also downloads the preceding 200 closed 4h bars. Warm-up candles are
+not counted as qualified examples or scored as trades.
+
+The report includes the source and data SHA-256, actual date range, candle
+coverage, separated eligible signal events, fold boundaries and metrics,
+trade-level OOS R multiples and signal scores, net expectancy, profit factor,
+worst-fold drawdown, top-tercile uplift, bootstrap 95% confidence interval,
+and explicit pass/fail reasons. Qualified examples count each eligible signal candle, not statistically
+independent trades; adjacent samples may be autocorrelated and this count is
+not itself proof of effective sample size. The uplift interval uses a
+circular moving-block bootstrap over chronological OOS trades (5-trade blocks)
+to reduce, but not eliminate, dependence concerns. The top-tercile comparison
+is made on executed OOS trades, not on an unobserved hypothetical signal set.
+
+Acceptance requires at least 200 qualified examples, at least 3 folds, at
+least 30 OOS trades, positive net expectancy, a positive lower bound of the
+top-tercile uplift bootstrap interval, and no positions left open at fold
+boundaries. Every failed check is recorded in `rejection_reasons`.
+
+Run locally from the repository root (PowerShell):
+
+```powershell
+$env:VIKE_API_KEY = "your Vike key"
+python scripts/run_hyperliquid_strategy_research.py
+```
+
+The key is read only from the process environment; never commit it, put it in
+`.env.example`, or paste it into chat. The default output is stored under
+`data/strategy-research/hyperliquid/` and should remain local/ignored. The
+script writes a report and a **research-only** candidate artifact. It does not
+overwrite the active scanner approval file.
+
+A separate `scripts/collect_hyperliquid_top100.py` collector handles wallet-level
+research. It uses the `pnl_cohort` label as of 2026-10-15 23:00 UTC (the
+2026-10-16 00:00 UTC positions snapshot), ranks only cohort-labelled wallets
+by realized PnL over the preceding 30 UTC days, and requires exactly 100
+positive-PnL wallets. It then downloads their 2026-10-16 through 2026-11-16
+fills, the latest pre-period position snapshot per wallet/asset, and their
+wallet-specific funding payments. It writes a manifest and local Parquet/JSON
+files; the opening snapshot seeds later fill replay.
+
+Install the optional research dependency and run the collector before the
+OHLCV walk-forward runner:
+
+```powershell
+python -m pip install -r requirements-research.txt
+$env:VIKE_API_KEY = "your Vike key"
+python scripts/collect_hyperliquid_top100.py
+python scripts/run_hyperliquid_strategy_research.py
+```
+
+The two datasets are collected separately: the top-100 wallet fills/funding
+are not yet consumed as training labels by the fixed-rule walk-forward
+evaluator. They must be replayed and reconciled before they can be described as
+a trained model. Hyperliquid is not one of the application's configured live
+exchange adapters, so its research reports cannot enable live scanner signals.
