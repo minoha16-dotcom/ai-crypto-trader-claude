@@ -359,6 +359,8 @@ def _append_fills_for_day(
     parquet_path: Path,
     selected_wallets: list[str],
     spool_dir: Path,
+    first_seen_assets: dict[str, set[str]],
+    initial_nonzero_positions: dict[str, int],
 ) -> tuple[int, int, dict[str, int]]:
     lazy = pl.scan_parquet(parquet_path)
     schema = set(lazy.collect_schema().names())
@@ -384,6 +386,18 @@ def _append_fills_for_day(
         total += 1
         if row.get("start_position") is None:
             invalid_start_position[address] = invalid_start_position.get(address, 0) + 1
+        # The first observed fill per wallet/asset must start from flat. A
+        # non-zero start means the position predates our warm-up archive and
+        # cannot be reconstructed with an auditable entry/fee lifecycle.
+        seen_assets = first_seen_assets.setdefault(address, set())
+        if asset not in seen_assets:
+            seen_assets.add(asset)
+            try:
+                first_start = float(row.get("start_position"))
+            except (TypeError, ValueError, OverflowError):
+                first_start = float("nan")
+            if not (abs(first_start) <= 1e-10):
+                initial_nonzero_positions[address] = initial_nonzero_positions.get(address, 0) + 1
         wallet_rows.setdefault(address, []).append(_native_fill(row))
 
     # Append small wallet batches, not the full market-wide archive.
@@ -456,6 +470,7 @@ def _collect(
     collector_code_sha: str,
     output: Path,
     pause_seconds: float,
+    history_warmup_days: int,
 ) -> None:
     snapshot_bytes = snapshot_path.read_bytes()
     snapshot_sha = hashlib.sha256(snapshot_bytes).hexdigest()
@@ -487,7 +502,8 @@ def _collect(
     else:
         current_catalogue_sha = catalogue_sha
 
-    daily_dates = _daily_dates(start_ms, end_ms)
+    history_start_ms = start_ms - history_warmup_days * 24 * 60 * 60 * 1000
+    daily_dates = _daily_dates(history_start_ms, end_ms)
     by_date = {str(row.get("date")): row for row in catalogue.get("dates", [])}
     missing_dates = [
         day for day in daily_dates
@@ -512,6 +528,8 @@ def _collect(
     }
     archive_records = []
     downloaded_rows = 0
+    first_seen_assets: dict[str, set[str]] = {}
+    initial_nonzero_positions: dict[str, int] = {}
     with tempfile.TemporaryDirectory(prefix="vike-fills-") as temp_dir:
         temp = Path(temp_dir)
         spool_dir = temp / "wallet-fills"
@@ -528,6 +546,8 @@ def _collect(
                 parquet_path=raw_path,
                 selected_wallets=wallets,
                 spool_dir=spool_dir,
+                first_seen_assets=first_seen_assets,
+                initial_nonzero_positions=initial_nonzero_positions,
             )
             raw_path.unlink(missing_ok=True)
             downloaded_rows += day_rows
@@ -571,10 +591,49 @@ def _collect(
             twap_fills, twap_status = _fetch_twap_slice_fills(
                 address, start_ms, end_ms, timeout=60.0
             )
+            # Vike's daily fill archive can already include TWAP executions.
+            # Deduplicate the separate native slice feed by the exchange fill
+            # identity before the preparer reconstructs positions.
+            known_keys = set()
+            if fills_path.exists():
+                with fills_path.open("r", encoding="utf-8") as source:
+                    for line in source:
+                        if not line.strip():
+                            continue
+                        archived = json.loads(line)
+                        known_keys.add((
+                            str(archived.get("tid") or ""),
+                            str(archived.get("coin") or ""),
+                            int(archived.get("time") or 0),
+                            str(archived.get("oid") or ""),
+                        ))
+            deduplicated_twap = []
+            duplicate_twap_rows = 0
+            for wrapper in twap_fills:
+                fill = wrapper.get("fill") if isinstance(wrapper, dict) else None
+                if not isinstance(fill, dict):
+                    deduplicated_twap.append(wrapper)
+                    continue
+                key = (
+                    str(fill.get("tid") or ""),
+                    str(fill.get("coin") or ""),
+                    int(fill.get("time") or 0),
+                    str(fill.get("oid") or ""),
+                )
+                if key in known_keys:
+                    duplicate_twap_rows += 1
+                    continue
+                known_keys.add(key)
+                deduplicated_twap.append(wrapper)
+            twap_fills = deduplicated_twap
+            twap_status["duplicate_rows_already_in_vike_archive"] = duplicate_twap_rows
             if pause_seconds:
                 time.sleep(pause_seconds)
             orders, order_status = _fetch_historical_orders(address, timeout=60.0)
-            fill_complete = wallet_stats[address]["missing_start_position"] == 0
+            fill_complete = (
+                wallet_stats[address]["missing_start_position"] == 0
+                and initial_nonzero_positions.get(address, 0) == 0
+            )
             complete = (
                 fill_complete
                 and funding_status.get("complete", False)
@@ -598,6 +657,8 @@ def _collect(
                     "daily_archive_files": len(daily_dates),
                     "daily_archive_files_complete": len(archive_records) == len(daily_dates),
                     "missing_start_position_rows": wallet_stats[address]["missing_start_position"],
+                    "pre_window_positions_already_open_at_warmup_start": initial_nonzero_positions.get(address, 0),
+                    "history_warmup_start_utc": _iso(history_start_ms),
                     "complete": fill_complete and len(archive_records) == len(daily_dates),
                     "source": "Vike daily fills Parquet archive",
                 },
@@ -626,6 +687,8 @@ def _collect(
             "raw_daily_archive_files": archive_records,
             "raw_fills_rows_for_selected_wallets": downloaded_rows,
             "fills_archive_dates": daily_dates,
+            "fills_history_start_utc": _iso(history_start_ms),
+            "history_warmup_days": history_warmup_days,
             "data_start_utc": _iso(start_ms),
             "data_end_utc": _iso(end_ms),
             "collector_code_sha": collector_code_sha.lower(),
@@ -670,6 +733,12 @@ def main() -> int:
     parser.add_argument("--wallet-limit", type=int, default=100)
     parser.add_argument("--out", default="artifacts/hyperliquid-vike-raw-dataset.json")
     parser.add_argument("--pause-seconds", type=float, default=0.0)
+    parser.add_argument(
+        "--history-warmup-days",
+        type=int,
+        default=30,
+        help="Days of pre-window fills used only to reconstruct positions opened before the observation window.",
+    )
     args = parser.parse_args()
 
     try:
@@ -685,6 +754,8 @@ def main() -> int:
         raise SystemExit("--wallet-limit must be between 1 and 1000")
     if args.pause_seconds < 0:
         raise SystemExit("--pause-seconds cannot be negative")
+    if args.history_warmup_days < 1 or args.history_warmup_days > 180:
+        raise SystemExit("--history-warmup-days must be between 1 and 180")
     if not re.fullmatch(r"[0-9a-fA-F]{7,40}", args.collector_code_sha):
         raise SystemExit("--collector-code-sha must be a 7-40 character Git SHA")
     if args.snapshot_only == bool(args.snapshot_file):
@@ -718,6 +789,7 @@ def main() -> int:
         collector_code_sha=args.collector_code_sha,
         output=output,
         pause_seconds=args.pause_seconds,
+        history_warmup_days=args.history_warmup_days,
     )
     return 0
 
