@@ -60,6 +60,17 @@ def approval_for_group(exchange, symbol, market_type, timeframe, path=ARTIFACT_P
             and group.get("validation_report_id")
             and group.get("strategy_version") == artifact.get("strategy_version")
             and group.get("config_hash") == expected_hash
+            and group.get("validation_status") == "accepted"
+            and isinstance(group.get("qualified_examples"), int)
+            and group.get("qualified_examples") >= 200
+            and isinstance(group.get("walk_forward_folds"), int)
+            and group.get("walk_forward_folds") >= 3
+            and isinstance(group.get("oos_trade_count"), int)
+            and group.get("oos_trade_count") > 0
+            and isinstance(group.get("net_expectancy_r"), (int, float))
+            and group.get("net_expectancy_r") > 0
+            and isinstance(group.get("uplift_ci_lower"), (int, float))
+            and group.get("uplift_ci_lower") > 0
             and group.get("expires_at")
         ):
             continue
