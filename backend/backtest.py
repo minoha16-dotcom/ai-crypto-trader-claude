@@ -597,6 +597,7 @@ def run_backtest(
                 if contract_type != "spot" else "base-asset units"
             ),
             "profit_factor": "null when there are no losing trades",
+            "direction_filter": direction_filter,
             "evaluation_start_index": start_index,
             "warmup_candles_excluded_from_scoring": start_index,
         },
