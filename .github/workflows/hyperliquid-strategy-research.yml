@@ -30,10 +30,11 @@ jobs:
       RESEARCH_SYMBOLS: ${{ inputs.symbols }}
       RESEARCH_TIMEFRAMES: ${{ inputs.timeframes }}
     steps:
-      - name: Check out selected branch
+      - name: Check out research branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref }}
+          # Always use the branch that contains the research scripts and dependencies.
+          ref: feature/scan-data-validation-v1
 
       - name: Validate Vike secret is configured
         shell: bash
