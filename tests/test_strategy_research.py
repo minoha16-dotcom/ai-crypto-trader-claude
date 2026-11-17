@@ -142,3 +142,30 @@ def test_signal_rejection_diagnostics_group_by_fold_direction_and_reason():
         "1": 1, "2": 1
     }
     assert grouped[("SHORT", "MTF_DIRECTION_NOT_CONFIRMED", "execution_gate")]["count"] == 1
+
+
+
+def test_qualified_examples_can_be_counted_per_direction(monkeypatch):
+    def alternating_signal(history):
+        side = "LONG" if len(history) % 2 == 0 else "SHORT"
+        return {"signal": side}
+
+    monkeypatch.setattr(strategy_research, "analyze", alternating_signal)
+    candles = [
+        [index * 3_600_000, 100, 101, 99, 100, 100]
+        for index in range(206)
+    ]
+
+    both = strategy_research.count_qualified_examples(
+        candles, "1h", start_index=200
+    )
+    longs = strategy_research.count_qualified_examples(
+        candles, "1h", start_index=200, direction_filter="LONG"
+    )
+    shorts = strategy_research.count_qualified_examples(
+        candles, "1h", start_index=200, direction_filter="SHORT"
+    )
+
+    assert both == 6
+    assert longs == 3
+    assert shorts == 3
