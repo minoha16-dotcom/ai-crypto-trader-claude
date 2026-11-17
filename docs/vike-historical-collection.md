@@ -19,7 +19,7 @@ the repository secret of the same name and never prints it.
 
 The cohort is selected from the daily Vike positions archive for 2026-10-15,
 using rows whose snapshot_ts fall in 23:00–24:00 UTC and whose pnl_cohort is
-3x smart. Vike documents this archived label as known at the start of the row's
+3x_smart. Vike documents this archived label as known at the start of the row's
 clock hour and based on fills strictly before that hour. The selection cutoff
 is therefore 2026-10-15 23:00 UTC, strictly before the 2026-10-16 observation
 start. This is a historical point-in-time label, not a current leaderboard
@@ -66,7 +66,7 @@ password manager or by loading your local .env. Do not print the secret.
 ~~~powershell
 $sha = git rev-parse HEAD
 
-python scripts/fetch_vike_hyperliquid_dataset.py --snapshot-only --start 2026-10-16T00:00:00Z --end 2026-11-16T00:00:00Z --cohort-label "3x smart" --wallet-limit 200 --collector-code-sha $sha --out artifacts/vike-cohort-snapshot.json
+python scripts/fetch_vike_hyperliquid_dataset.py --snapshot-only --start 2026-10-16T00:00:00Z --end 2026-11-16T00:00:00Z --cohort-label "3x_smart" --wallet-limit 200 --collector-code-sha $sha --out artifacts/vike-cohort-snapshot.json
 
 python scripts/fetch_vike_hyperliquid_dataset.py --snapshot-file artifacts/vike-cohort-snapshot.json --start 2026-10-16T00:00:00Z --end 2026-11-16T00:00:00Z --history-warmup-days 17 --collector-code-sha $sha --out artifacts/hyperliquid-vike-raw-dataset.json
 
