@@ -167,6 +167,21 @@ def run_backtest(
         stop = raw_entry - distance if side == "LONG" else raw_entry + distance
         reward_distance = distance * float(settings.reward_risk_ratio)
         target = raw_entry + reward_distance if side == "LONG" else raw_entry - reward_distance
+        estimated_round_trip_cost = raw_entry * (
+            2.0 * fee_rate + 2.0 * slippage
+        )
+        net_reward = reward_distance - estimated_round_trip_cost
+        net_risk = distance + estimated_round_trip_cost
+        net_rr = net_reward / net_risk if net_risk > 0 else 0.0
+        if net_rr < float(settings.signal_min_net_rr):
+            skipped_signals.append({
+                "index": i,
+                "reason": "NET_REWARD_RISK_BELOW_MINIMUM",
+                "net_reward_risk": net_rr,
+                "minimum_net_reward_risk": float(settings.signal_min_net_rr),
+            })
+            i += 1
+            continue
         if stop <= 0:
             skipped_signals.append({"index": i, "reason": "Calculated stop is not positive"})
             i += 1
