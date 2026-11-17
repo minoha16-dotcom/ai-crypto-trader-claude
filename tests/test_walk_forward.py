@@ -59,14 +59,14 @@ def test_rolling_walk_forward_creates_chronological_non_overlapping_test_folds(m
     calls = []
     monkeypatch.setattr(walk_forward, "run_backtest", fake_backtest(calls))
     result = walk_forward.run_walk_forward_backtest(
-        candles(420),
+        candles(1000),
         train_bars=100,
         validation_bars=40,
         test_bars=40,
         step_bars=40,
-        warmup_bars=50,
+        warmup_bars=200,
         purge_bars=20,
-        embargo_bars=50,
+        embargo_bars=200,
         window_mode="rolling",
         max_folds=2,
         starting_balance=1000.0,
@@ -76,29 +76,29 @@ def test_rolling_walk_forward_creates_chronological_non_overlapping_test_folds(m
     assert result["fold_count"] == 2
     assert result["max_folds_reached"] is True
     first, second = result["folds"]
-    assert first["ranges"]["train"]["start_index"] == 50
-    assert first["ranges"]["train"]["end_index_exclusive"] == 130
+    assert first["ranges"]["train"]["start_index"] == 500
+    assert first["ranges"]["train"]["end_index_exclusive"] == 280
     assert first["ranges"]["validation"]["start_index"] == 200
-    assert first["ranges"]["validation"]["end_index_exclusive"] == 220
-    assert first["ranges"]["test"]["start_index"] == 290
-    assert first["ranges"]["test"]["end_index_exclusive"] == 330
+    assert first["ranges"]["validation"]["end_index_exclusive"] == 520
+    assert first["ranges"]["test"]["start_index"] == 740
+    assert first["ranges"]["test"]["end_index_exclusive"] == 780
     assert second["ranges"]["test"]["start_index"] == 330
-    assert second["ranges"]["test"]["end_index_exclusive"] == 370
+    assert second["ranges"]["test"]["end_index_exclusive"] == 820
     assert result["policy"]["test_windows_overlap"] is False
     assert result["aggregate_test"]["total_closed_trades"] == 2
     assert result["aggregate_test"]["trade_weighted_win_rate_pct"] == 100.0
 
     assert len(calls) == 6
     for call in calls:
-        assert call["start_index"] == 50
+        assert call["start_index"] == 200
         assert call["volume_ratio_threshold"] == 0.8
         assert len(call["rows"]) > call["start_index"]
     # The runner passes only historical warm-up plus rows through that period's
     # exclusive end. No candle after a scored range enters its backtest call.
     assert calls[0]["rows"][0][0] == 0
-    assert calls[0]["rows"][-1][0] == 129_000
-    assert calls[2]["rows"][0][0] == 240_000
-    assert calls[2]["rows"][-1][0] == 329_000
+    assert calls[0]["rows"][-1][0] == 279_000
+    assert calls[2]["rows"][0][0] == 540_000
+    assert calls[2]["rows"][-1][0] == 779_000
     assert all(call["max_holding_bars"] == 20 for call in calls)
     assert all(call["close_open_at_end"] is True for call in calls)
 
@@ -107,14 +107,14 @@ def test_expanding_mode_keeps_training_start_fixed_and_grows_training_window(mon
     calls = []
     monkeypatch.setattr(walk_forward, "run_backtest", fake_backtest(calls))
     result = walk_forward.run_walk_forward_backtest(
-        candles(400),
+        candles(1000),
         train_bars=100,
         validation_bars=40,
         test_bars=40,
         step_bars=40,
-        warmup_bars=50,
+        warmup_bars=200,
         purge_bars=20,
-        embargo_bars=50,
+        embargo_bars=200,
         window_mode="expanding",
         max_folds=2,
     )
@@ -220,9 +220,9 @@ def test_aggregate_test_counts_breakeven_trades_separately(monkeypatch):
         validation_bars=40,
         test_bars=40,
         step_bars=40,
-        warmup_bars=50,
+        warmup_bars=200,
         purge_bars=20,
-        embargo_bars=50,
+        embargo_bars=200,
         max_folds=1,
     )
 
@@ -236,7 +236,7 @@ def test_aggregate_test_counts_breakeven_trades_separately(monkeypatch):
 def test_walk_forward_integration_uses_real_backtest_and_closes_period_boundaries(monkeypatch):
     rows = [
         [index * 1000, 100.0, 101.0, 99.0, 100.0, 100.0]
-        for index in range(320)
+        for index in range(1000)
     ]
 
     def always_long(_history, volume_ratio_threshold=None):
@@ -261,9 +261,9 @@ def test_walk_forward_integration_uses_real_backtest_and_closes_period_boundarie
         validation_bars=40,
         test_bars=30,
         step_bars=30,
-        warmup_bars=50,
+        warmup_bars=200,
         purge_bars=3,
-        embargo_bars=50,
+        embargo_bars=200,
         max_holding_bars=3,
         max_folds=1,
         starting_balance=10000.0,
