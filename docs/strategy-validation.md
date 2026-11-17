@@ -265,9 +265,9 @@ folds and ablations have been run and their out-of-sample results reviewed.
 
 ## 4. Automated per-group research reports
 
-\`scripts/run_hyperliquid_strategy_research.py\` downloads historical Hyperliquid
-perpetual OHLCV from Vike's \`/ohlcv/export\` endpoint and evaluates each exact
-\`Exchange × Symbol × Market Type × Timeframe\` group independently. The default
+`scripts/run_hyperliquid_strategy_research.py` downloads historical Hyperliquid
+perpetual OHLCV from Vike's `/ohlcv/export` endpoint and evaluates each exact
+`Exchange × Symbol × Market Type × Timeframe` group independently. The default
 research window is **2026-10-16 00:00 UTC through 2026-11-16 00:00 UTC**. It
 downloads 200 lower-timeframe warm-up bars before the scoring window; for 15m
 groups it also downloads the preceding 200 closed 4h bars. Warm-up candles are
@@ -287,23 +287,23 @@ is made on executed OOS trades, not on an unobserved hypothetical signal set.
 Acceptance requires at least 200 qualified examples, at least 3 folds, at
 least 30 OOS trades, positive net expectancy, a positive lower bound of the
 top-tercile uplift bootstrap interval, and no positions left open at fold
-boundaries. Every failed check is recorded in \`rejection_reasons\`.
+boundaries. Every failed check is recorded in `rejection_reasons`.
 
 Run locally from the repository root (PowerShell):
 
-\`\`\`powershell
+```powershell
 $env:VIKE_API_KEY = "your Vike key"
 python scripts/run_hyperliquid_strategy_research.py
-\`\`\`
+```
 
 The key is read only from the process environment; never commit it, put it in
-\`.env.example\`, or paste it into chat. The default output is stored under
-\`data/strategy-research/hyperliquid/\` and should remain local/ignored. The
+`.env.example`, or paste it into chat. The default output is stored under
+`data/strategy-research/hyperliquid/` and should remain local/ignored. The
 script writes a report and a **research-only** candidate artifact. It does not
 overwrite the active scanner approval file.
 
-A separate \`scripts/collect_hyperliquid_top100.py\` collector handles wallet-level
-research. It uses the \`pnl_cohort\` label as of 2026-10-15 23:00 UTC (the
+A separate `scripts/collect_hyperliquid_top100.py` collector handles wallet-level
+research. It uses the `pnl_cohort` label as of 2026-10-15 23:00 UTC (the
 2026-10-16 00:00 UTC positions snapshot), ranks only cohort-labelled wallets
 by realized PnL over the preceding 30 UTC days, and requires exactly 100
 positive-PnL wallets. It then downloads their 2026-10-16 through 2026-11-16
@@ -314,12 +314,12 @@ files; the opening snapshot seeds later fill replay.
 Install the optional research dependency and run the collector before the
 OHLCV walk-forward runner:
 
-\`\`\`powershell
+```powershell
 python -m pip install -r requirements-research.txt
 $env:VIKE_API_KEY = "your Vike key"
 python scripts/collect_hyperliquid_top100.py
 python scripts/run_hyperliquid_strategy_research.py
-\`\`\`
+```
 
 The two datasets are collected separately: the top-100 wallet fills/funding
 are not yet consumed as training labels by the fixed-rule walk-forward
