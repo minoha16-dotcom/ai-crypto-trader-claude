@@ -201,7 +201,7 @@ def run_backtest(
                             "adx14", "plus_di14", "minus_di14", "ema20",
                             "ema50", "ema200", "rsi14", "atr14", "atr_pct",
                             "volume_ratio", "volume_ratio_threshold",
-                            "net_reward_risk",
+                            "net_reward_risk", "long_gate_diagnostics",
                         )
                     },
                 })
