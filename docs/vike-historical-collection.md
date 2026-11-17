@@ -19,7 +19,8 @@ the repository secret of the same name and never prints it.
 
 The cohort is selected from the daily Vike positions archive for 2026-10-15,
 using rows whose snapshot_ts fall in 23:00–24:00 UTC and whose pnl_cohort is
-3x_smart. Vike documents this archived label as known at the start of the row's
+the stored display label "3x smart". The collector accepts the API slug
+"3x_smart" and normalizes it to that archive value. Vike documents this archived label as known at the start of the row's
 clock hour and based on fills strictly before that hour. The selection cutoff
 is therefore 2026-10-15 23:00 UTC, strictly before the 2026-10-16 observation
 start. This is a historical point-in-time label, not a current leaderboard
