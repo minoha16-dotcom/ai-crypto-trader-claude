@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Collect a point-in-time Hyperliquid trader cohort and its historical fills from Vike.
 
-The cohort is selected from Vike's historical hourly positions archive in the UTC hour
+The cohort is selected from Vike's historical positions archive in the UTC hour
 immediately before the requested observation window. The archived pnl_cohort
 label is defined at the start of that clock hour, so it does not use outcomes
 from the observation window. Vike archives are processed one day at a time;
@@ -260,22 +260,22 @@ def _write_snapshot(
         (row for row in catalogue.get("dates", []) if row.get("date") == source_day),
         None,
     )
-    if not day_entry or not isinstance(day_entry.get("streams", {}).get("positions_hourly"), dict):
-        raise RuntimeError(f"Vike has no historical hourly positions archive for {source_day}")
-    expected_bytes = int(day_entry["streams"]["positions_hourly"].get("bytes") or 0)
+    if not day_entry or not isinstance(day_entry.get("streams", {}).get("positions"), dict):
+        raise RuntimeError(f"Vike has no historical positions archive for {source_day}")
+    expected_bytes = int(day_entry["streams"]["positions"].get("bytes") or 0)
 
     with tempfile.TemporaryDirectory(prefix="vike-cohort-") as temp_dir:
-        positions_path = Path(temp_dir) / f"positions-hourly-{source_day}.parquet"
+        positions_path = Path(temp_dir) / f"positions-{source_day}.parquet"
         retrieved_at = datetime.now(timezone.utc)
         written, positions_sha, link = _archive_download(
-            session, api_key, "positions_hourly", source_day, positions_path, expected_bytes
+            session, api_key, "positions", source_day, positions_path, expected_bytes
         )
         lazy = pl.scan_parquet(positions_path)
         schema = lazy.collect_schema().names()
         needed = {"wallet", "snapshot_ts", "pnl_cohort"}
         if not needed.issubset(schema):
             raise RuntimeError(
-                "Vike hourly positions archive is missing required cohort columns: "
+                "Vike positions archive is missing required cohort columns: "
                 + ", ".join(sorted(needed - set(schema)))
             )
         wallets, cohort_selection_as_of_ms, distinct_snapshot_count = _select_wallets_from_positions(
@@ -305,7 +305,7 @@ def _write_snapshot(
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "wallets": wallets,
         "manifest": {
-            "source_provider": "Vike Hyperliquid historical hourly positions archive",
+            "source_provider": "Vike Hyperliquid historical positions archive",
             "source_url": ARCHIVE_URL,
             "source_metadata_url": DATASETS_URL,
             "source_license": VENDOR_LICENSE_NOTE,
@@ -724,7 +724,7 @@ def _collect(
         retrieved_at = datetime.now(timezone.utc).isoformat()
         manifest = {
             **frozen,
-            "source_provider": "Vike Hyperliquid daily fills/hourly positions archives + Hyperliquid public Info API",
+            "source_provider": "Vike Hyperliquid daily fills/positions archives + Hyperliquid public Info API",
             "source_url": ARCHIVE_URL,
             "source_metadata_url": DATASETS_URL,
             "source_license": VENDOR_LICENSE_NOTE,
