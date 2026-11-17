@@ -57,7 +57,7 @@ jobs:
 
       - name: Run strategy and backtest regression tests
         run: |
-          python -m pytest -q tests/test_backtest.py tests/test_walk_forward.py tests/test_strategy_research.py
+          python -m pytest -q tests/test_backtest.py tests/test_walk_forward.py tests/test_strategy_research.py tests/test_signal_gate_diagnostics.py
 
       - name: Collect Hyperliquid OHLCV and run per-group Walk-Forward
         env:
