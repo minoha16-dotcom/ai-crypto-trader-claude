@@ -90,7 +90,12 @@ def run_backtest(
         higher_interval_ms = timeframe_milliseconds(higher_timeframe)
         previous_timestamp = None
         for index, candle in enumerate(higher_timeframe_candles):
-            timestamp = int(float(candle[0]))
+            raw_timestamp = float(candle[0])
+            if not math.isfinite(raw_timestamp) or not raw_timestamp.is_integer():
+                raise ValueError(f"Higher-timeframe candle {index} has an invalid timestamp")
+            timestamp = int(raw_timestamp)
+            if timestamp <= 0 or timestamp % higher_interval_ms != 0:
+                raise ValueError(f"Higher-timeframe candle {index} is not timeframe-aligned")
             if previous_timestamp is not None:
                 delta = timestamp - previous_timestamp
                 if delta != higher_interval_ms:
