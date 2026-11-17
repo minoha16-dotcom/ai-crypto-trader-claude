@@ -326,3 +326,17 @@ are not yet consumed as training labels by the fixed-rule walk-forward
 evaluator. They must be replayed and reconciled before they can be described as
 a trained model. Hyperliquid is not one of the application's configured live
 exchange adapters, so its research reports cannot enable live scanner signals.
+
+## 0.3 OOS loss diagnostics
+
+Each walk-forward OOS trade record preserves its direction, exit reason, holding
+duration, gross P&L, modeled costs, and net P&L. The per-group research report
+summarizes valid OOS outcomes by LONG/SHORT and by exit reason, including win
+rate and mean R, plus the share of STOP and STOP_GAP exits.
+
+These summaries are diagnostic only: they do not change the frozen strategy,
+select parameters, or approve a group. Interpret them alongside each fold's
+sample count and market regime. A high stop-exit share alone is not evidence
+that a wider stop improves expectancy; stop-distance alternatives must be
+registered as separate candidates and compared on untouched chronological
+OOS data with the same cost assumptions.
