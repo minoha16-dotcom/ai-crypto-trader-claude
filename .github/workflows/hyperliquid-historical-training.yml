@@ -16,11 +16,11 @@ on:
       cohort_label:
         description: Historical point-in-time Vike PnL cohort
         required: true
-        default: "3x smart"
+        default: "3x_smart"
         type: choice
         options:
-          - "3x smart"
-          - "2x smart"
+          - "3x_smart"
+          - "2x_smart"
           - "smart"
       wallet_limit:
         description: Maximum wallets sampled from the cohort
