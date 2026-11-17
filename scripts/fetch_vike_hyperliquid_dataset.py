@@ -104,6 +104,66 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _atomic_json(path: Path, value: Any) -> str:
+    """Write JSON and its digest atomically; return the digest of stored bytes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8") + b"\n"
+    tmp = path.with_name(path.name + f".{os.getpid()}.tmp")
+    try:
+        with tmp.open("wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    return hashlib.sha256(data).hexdigest()
+
+
+def _read_checkpoint(path: Path, *, binding: dict[str, Any]) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        raw = path.read_bytes()
+        document = json.loads(raw.decode("utf-8"))
+        payload = document["payload"]
+        expected = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        ).hexdigest()
+        if document.get("sha256") != expected:
+            raise ValueError("checkpoint checksum mismatch")
+        if payload.get("binding") != binding:
+            raise ValueError("checkpoint parameters, snapshot, or collector code changed")
+        return payload
+    except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"invalid or incompatible checkpoint at {path}: {exc}") from None
+
+
+def _write_checkpoint(path: Path, *, binding: dict[str, Any], state: dict[str, Any]) -> None:
+    payload = {"binding": binding, "state": state}
+    digest = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    ).hexdigest()
+    _atomic_json(path, {"payload": payload, "sha256": digest})
+
+
+def _retry_call(call, *, attempts: int = 5, base_delay: float = 1.0):
+    """Bounded retry for transient public API failures; never logs request data."""
+    for attempt in range(attempts):
+        try:
+            return call()
+        except requests.RequestException as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status not in (408, 425, 429, 500, 502, 503, 504) or attempt + 1 == attempts:
+                raise
+            retry_after = getattr(getattr(exc, "response", None), "headers", {}).get("Retry-After")
+            try:
+                delay = min(120.0, max(0.0, float(retry_after))) if retry_after else min(60.0, base_delay * (2 ** attempt))
+            except (TypeError, ValueError):
+                delay = min(60.0, base_delay * (2 ** attempt))
+            time.sleep(delay)
+
+
 def _history_start_ms(start_ms: int, history_warmup_days: int) -> int:
     history_warmup_days = int(history_warmup_days)
     if history_warmup_days < 1 or history_warmup_days > 180:
@@ -492,7 +552,9 @@ def _write_raw_dataset(
     manifest: dict[str, Any],
 ) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    with output.open("w", encoding="utf-8") as handle:
+    tmp_output = output.with_name(output.name + f".{os.getpid()}.tmp")
+    try:
+      with tmp_output.open("w", encoding="utf-8") as handle:
         handle.write('{"dataset_version":2,"created_at_utc":')
         handle.write(json.dumps(datetime.now(timezone.utc).isoformat()))
         handle.write(',"manifest":')
@@ -532,6 +594,9 @@ def _write_raw_dataset(
                 json.dump(meta[key], handle, ensure_ascii=False, allow_nan=False)
             handle.write("}")
         handle.write("]}\n")
+      os.replace(tmp_output, output)
+    finally:
+      tmp_output.unlink(missing_ok=True)
 
 
 def _collect(
@@ -543,6 +608,7 @@ def _collect(
     snapshot_path: Path,
     collector_code_sha: str,
     output: Path,
+    state_dir: Path,
     pause_seconds: float,
     history_warmup_days: int,
 ) -> None:
@@ -555,6 +621,8 @@ def _collect(
     if snapshot.get("snapshot_only") is not True or snapshot.get("snapshot_kind") != "historical_archive_causal":
         raise SystemExit("--snapshot-file must be created by this collector's historical --snapshot-only stage")
     frozen = snapshot.get("manifest") or {}
+    if str(frozen.get("cohort_snapshot_code_sha") or "").lower() != collector_code_sha.lower():
+        raise SystemExit("snapshot collector code SHA does not match --collector-code-sha")
     if _utc_ms(frozen.get("data_start_utc", ""), "snapshot.data_start_utc") != start_ms:
         raise SystemExit("collection start must match the frozen snapshot")
     if _utc_ms(frozen.get("data_end_utc", ""), "snapshot.data_end_utc") != end_ms:
@@ -565,6 +633,17 @@ def _collect(
     wallets = [str(value).lower() for value in snapshot.get("wallets", [])]
     if not wallets or any(not ADDRESS_RE.fullmatch(value) for value in wallets):
         raise SystemExit("snapshot contains no valid wallet addresses")
+
+    binding = {
+        "snapshot_sha256": snapshot_sha,
+        "start_ms": start_ms,
+        "end_ms": end_ms,
+        "history_warmup_days": history_warmup_days,
+        "wallets_sha256": hashlib.sha256("\n".join(wallets).encode("ascii")).hexdigest(),
+        "collector_code_sha": collector_code_sha.lower(),
+    }
+    state_dir.mkdir(parents=True, exist_ok=True)
+    _read_checkpoint(state_dir / "run.checkpoint.json", binding=binding)
 
     catalogue_bytes, catalogue = _vike_json(session, DATASETS_URL, api_key)
     catalogue_sha = hashlib.sha256(catalogue_bytes).hexdigest()
@@ -611,11 +690,24 @@ def _collect(
         for index, day in enumerate(daily_dates, start=1):
             fill_stream = by_date[day]["streams"]["fills"]
             expected_bytes = int(fill_stream.get("bytes") or 0)
-            raw_path = temp / f"fills-{day}.parquet"
+            raw_path = state_dir / "archive_cache" / f"fills-{day}.parquet"
+            day_binding = {**binding, "kind": "archive_day", "day": day, "expected_bytes": expected_bytes}
+            day_marker = state_dir / "days" / f"{day}.checkpoint.json"
             started = time.monotonic()
-            written, day_sha, link = _archive_download(
-                session, api_key, "fills", day, raw_path, expected_bytes
-            )
+            saved_day = _read_checkpoint(day_marker, binding=day_binding)
+            if saved_day is not None:
+                day_state = saved_day["state"]
+                written, day_sha = int(day_state["bytes"]), str(day_state["archive_sha256"])
+                if not raw_path.is_file() or _sha256_file(raw_path) != day_sha or raw_path.stat().st_size != written:
+                    raise RuntimeError(f"checkpoint archive integrity mismatch for {day}")
+                link = {"rows": fill_stream.get("rows")}
+            else:
+                raw_path.parent.mkdir(parents=True, exist_ok=True)
+                raw_path.unlink(missing_ok=True)
+                written, day_sha, link = _retry_call(lambda: _archive_download(
+                    session, api_key, "fills", day, raw_path, expected_bytes
+                ))
+                _write_checkpoint(day_marker, binding=day_binding, state={"bytes": written, "archive_sha256": day_sha})
             day_rows, missing_start = _append_fills_for_day(
                 parquet_path=raw_path,
                 selected_wallets=wallets,
@@ -623,7 +715,6 @@ def _collect(
                 first_seen_assets=first_seen_assets,
                 initial_nonzero_positions=initial_nonzero_positions,
             )
-            raw_path.unlink(missing_ok=True)
             downloaded_rows += day_rows
             for address, count in missing_start.items():
                 wallet_stats[address]["missing_start_position"] += count
@@ -652,18 +743,24 @@ def _collect(
                     for _ in handle:
                         fill_rows += 1
             wallet_stats[address]["fills_rows"] = fill_rows
-            funding, funding_status = _fetch_time_range(
-                address,
-                "userFunding",
-                start_ms,
-                end_ms,
-                timeout=60.0,
-                pause_seconds=pause_seconds,
-            )
+            def wallet_phase(name, fetch):
+                phase_binding = {**binding, "kind": "wallet_api", "wallet": address, "phase": name}
+                phase_path = state_dir / "wallet_api" / address / f"{name}.checkpoint.json"
+                saved = _read_checkpoint(phase_path, binding=phase_binding)
+                if saved is not None:
+                    return saved["state"]["result"]
+                result = _retry_call(fetch)
+                _write_checkpoint(phase_path, binding=phase_binding, state={"result": result})
+                return result
+
+            funding_result = wallet_phase("funding", lambda: _fetch_time_range(
+                address, "userFunding", start_ms, end_ms, timeout=60.0, pause_seconds=pause_seconds
+            ))
+            funding, funding_status = funding_result
             if pause_seconds:
                 time.sleep(pause_seconds)
-            twap_fills, twap_status = _fetch_twap_slice_fills(
-                address, start_ms, end_ms, timeout=60.0
+            twap_fills, twap_status = wallet_phase(
+                "twap", lambda: _fetch_twap_slice_fills(address, start_ms, end_ms, timeout=60.0)
             )
             # Vike's daily fill archive can already include TWAP executions.
             # Deduplicate the separate native slice feed by the exchange fill
@@ -703,7 +800,9 @@ def _collect(
             twap_status["duplicate_rows_already_in_vike_archive"] = duplicate_twap_rows
             if pause_seconds:
                 time.sleep(pause_seconds)
-            orders, order_status = _fetch_historical_orders(address, timeout=60.0)
+            orders, order_status = wallet_phase(
+                "orders", lambda: _fetch_historical_orders(address, timeout=60.0)
+            )
             fill_complete = (
                 wallet_stats[address]["missing_start_position"] == 0
                 and initial_nonzero_positions.get(address, 0) == 0
@@ -788,6 +887,31 @@ def _collect(
             wallet_metadata=wallet_stats,
             manifest=manifest,
         )
+        output_sha = _sha256_file(output)
+        expected_days = _daily_dates(history_start_ms, end_ms)
+        if daily_dates != expected_days or len(archive_records) != len(expected_days):
+            raise RuntimeError("collection did not verify every requested UTC archive day")
+        if any(not re.fullmatch(r"[0-9a-f]{64}", str(row.get("archive_sha256", ""))) for row in archive_records):
+            raise RuntimeError("collection contains an archive without a verified SHA-256")
+        completion = {
+            "schema_version": 1,
+            "complete": True,
+            "data_start_utc": _iso(start_ms),
+            "data_end_utc": _iso(end_ms),
+            "history_start_utc": _iso(history_start_ms),
+            "snapshot_sha256": snapshot_sha,
+            "collector_code_sha": collector_code_sha.lower(),
+            "dataset_sha256": output_sha,
+            "archive_days": [{"date": row["date"], "sha256": row["archive_sha256"]} for row in archive_records],
+            "wallet_count": len(wallets),
+            "wallets_complete": sum(1 for item in wallet_stats.values() if item["complete"]),
+        }
+        _atomic_json(output.parent / "vike-collection-complete.json", completion)
+        _write_checkpoint(
+            state_dir / "run.checkpoint.json",
+            binding=binding,
+            state={"complete": True, "dataset_sha256": output_sha, "archive_days": daily_dates, "wallet_count": len(wallets)},
+        )
 
     print(f"OUTPUT {output}")
     print(f"RAW_DATASET_SHA256 {_sha256_file(output)}")
@@ -806,6 +930,7 @@ def main() -> int:
     parser.add_argument("--cohort-label", default=DEFAULT_COHORT, help="Vike point-in-time pnl_cohort label")
     parser.add_argument("--wallet-limit", type=int, default=100)
     parser.add_argument("--out", default="artifacts/hyperliquid-vike-raw-dataset.json")
+    parser.add_argument("--state-dir", default=".vike-checkpoints", help="Local private checkpoint directory; do not upload or commit it")
     parser.add_argument("--pause-seconds", type=float, default=0.0)
     parser.add_argument(
         "--history-warmup-days",
@@ -865,6 +990,7 @@ def main() -> int:
         snapshot_path=Path(args.snapshot_file),
         collector_code_sha=args.collector_code_sha,
         output=output,
+        state_dir=Path(args.state_dir),
         pause_seconds=args.pause_seconds,
         history_warmup_days=args.history_warmup_days,
     )
@@ -873,3 +999,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
