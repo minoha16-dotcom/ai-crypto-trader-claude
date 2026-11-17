@@ -137,6 +137,8 @@ The canonical example is .env.example. Values below are defaults; environment va
 | SIGNAL_MIN_ADX | 20.0 | Minimum ADX filter |
 | SIGNAL_MIN_VOLUME_RATIO | 1.0 | Default Volume Ratio filter |
 | SIGNAL_MIN_ATR_PCT | 0.1 | Minimum ATR percent filter |
+| SIGNAL_MIN_NET_RR | 1.2 | Minimum estimated net reward/risk after round-trip costs |
+| SIGNAL_HIGHER_TIMEFRAME | 4h | Confirmation timeframe for 15m scans |
 | TAKER_FEE_RATE | 0.0006 | Estimated fee per side |
 | SLIPPAGE_BPS | 2.0 | Estimated slippage per side |
 
@@ -144,17 +146,36 @@ The default open-position limit remains 3 and the default reward/risk ratio rema
 
 ## Indicators and signal rules
 
-The backend currently calculates:
+The backend calculates EMA 20/50/200, RSI 14, ATR 14, Wilder ADX 14 with
++DI/-DI, ATR percent, and Volume Ratio. Live technical scans require 500
+validated closed candles. The forming candle is excluded; invalid OHLCV,
+duplicates, out-of-order timestamps, gaps, or insufficient closed history
+cause an explicit data rejection.
 
-- EMA 20 and EMA 50.
-- RSI 14.
-- ATR 14 and ATR percent.
-- ADX 14.
-- Volume Ratio: latest closed-candle volume divided by the mean volume of the preceding 20 closed candles.
+Signal eligibility separates **regime** from **direction**:
 
-The directional score uses three votes: EMA 20 versus EMA 50, RSI zone (55/45), and close versus EMA 20. ADX, ATR percent, and Volume Ratio are filters, not extra directional votes. EMA alignment and price relative to EMA 20 may be correlated and should not be treated as independent confirmations.
+- ADX below 20 is a ranging regime and blocks trend-following signals.
+- Bullish direction requires +DI > -DI, EMA20 > EMA50, and close > EMA200.
+- Bearish direction requires -DI > +DI, EMA20 < EMA50, and close < EMA200.
+- Any disagreement or missing EMA200 history is neutral and cannot emit a signal.
+- 15m candidates additionally require the latest fully closed 4h candle to
+  show a trending regime and the same direction. Neutral, ranging, opposite,
+  or invalid 4h context blocks the candidate.
 
-MACD and EMA 200 are not part of the current backend signal engine. The Technical Analysis Skill distinguishes optional external chart analysis from backend-generated metrics.
+Hard filters run before ranking. The fixed score only ranks eligible candidates;
+it cannot rescue a rejected one. The score combines trend strength, directional
+RSI, volume, EMA alignment, and price alignment. A trade plan uses a 2×ATR
+stop (with a 0.5% price floor) and the configured reward/risk target. The
+estimated net reward/risk is calculated after modeled round-trip taker fees and
+slippage; candidates below SIGNAL_MIN_NET_RR are rejected.
+
+Live scan signals are fail-closed behind
+[`backend/strategy_approval.json`](backend/strategy_approval.json). The
+committed artifact is deliberately `research_only` with no approved groups.
+A group can emit signals only after it has an exact Exchange × Symbol × Market
+Type × Timeframe approval, a validation report ID, matching strategy version
+and configuration fingerprint, and an unexpired approval. This repository
+does not claim that the new rule set is profitable or approved.
 
 ## Backtesting and Volume Ratio experiments
 
@@ -190,7 +211,7 @@ trade-horizon controls:
 Example request:
 
 ~~~text
-GET /api/walk-forward?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1500&train_bars=250&validation_bars=100&test_bars=100&step_bars=100&warmup_bars=50&purge_bars=20&embargo_bars=50&max_holding_bars=20&window_mode=rolling&max_folds=10
+GET /api/walk-forward?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1500&train_bars=250&validation_bars=100&test_bars=100&step_bars=100&warmup_bars=200&purge_bars=20&embargo_bars=200&max_holding_bars=20&window_mode=rolling&max_folds=10
 ~~~
 
 The holding limit and forced boundary exit are walk-forward evaluation
