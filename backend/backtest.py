@@ -149,6 +149,7 @@ def run_backtest(
 
     trades = []
     skipped_signals = []
+    decision_metadata = {}
     equity_curve = []
     equity = starting_balance  # realized balance; open P&L is not booked
     peak_equity = equity
@@ -166,6 +167,10 @@ def run_backtest(
             )
         )
         side = metrics["signal"]
+        decision_metadata[i] = {
+            "timestamp": candles[i][0],
+            "side": side if side in ("LONG", "SHORT") else str(metrics.get("direction", "neutral")).upper(),
+        }
         if side not in ("LONG", "SHORT"):
             # Preserve every closed-candle rejection, including WAIT decisions.
             # One event is emitted per reason so multi-gate rejections remain auditable.
@@ -510,6 +515,13 @@ def run_backtest(
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else None
     unrealized = float(open_position["unrealized_pnl"]) if open_position else 0.0
     ending_equity = equity + unrealized
+
+    # Normalize metadata for all later-stage rejection events as well, so
+    # walk-forward diagnostics can group MTF/risk/venue skips by direction.
+    for skipped in skipped_signals:
+        metadata = decision_metadata.get(skipped.get("index"), {})
+        skipped.setdefault("timestamp", metadata.get("timestamp"))
+        skipped.setdefault("side", metadata.get("side", "unknown"))
 
     return {
         "trades": trades,
