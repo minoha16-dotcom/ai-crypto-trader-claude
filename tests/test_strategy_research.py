@@ -169,3 +169,33 @@ def test_qualified_examples_can_be_counted_per_direction(monkeypatch):
     assert both == 6
     assert longs == 3
     assert shorts == 3
+
+
+
+def test_signal_rule_variant_has_independent_reproducible_hash(monkeypatch):
+    monkeypatch.setattr(strategy_research, "count_qualified_examples", lambda *a, **k: 250)
+    monkeypatch.setattr(
+        strategy_research, "run_walk_forward_backtest",
+        lambda *a, **k: _fake_wf(),
+    )
+    candles = [
+        [index * 3_600_000, 100, 101, 99, 100, 100]
+        for index in range(1400)
+    ]
+    baseline = strategy_research.evaluate_strategy_group(
+        exchange="hyperliquid", symbol="BTC", market_type="futures",
+        timeframe="1h", candles=candles, bootstrap_replicates=100,
+        direction_filter="LONG", experiment_name="BASELINE_LONG",
+    )
+    variant = strategy_research.evaluate_strategy_group(
+        exchange="hyperliquid", symbol="BTC", market_type="futures",
+        timeframe="1h", candles=candles, bootstrap_replicates=100,
+        direction_filter="LONG",
+        signal_overrides={"long_require_ema200": False},
+        experiment_name="LONG_NO_EMA200",
+    )
+    assert baseline["base_config_hash"] == variant["base_config_hash"]
+    assert baseline["config_hash"] != variant["config_hash"]
+    assert variant["experiment"]["signal_overrides"] == {
+        "long_require_ema200": False
+    }
