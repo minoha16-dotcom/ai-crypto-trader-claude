@@ -64,8 +64,8 @@ jobs:
 
       - name: Collect Hyperliquid OHLCV and run per-group Walk-Forward
         env:
-          RESEARCH_SYMBOLS: ${{ inputs.symbols }}
-          RESEARCH_TIMEFRAMES: ${{ inputs.timeframes }}
+          RESEARCH_SYMBOLS: ${{ inputs.symbols || 'BTC,ETH,SOL,HYPE' }}
+          RESEARCH_TIMEFRAMES: ${{ inputs.timeframes || '15m,4h' }}
         run: |
           python scripts/run_hyperliquid_strategy_research.py \
             --start "2026-10-18T00:00:00Z" \
