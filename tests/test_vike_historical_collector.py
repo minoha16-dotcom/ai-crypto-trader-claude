@@ -23,18 +23,18 @@ def test_point_in_time_cohort_filters_exact_previous_utc_hour_and_label():
         {
             "wallet": _address("1"),
             "snapshot_ts": hour_start,
-            "pnl_cohort": "3x smart",
+            "pnl_cohort": "3x_smart",
         },
         {
             "wallet": _address("2"),
             "snapshot_ts": datetime(2026, 10, 15, 23, 59, tzinfo=timezone.utc),
-            "pnl_cohort": "3x smart",
+            "pnl_cohort": "3x_smart",
         },
         {
             # Prior hour is outside the selection hour.
             "wallet": _address("3"),
             "snapshot_ts": datetime(2026, 10, 15, 22, 59, tzinfo=timezone.utc),
-            "pnl_cohort": "3x smart",
+            "pnl_cohort": "3x_smart",
         },
         {
             # A different cohort in the correct hour is not selected.
@@ -46,7 +46,7 @@ def test_point_in_time_cohort_filters_exact_previous_utc_hour_and_label():
             # End timestamp is exclusive.
             "wallet": _address("5"),
             "snapshot_ts": datetime(2026, 10, 16, 0, 0, tzinfo=timezone.utc),
-            "pnl_cohort": "3x smart",
+            "pnl_cohort": "3x_smart",
         },
     ]
     frame = pl.DataFrame(rows).lazy()
@@ -55,7 +55,7 @@ def test_point_in_time_cohort_filters_exact_previous_utc_hour_and_label():
         frame,
         selection_start_ms=int(hour_start.timestamp() * 1000),
         selection_end_ms=int(datetime(2026, 10, 16, 0, 0, tzinfo=timezone.utc).timestamp() * 1000),
-        cohort_label="3x smart",
+        cohort_label="3x_smart",
         wallet_limit=10,
     )
 
@@ -82,6 +82,7 @@ def test_fill_direction_rejects_unknown_or_nonpositive_size():
     assert _fill_direction(None, 1.0, "buy") == "UNCLASSIFIED"
     assert _fill_direction(0.0, 0.0, "buy") == "UNCLASSIFIED"
     assert _fill_direction(0.0, 1.0, "unknown") == "UNCLASSIFIED"
+    assert _fill_direction(1.0, 2.0, "sell") == "UNCLASSIFIED"
 
 
 def test_native_fill_maps_vike_archive_schema_to_hyperliquid_position_schema():
