@@ -21,37 +21,35 @@ def test_point_in_time_cohort_filters_exact_previous_utc_hour_and_label():
     hour_start = datetime(2026, 10, 15, 23, 0, tzinfo=timezone.utc)
     rows = [
         {
-            "wallet": _address("1"),
-            "snapshot_ts": hour_start,
+            "wallet": _address(str(index)),
+            "snapshot_ts": datetime(2026, 10, 15, 23, minute, tzinfo=timezone.utc),
             "pnl_cohort": "3x_smart",
-        },
-        {
-            "wallet": _address("2"),
-            "snapshot_ts": datetime(2026, 10, 15, 23, 59, tzinfo=timezone.utc),
-            "pnl_cohort": "3x_smart",
-        },
+        }
+        for index, minute in enumerate((0, 10, 20, 30, 40, 59), start=1)
+    ]
+    rows.extend([
         {
             # Prior hour is outside the selection hour.
-            "wallet": _address("3"),
+            "wallet": _address("7"),
             "snapshot_ts": datetime(2026, 10, 15, 22, 59, tzinfo=timezone.utc),
             "pnl_cohort": "3x_smart",
         },
         {
             # A different cohort in the correct hour is not selected.
-            "wallet": _address("4"),
+            "wallet": _address("8"),
             "snapshot_ts": datetime(2026, 10, 15, 23, 15, tzinfo=timezone.utc),
-            "pnl_cohort": "2x smart",
+            "pnl_cohort": "2x_smart",
         },
         {
             # End timestamp is exclusive.
-            "wallet": _address("5"),
+            "wallet": _address("9"),
             "snapshot_ts": datetime(2026, 10, 16, 0, 0, tzinfo=timezone.utc),
             "pnl_cohort": "3x_smart",
         },
-    ]
+    ])
     frame = pl.DataFrame(rows).lazy()
 
-    selected = _select_wallets_from_positions(
+    selected, selection_cutoff_ms, snapshot_count = _select_wallets_from_positions(
         frame,
         selection_start_ms=int(hour_start.timestamp() * 1000),
         selection_end_ms=int(datetime(2026, 10, 16, 0, 0, tzinfo=timezone.utc).timestamp() * 1000),
@@ -59,9 +57,10 @@ def test_point_in_time_cohort_filters_exact_previous_utc_hour_and_label():
         wallet_limit=10,
     )
 
-    assert set(selected) == {_address("1"), _address("2")}
-    assert len(selected) == 2
-
+    assert set(selected) == {_address(str(index)) for index in range(1, 7)}
+    assert len(selected) == 6
+    assert selection_cutoff_ms == int(datetime(2026, 10, 15, 23, 59, tzinfo=timezone.utc).timestamp() * 1000)
+    assert snapshot_count == 6
 
 @pytest.mark.parametrize(
     ("start_position", "size", "side", "expected"),
