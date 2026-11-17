@@ -116,3 +116,29 @@ def test_approval_artifact_contains_only_accepted_exact_groups(monkeypatch):
     assert artifact["status"] == "approved"
     assert len(artifact["approved_groups"]) == 1
     assert artifact["approved_groups"][0]["validation_report_id"] == "wf-accepted"
+
+
+def test_signal_rejection_diagnostics_group_by_fold_direction_and_reason():
+    folds = [
+        {"test": {"skipped_signal_diagnostics": [
+            {"side": "NEUTRAL", "reason": "REGIME_RANGING", "stage": "signal_eligibility"},
+            {"side": "NEUTRAL", "reason": "VOLUME_BELOW_AVERAGE", "stage": "signal_eligibility"},
+            {"side": "SHORT", "reason": "MTF_DIRECTION_NOT_CONFIRMED", "stage": "execution_gate"},
+        ]}},
+        {"test": {"skipped_signal_diagnostics": [
+            {"side": "NEUTRAL", "reason": "REGIME_RANGING", "stage": "signal_eligibility"},
+        ]}},
+    ]
+
+    diagnostics = strategy_research._signal_rejection_diagnostics(folds)
+
+    assert diagnostics["total_rejected_decisions"] == 4
+    grouped = {
+        (row["direction"], row["reason"], row["stage"]): row
+        for row in diagnostics["grouped_by_direction_reason_stage"]
+    }
+    assert grouped[("NEUTRAL", "REGIME_RANGING", "signal_eligibility")]["count"] == 2
+    assert grouped[("NEUTRAL", "REGIME_RANGING", "signal_eligibility")]["fold_counts"] == {
+        "1": 1, "2": 1
+    }
+    assert grouped[("SHORT", "MTF_DIRECTION_NOT_CONFIRMED", "execution_gate")]["count"] == 1
