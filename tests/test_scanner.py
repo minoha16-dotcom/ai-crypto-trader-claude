@@ -41,6 +41,7 @@ def test_futures_scan_persists_canonical_symbol(monkeypatch):
     monkeypatch.setattr(scanner, "analyze", lambda candles: metrics)
     monkeypatch.setattr(scanner, "connect", lambda: FakeConnection())
     monkeypatch.setattr(scanner, "archive_expired_signals", lambda: 0)
+    monkeypatch.setattr(scanner, "approval_for_group", lambda *args: (True, None, {"strategy_version": "test"}))
     monkeypatch.setattr(
         scanner, "validate_scan_candles",
         lambda candles, timeframe, min_candles: [[i * 3_600_000, 100, 102, 99, 101, 1000] for i in range(1, 501)],
