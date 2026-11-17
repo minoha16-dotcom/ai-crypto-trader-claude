@@ -98,6 +98,29 @@ def adx(candles, period=14):
     return directional_indicators(candles, period)["adx14"]
 
 
+def market_context(candles):
+    """Classify a timeframe using its latest supplied (already closed) candle."""
+    if len(candles) < 200:
+        raise ValueError("At least 200 candles required for EMA200 market context")
+    closes = [float(candle[4]) for candle in candles]
+    ema20, ema50, ema200 = ema(closes, 20), ema(closes, 50), ema(closes, 200)
+    dm = directional_indicators(candles)
+    regime = "trending" if dm["adx14"] >= float(settings.signal_min_adx) else "ranging"
+    bullish = (
+        dm["plus_di14"] > dm["minus_di14"] and ema20 > ema50 and closes[-1] > ema200
+    )
+    bearish = (
+        dm["minus_di14"] > dm["plus_di14"] and ema20 < ema50 and closes[-1] < ema200
+    )
+    direction = "bullish" if bullish else "bearish" if bearish else "neutral"
+    return {
+        "regime": regime, "direction": direction,
+        "adx14": dm["adx14"], "plus_di14": dm["plus_di14"],
+        "minus_di14": dm["minus_di14"], "ema20": ema20,
+        "ema50": ema50, "ema200": ema200, "price": closes[-1],
+    }
+
+
 def analyze(candles, volume_ratio_threshold=None):
     """Apply hard eligibility gates first; score only eligible trend candidates."""
     if len(candles) < 200:
