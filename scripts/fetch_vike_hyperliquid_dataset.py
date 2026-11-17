@@ -135,8 +135,14 @@ def _archive_download(
         raise RuntimeError(f"Vike did not return a valid signed download link for {dataset} {day}")
 
     # The signed URL is a bearer credential. Never print or store it in metadata.
-    response = session.get(signed_url, stream=True, timeout=(20, 300))
-    response.raise_for_status()
+    try:
+        response = session.get(signed_url, stream=True, timeout=(20, 300))
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        suffix = f" (HTTP {status})" if status else ""
+        # Do not surface the signed URL: it is itself a temporary bearer token.
+        raise RuntimeError(f"Vike archive download failed for {dataset} {day}{suffix}") from None
     digest = hashlib.sha256()
     written = 0
     try:
