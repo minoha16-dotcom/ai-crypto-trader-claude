@@ -23,7 +23,7 @@ def test_point_in_time_cohort_filters_exact_previous_utc_hour_and_label():
         {
             "wallet": _address(str(index)),
             "snapshot_ts": datetime(2026, 10, 15, 23, minute, tzinfo=timezone.utc),
-            "pnl_cohort": "3x_smart",
+            "pnl_cohort": "3x smart",
         }
         for index, minute in enumerate((0, 10, 20, 30, 40, 59), start=1)
     ]
@@ -32,19 +32,19 @@ def test_point_in_time_cohort_filters_exact_previous_utc_hour_and_label():
             # Prior hour is outside the selection hour.
             "wallet": _address("7"),
             "snapshot_ts": datetime(2026, 10, 15, 22, 59, tzinfo=timezone.utc),
-            "pnl_cohort": "3x_smart",
+            "pnl_cohort": "3x smart",
         },
         {
             # A different cohort in the correct hour is not selected.
             "wallet": _address("8"),
             "snapshot_ts": datetime(2026, 10, 15, 23, 15, tzinfo=timezone.utc),
-            "pnl_cohort": "2x_smart",
+            "pnl_cohort": "2x smart",
         },
         {
             # End timestamp is exclusive.
             "wallet": _address("9"),
             "snapshot_ts": datetime(2026, 10, 16, 0, 0, tzinfo=timezone.utc),
-            "pnl_cohort": "3x_smart",
+            "pnl_cohort": "3x smart",
         },
     ])
     frame = pl.DataFrame(rows).lazy()
@@ -53,7 +53,7 @@ def test_point_in_time_cohort_filters_exact_previous_utc_hour_and_label():
         frame,
         selection_start_ms=int(hour_start.timestamp() * 1000),
         selection_end_ms=int(datetime(2026, 10, 16, 0, 0, tzinfo=timezone.utc).timestamp() * 1000),
-        cohort_label="3x_smart",
+        cohort_label="3x smart",
         wallet_limit=10,
     )
 
