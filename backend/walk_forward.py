@@ -11,6 +11,7 @@ profitability.
 import math
 
 from .backtest import run_backtest
+from .data_validation import timeframe_milliseconds
 
 
 def _integer(name, value, minimum=0):
@@ -113,11 +114,19 @@ def _range(candles, start, end):
 def _evaluate_period(
     candles, start, end, warmup_bars, starting_balance,
     instrument, volume_ratio_threshold, max_holding_bars,
+    candle_timeframe=None, higher_timeframe_candles=None, higher_timeframe="4h",
 ):
     history_start = start - warmup_bars
     period_candles = candles[history_start:end]
     # run_backtest starts scoring at this index; all earlier rows are indicator
     # context only and cannot generate a trade in the evaluated period.
+    backtest_options = {}
+    if candle_timeframe == "15m":
+        backtest_options = {
+            "candle_timeframe": candle_timeframe,
+            "higher_timeframe_candles": higher_timeframe_candles,
+            "higher_timeframe": higher_timeframe,
+        }
     result = run_backtest(
         period_candles,
         starting_balance=starting_balance,
@@ -126,6 +135,7 @@ def _evaluate_period(
         start_index=warmup_bars,
         max_holding_bars=max_holding_bars,
         close_open_at_end=True,
+        **backtest_options,
     )
     return _period_summary(result, starting_balance, end - start)
 
@@ -148,6 +158,9 @@ def run_walk_forward_backtest(
     volume_ratio_threshold=None,
     expected_candle_ms=None,
     max_missing_bars=0,
+    candle_timeframe=None,
+    higher_timeframe_candles=None,
+    higher_timeframe="4h",
 ):
     """Evaluate a fixed strategy in non-overlapping chronological test folds.
 
@@ -201,6 +214,13 @@ def run_walk_forward_backtest(
             raise ValueError("volume_ratio_threshold must be finite and non-negative")
 
     _validate_candles(candles, expected_candle_ms, max_missing_bars)
+    if candle_timeframe == "15m":
+        if not isinstance(higher_timeframe_candles, (list, tuple)):
+            raise ValueError("15m walk-forward requires higher-timeframe OHLCV data")
+        higher_interval_ms = timeframe_milliseconds(higher_timeframe)
+        _validate_candles(higher_timeframe_candles, higher_interval_ms, 0)
+        if len(higher_timeframe_candles) < 200:
+            raise ValueError("At least 200 closed higher-timeframe candles are required")
     candle_count = len(candles)
     folds = []
     offset = 0
@@ -230,14 +250,17 @@ def run_walk_forward_backtest(
         train_result = _evaluate_period(
             candles, train_start, train_end, warmup_bars, starting_balance,
             instrument, volume_ratio_threshold, max_holding_bars,
+            candle_timeframe, higher_timeframe_candles, higher_timeframe,
         )
         validation_result = _evaluate_period(
             candles, validation_start, validation_end, warmup_bars, starting_balance,
             instrument, volume_ratio_threshold, max_holding_bars,
+            candle_timeframe, higher_timeframe_candles, higher_timeframe,
         )
         test_result = _evaluate_period(
             candles, test_start, test_end, warmup_bars, starting_balance,
             instrument, volume_ratio_threshold, max_holding_bars,
+            candle_timeframe, higher_timeframe_candles, higher_timeframe,
         )
 
         folds.append({
