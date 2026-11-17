@@ -208,23 +208,22 @@ def _select_wallets_from_positions(
             & (pl.col("snapshot_ts") < pl.lit(end))
             & (pl.col("pnl_cohort") == cohort_label)
         )
-        .group_by("wallet")
-        .agg(pl.col("snapshot_ts").max().alias("last_seen_in_selection_hour"))
+        .select("wallet", "snapshot_ts")
         .drop_nulls()
         .collect(engine="streaming")
     )
     wallets = sorted(
         {
-            str(row[0]).lower()
-            for row in selected.iter_rows()
-            if ADDRESS_RE.fullmatch(str(row[0]).lower())
+            str(address).lower()
+            for address in selected["wallet"].unique().to_list()
+            if ADDRESS_RE.fullmatch(str(address).lower())
         },
         key=lambda address: hashlib.sha256(
             ("ai-crypto-v1|" + address).encode("ascii")
         ).hexdigest(),
     )
-    latest_snapshot = selected["last_seen_in_selection_hour"].max()
-    distinct_snapshot_count = selected["last_seen_in_selection_hour"].n_unique()
+    latest_snapshot = selected["snapshot_ts"].max()
+    distinct_snapshot_count = selected["snapshot_ts"].n_unique()
     if latest_snapshot is None:
         return [], None, int(distinct_snapshot_count)
     return (
@@ -716,7 +715,7 @@ def _collect(
                 "training_eligible": False,
             })
             print(
-                f"WALLET {index}/{len(wallets)} {address[:10]}…: "
+                f"WALLET {index}/{len(wallets)}: "
                 f"{fill_rows} fills, {len(funding)} funding rows, "
                 f"{len(orders)} orders, {'COMPLETE_RAW' if complete else 'INCOMPLETE_RAW'}"
             )
