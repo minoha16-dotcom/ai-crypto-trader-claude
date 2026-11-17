@@ -134,7 +134,8 @@ def analyze(candles, volume_ratio_threshold=None):
     if not math.isfinite(threshold) or threshold < 0:
         raise ValueError("volume_ratio_threshold must be finite and non-negative")
 
-    ema20, ema50, ema200 = ema(closes, 20), ema(closes, 50), ema(closes, 200)
+    ema20, ema50 = ema(closes, 20), ema(closes, 50)
+    ema200 = ema(closes, 200) if len(closes) >= 200 else None
     strength, volatility, last = rsi(closes), atr(candles), closes[-1]
     dm = directional_indicators(candles)
     volumes = [float(candle[5]) for candle in candles]
