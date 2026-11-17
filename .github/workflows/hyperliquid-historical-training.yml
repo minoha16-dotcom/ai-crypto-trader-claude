@@ -37,7 +37,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: hyperliquid-historical-advisor-\${{ github.ref }}
+  group: hyperliquid-historical-advisor-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -62,7 +62,7 @@ jobs:
 
       - name: Freeze the historical point-in-time cohort
         env:
-          VIKE_API_KEY: \${{ secrets.VIKE_API_KEY }}
+          VIKE_API_KEY: ${{ secrets.VIKE_API_KEY }}
         run: |
           set -euo pipefail
           mkdir -p artifacts
@@ -70,23 +70,23 @@ jobs:
           echo "CODE_SHA=$CODE_SHA" >> "$GITHUB_ENV"
           python scripts/fetch_vike_hyperliquid_dataset.py \
             --snapshot-only \
-            --start "\${{ inputs.start }}" \
-            --end "\${{ inputs.end }}" \
-            --cohort-label "\${{ inputs.cohort_label }}" \
-            --wallet-limit "\${{ inputs.wallet_limit }}" \
+            --start "${{ inputs.start }}" \
+            --end "${{ inputs.end }}" \
+            --cohort-label "${{ inputs.cohort_label }}" \
+            --wallet-limit "${{ inputs.wallet_limit }}" \
             --collector-code-sha "$CODE_SHA" \
             --out artifacts/vike-cohort-snapshot.json
 
       - name: Collect historical fills and accounting evidence
         env:
-          VIKE_API_KEY: \${{ secrets.VIKE_API_KEY }}
+          VIKE_API_KEY: ${{ secrets.VIKE_API_KEY }}
         run: |
           set -euo pipefail
           python scripts/fetch_vike_hyperliquid_dataset.py \
             --snapshot-file artifacts/vike-cohort-snapshot.json \
-            --start "\${{ inputs.start }}" \
-            --end "\${{ inputs.end }}" \
-            --history-warmup-days "\${{ inputs.history_warmup_days }}" \
+            --start "${{ inputs.start }}" \
+            --end "${{ inputs.end }}" \
+            --history-warmup-days "${{ inputs.history_warmup_days }}" \
             --collector-code-sha "$CODE_SHA" \
             --out artifacts/hyperliquid-vike-raw-dataset.json
 
@@ -154,7 +154,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hyperliquid-advisor-approval-\${{ github.run_number }}
+          name: hyperliquid-advisor-approval-${{ github.run_number }}
           path: |
             artifacts/advisor-models/advisor-model-approval.json
             artifacts/advisor-models/advisor-model-*.json
