@@ -41,6 +41,10 @@ def test_futures_scan_persists_canonical_symbol(monkeypatch):
     monkeypatch.setattr(scanner, "analyze", lambda candles: metrics)
     monkeypatch.setattr(scanner, "connect", lambda: FakeConnection())
     monkeypatch.setattr(scanner, "archive_expired_signals", lambda: 0)
+    monkeypatch.setattr(
+        scanner, "validate_scan_candles",
+        lambda candles, timeframe, min_candles: [[i * 3_600_000, 100, 102, 99, 101, 1000] for i in range(1, 501)],
+    )
 
     results = asyncio.run(scanner.scan(
         "binance",
@@ -52,6 +56,8 @@ def test_futures_scan_persists_canonical_symbol(monkeypatch):
     assert results[0]["symbol"] == "BTC/USDT:USDT"
     assert results[0]["signal_id"] == 42
     assert observed["ohlcv_symbol"] == "BTC/USDT:USDT"
+    assert results[0]["data_status"] == "VALIDATED"
+    assert results[0]["closed_candles"] == 500
     assert observed["params"][1] == "BTC/USDT:USDT"
     saved_payload = json.loads(observed["params"][-1])
     assert saved_payload["symbol"] == "BTC/USDT:USDT"
