@@ -167,6 +167,25 @@ def run_backtest(
         )
         side = metrics["signal"]
         if side not in ("LONG", "SHORT"):
+            # Preserve every closed-candle rejection, including WAIT decisions.
+            # One event is emitted per reason so multi-gate rejections remain auditable.
+            rejection_reasons = metrics.get("filter_reasons") or ["NO_DIRECTIONAL_SIGNAL"]
+            for rejection_reason in rejection_reasons:
+                skipped_signals.append({
+                    "index": i,
+                    "timestamp": candles[i][0],
+                    "side": metrics.get("direction", "neutral").upper(),
+                    "reason": rejection_reason,
+                    "stage": "signal_eligibility",
+                    "indicators": {
+                        key: metrics.get(key) for key in (
+                            "adx14", "plus_di14", "minus_di14", "ema20",
+                            "ema50", "ema200", "rsi14", "atr14", "atr_pct",
+                            "volume_ratio", "volume_ratio_threshold",
+                            "net_reward_risk",
+                        )
+                    },
+                })
             i += 1
             continue
         if candle_timeframe == "15m" and require_mtf_confirmation:
