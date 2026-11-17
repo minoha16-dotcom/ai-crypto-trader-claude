@@ -116,6 +116,46 @@ def count_qualified_examples(candles, timeframe, higher_timeframe_candles=None,
     return qualified
 
 
+def _trade_diagnostics(trades):
+    """Summarize OOS outcomes by direction and exit mechanism without tuning rules."""
+    by_side = {}
+    by_exit_reason = {}
+    for trade in trades:
+        side = trade.get("side") or "unknown"
+        reason = trade.get("exit_reason") or "unknown"
+        for bucket, key in ((by_side, side), (by_exit_reason, reason)):
+            row = bucket.setdefault(key, {"trades": 0, "wins": 0, "losses": 0, "sum_r": 0.0})
+            r_value = _finite(trade.get("r_multiple"))
+            if r_value is None:
+                continue
+            row["trades"] += 1
+            row["wins"] += int(r_value > 0)
+            row["losses"] += int(r_value < 0)
+            row["sum_r"] += r_value
+    def finalize(bucket):
+        result = {}
+        for key, row in sorted(bucket.items()):
+            count = row["trades"]
+            result[key] = {
+                "trades": count,
+                "wins": row["wins"],
+                "losses": row["losses"],
+                "win_rate_pct": (row["wins"] / count * 100.0) if count else None,
+                "mean_r": (row["sum_r"] / count) if count else None,
+            }
+        return result
+    return {
+        "by_side": finalize(by_side),
+        "by_exit_reason": finalize(by_exit_reason),
+        "stop_exit_share_pct": (
+            sum(row["trades"] for key, row in by_exit_reason.items()
+                if key in ("STOP", "STOP_GAP"))
+            / len(trades) * 100.0
+            if trades else None
+        ),
+    }
+
+
 def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles,
                             higher_timeframe_candles=None, higher_timeframe="4h",
                             start_utc=None, end_utc=None, instrument=None,
@@ -217,6 +257,7 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
         "net_expectancy_r": expectancy,
         "oos_profit_factor": wf["aggregate_test"]["profit_factor"],
         "worst_fold_max_drawdown_pct": wf["aggregate_test"]["worst_fold_max_drawdown_pct"],
+        "trade_diagnostics": _trade_diagnostics(valid_trades),
         "uplift": uplift,
         "checks": checks,
         "validation_status": "accepted" if not reasons else "rejected",
