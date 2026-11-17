@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     signal_min_adx: float = Field(default=20.0, ge=0, le=100, allow_inf_nan=False)
     signal_min_volume_ratio: float = Field(default=1.0, ge=0, allow_inf_nan=False)
     signal_min_atr_pct: float = Field(default=0.1, gt=0, allow_inf_nan=False)
+    signal_min_net_rr: float = Field(default=1.2, gt=0, le=20, allow_inf_nan=False)
+    signal_higher_timeframe: str = "4h"
 
     paper_starting_balance: float = Field(default=10000.0, gt=0, allow_inf_nan=False)
     paper_entry_max_deviation_pct: float = Field(default=5.0, gt=0, le=100, allow_inf_nan=False)
