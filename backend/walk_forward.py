@@ -122,7 +122,7 @@ def _evaluate_period(
     # run_backtest starts scoring at this index; all earlier rows are indicator
     # context only and cannot generate a trade in the evaluated period.
     backtest_options = {}
-    if candle_timeframe == "15m" and require_mtf_confirmation:
+    if candle_timeframe == "15m":
         backtest_options = {
             "candle_timeframe": candle_timeframe,
             "higher_timeframe_candles": higher_timeframe_candles,
