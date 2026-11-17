@@ -57,7 +57,8 @@ def validate_scan_candles(candles, timeframe, *, now_ms=None, min_candles=MIN_SC
         if not math.isclose(timestamp, round(timestamp), rel_tol=0, abs_tol=0.001):
             raise ValueError(f"DATA_INVALID_TIMESTAMP: candle {index} timestamp is not integral")
         timestamp = int(timestamp)
-        if timestamp % interval != 0:
+        alignment_offset = 4 * 86_400_000 if str(timeframe).strip().lower().endswith("w") else 0
+        if (timestamp - alignment_offset) % interval != 0:
             raise ValueError(f"DATA_MISALIGNED_TIMESTAMP: candle {index} is not aligned to {timeframe}")
         if previous is not None:
             delta = timestamp - previous
