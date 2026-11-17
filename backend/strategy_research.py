@@ -44,15 +44,20 @@ def _percentile(values, quantile):
 
 
 def _bootstrap_top_tercile_uplift(trades, seed, replicates=BOOTSTRAP_REPLICATES):
-    """Bootstrap top-score-third mean R minus the full OOS mean R."""
+    """Circular moving-block bootstrap of top-score-third uplift over all OOS trades."""
     if len(trades) < MIN_OOS_TRADES:
         return {"uplift_r": None, "ci_lower": None, "ci_upper": None}
     rng = random.Random(seed)
     scores = [float(row["signal_score"]) for row in trades]
     outcomes = [float(row["r_multiple"]) for row in trades]
     estimates = []
+    block_length = min(5, len(trades))
     for _ in range(replicates):
-        indices = [rng.randrange(len(trades)) for _ in trades]
+        indices = []
+        while len(indices) < len(trades):
+            start = rng.randrange(len(trades))
+            indices.extend((start + offset) % len(trades) for offset in range(block_length))
+        indices = indices[:len(trades)]
         sample = [(scores[i], outcomes[i]) for i in indices]
         sample.sort(key=lambda item: item[0], reverse=True)
         top_count = max(1, math.ceil(len(sample) / 3))
@@ -67,7 +72,7 @@ def _bootstrap_top_tercile_uplift(trades, seed, replicates=BOOTSTRAP_REPLICATES)
         "uplift_r": top_mean - all_mean,
         "ci_lower": _percentile(estimates, 0.025),
         "ci_upper": _percentile(estimates, 0.975),
-        "method": "percentile bootstrap; resample OOS trades with replacement",
+        "method": "95% percentile circular moving-block bootstrap; 5-trade blocks",
         "replicates": replicates,
         "top_tercile_trade_count": top_count,
     }
@@ -75,8 +80,8 @@ def _bootstrap_top_tercile_uplift(trades, seed, replicates=BOOTSTRAP_REPLICATES)
 
 def count_qualified_examples(candles, timeframe, higher_timeframe_candles=None,
                              higher_timeframe="4h", require_mtf_confirmation=True,
-                             cooldown_bars=20, start_index=199):
-    """Count separated, eligible signal events; avoid counting every adjacent bar."""
+                             cooldown_bars=1, start_index=199):
+    """Count eligible signal candles; adjacent examples may be autocorrelated."""
     interval_ms = timeframe_milliseconds(timeframe)
     higher_interval_ms = None
     higher_end_times = []
