@@ -137,7 +137,6 @@ def analyze(candles, volume_ratio_threshold=None, signal_overrides=None):
     long_require_ema20_50 = overrides.get("long_require_ema20_50", True)
     if not isinstance(long_require_ema200, bool) or not isinstance(long_require_ema20_50, bool):
         raise ValueError("EMA signal overrides must be booleans")
-    """Apply hard eligibility gates first; score only eligible trend candidates."""
     if len(candles) < 50:
         raise ValueError("At least 50 candles required for indicators")
     closes = [float(candle[4]) for candle in candles]
