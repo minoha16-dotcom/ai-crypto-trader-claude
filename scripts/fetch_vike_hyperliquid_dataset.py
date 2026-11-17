@@ -13,19 +13,22 @@ import argparse
 import hashlib
 import json
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import re
+import sys
 import tempfile
 import time
 from typing import Any
-from urllib.parse import quote
 
 import polars as pl
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from dotenv import load_dotenv
+
+# Ensure imports work both when run as a script and when imported by tests.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.fetch_hyperliquid_leader_fills import (
     _fetch_historical_orders,
@@ -36,7 +39,6 @@ from scripts.fetch_hyperliquid_leader_fills import (
 API_BASE = "https://data.vike.io/v1/hyperliquid"
 DATASETS_URL = f"{API_BASE}/archive/datasets"
 ARCHIVE_URL = f"{API_BASE}/archive/url"
-INFO_START = "https://api.hyperliquid.xyz/info"
 ADDRESS_RE = re.compile(r"^0x[a-f0-9]{40}$")
 FILL_COLUMNS = (
     "fill_ts", "wallet", "asset", "side", "size_token", "price", "fee",
@@ -385,7 +387,6 @@ def _append_fills_for_day(
     wallet_rows: dict[str, list[dict[str, Any]]] = {}
     invalid_start_position: dict[str, int] = {}
     total = 0
-    builder_rows = 0
     for row in filtered.iter_rows(named=True):
         address = str(row.get("wallet") or "").lower()
         if address not in selected_wallets:
@@ -416,7 +417,7 @@ def _append_fills_for_day(
         with path.open("a", encoding="utf-8") as handle:
             for row in rows:
                 handle.write(json.dumps(row, separators=(",", ":"), allow_nan=False) + "\n")
-    return total, builder_rows, invalid_start_position
+    return total, invalid_start_position
 
 
 def _write_raw_dataset(
@@ -552,7 +553,7 @@ def _collect(
             written, day_sha, link = _archive_download(
                 session, api_key, "fills", day, raw_path, expected_bytes
             )
-            day_rows, _, missing_start = _append_fills_for_day(
+            day_rows, missing_start = _append_fills_for_day(
                 parquet_path=raw_path,
                 selected_wallets=wallets,
                 spool_dir=spool_dir,
