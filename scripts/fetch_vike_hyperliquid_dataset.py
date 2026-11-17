@@ -87,6 +87,19 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _history_start_ms(start_ms: int, history_warmup_days: int) -> int:
+    history_warmup_days = int(history_warmup_days)
+    if history_warmup_days < 1 or history_warmup_days > 180:
+        raise ValueError("history_warmup_days must be between 1 and 180")
+    history_start = int(start_ms) - history_warmup_days * 24 * 60 * 60 * 1000
+    if history_start < START_POSITION_AVAILABLE_FROM_MS:
+        raise ValueError(
+            "the requested warm-up starts before Vike's start_position field "
+            "was available (2026-09-29); reduce history_warmup_days"
+        )
+    return history_start
+
+
 def _session() -> requests.Session:
     retry = Retry(
         total=5,
@@ -513,7 +526,7 @@ def _collect(
     else:
         current_catalogue_sha = catalogue_sha
 
-    history_start_ms = start_ms - history_warmup_days * 24 * 60 * 60 * 1000
+    history_start_ms = _history_start_ms(start_ms, history_warmup_days)
     daily_dates = _daily_dates(history_start_ms, end_ms)
     by_date = {str(row.get("date")): row for row in catalogue.get("dates", [])}
     missing_dates = [
@@ -765,13 +778,10 @@ def main() -> int:
         raise SystemExit("--wallet-limit must be between 1 and 1000")
     if args.pause_seconds < 0:
         raise SystemExit("--pause-seconds cannot be negative")
-    if args.history_warmup_days < 1 or args.history_warmup_days > 180:
-        raise SystemExit("--history-warmup-days must be between 1 and 180")
-    if start_ms - args.history_warmup_days * 24 * 60 * 60 * 1000 < START_POSITION_AVAILABLE_FROM_MS:
-        raise SystemExit(
-            "the requested warm-up starts before Vike's start_position field "
-            "was available (2026-09-29); reduce --history-warmup-days"
-        )
+    try:
+        _history_start_ms(start_ms, args.history_warmup_days)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
     if not re.fullmatch(r"[0-9a-fA-F]{7,40}", args.collector_code_sha):
         raise SystemExit("--collector-code-sha must be a 7-40 character Git SHA")
     if args.snapshot_only == bool(args.snapshot_file):
