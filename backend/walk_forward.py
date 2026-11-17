@@ -97,6 +97,16 @@ def _period_summary(result, starting_balance, candle_count):
         "volume_ratio_threshold": result.get("assumptions", {}).get(
             "volume_ratio_threshold"
         ),
+        "oos_trades": [
+            {
+                "r_multiple": float(trade.get("r_multiple", 0.0)),
+                "signal_score": float(trade.get("signal_score", 0.0)),
+                "entry_timestamp": trade.get("entry_timestamp"),
+                "exit_timestamp": trade.get("exit_timestamp"),
+                "pnl": float(trade.get("pnl", 0.0)),
+            }
+            for trade in trades
+        ],
     }
 
 
