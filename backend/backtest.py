@@ -162,13 +162,16 @@ def run_backtest(
     i = start_index
 
     while i < len(candles) - 1:
+        analyze_options = {}
+        if signal_overrides is not None:
+            analyze_options["signal_overrides"] = signal_overrides
         metrics = (
-            analyze(candles[: i + 1], signal_overrides=signal_overrides)
+            analyze(candles[: i + 1], **analyze_options)
             if volume_ratio_threshold is None
             else analyze(
                 candles[: i + 1],
                 volume_ratio_threshold=volume_ratio_threshold,
-                signal_overrides=signal_overrides,
+                **analyze_options,
             )
         )
         side = metrics["signal"]
