@@ -15,7 +15,7 @@ The runner's boundary policy is explicit and enforced:
   the bar that reaches this maximum, unless its stop or target exits first.
 - `purge_bars` must be at least `max_holding_bars`; its default is 20.
 - `embargo_bars` defaults to the greater of `warmup_bars` and
-  `max_holding_bars` (50 bars with the default warm-up of 50). A smaller
+  `max_holding_bars` (200 bars with the default EMA200 warm-up of 200). A smaller
   explicit value is rejected.
 - Every train, validation, and test simulation is independent and starts with
   a fresh balance. Any remaining position is force-closed at that period's
@@ -53,7 +53,7 @@ portfolio equity curve.
 Example:
 
 ```text
-GET /api/walk-forward?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1500&train_bars=250&validation_bars=100&test_bars=100&step_bars=100&warmup_bars=50&purge_bars=20&embargo_bars=50&max_holding_bars=20&window_mode=rolling&max_folds=10
+GET /api/walk-forward?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1500&train_bars=250&validation_bars=100&test_bars=100&step_bars=100&warmup_bars=200&purge_bars=20&embargo_bars=200&max_holding_bars=20&window_mode=rolling&max_folds=10
 ```
 
 
@@ -77,6 +77,52 @@ a strategy is profitable. It provides history beyond the 200-period EMA
 planned for the next strategy phase. Exchange-specific timestamp alignment
 must be verified before adding further timeframes; weekly candles use the
 Monday UTC boundary.
+
+
+## 0.2 Strategy rules and live approval gate (Phases 2–5)
+
+The scanner and backtest feature engine now expose Wilder ADX, +DI/-DI,
+EMA20/50/200, RSI14, ATR14, ATR percent, and Volume Ratio. ADX below the
+configured threshold (20 by default) classifies the regime as ranging and
+blocks trend-following candidates. Direction is bullish only when +DI > -DI,
+EMA20 > EMA50, and close > EMA200; bearish requires the exact inverse.
+Insufficient EMA200 history is neutral. Hard gates are evaluated before
+scoring; the fixed 0–100 score only ranks candidates that pass those gates.
+
+The score has frozen initial weights: trend strength 25%, directional RSI
+20%, volume 15%, EMA alignment 20%, and price alignment 20%. These are
+engineering defaults, not empirically optimized weights. They must remain
+unchanged during the first OOS evaluation.
+
+A 15m LONG/SHORT candidate must also agree with the latest fully closed 4h
+candle. The 4h context must be trending and have the same bullish/bearish
+direction. Neutral, ranging, opposite-direction, or invalid higher-timeframe
+data blocks the candidate. Other scan timeframes do not yet apply this 15m/4h
+filter; compare 15m alone against 15m+4h in controlled walk-forward research
+before considering a different production default.
+
+The trade plan uses a stop distance of max(2×ATR, 0.5% of price) and the
+configured gross reward/risk target. Both live analysis and the historical
+backtest apply a minimum estimated net reward/risk after round-trip taker fees
+and slippage. The backtest recalculates the plan from its simulated next-open
+entry; live scan values are indicative plans based on the last closed candle.
+Funding, spread dynamics, and order-book impact are still not modeled.
+
+Live signal emission is fail-closed by `backend/strategy_approval.json`.
+The committed artifact is `research_only` and contains no approved groups.
+An exact Exchange × Symbol × Market Type × Timeframe group requires:
+- at least 200 qualified examples for that independent group;
+- at least three valid walk-forward folds;
+- sufficient OOS trades and positive net expectancy after modeled costs;
+- a positive, adequately powered confidence interval for the pre-registered
+  uplift comparison;
+- a saved validation report ID, matching strategy version and configuration
+  fingerprint, and a non-expired approval entry.
+
+The approval loader rejects missing/invalid artifacts, unapproved groups,
+mismatched strategy/configuration fingerprints, missing report IDs, and expired
+approvals. The research runner still evaluates fixed rules; it does not train
+or tune a predictive model. No group is approved by this code change.
 
 ## 1. Objective and non-goals
 
@@ -177,9 +223,9 @@ Measure redundancy using only training data in each fold:
    out-of-sample information, not merely because it improves the training
    score.
 
-Do not add MACD or EMA 200 to engine-driven claims until they are implemented,
-tested, and exposed in the backend feature payload. Skills may discuss them as
-optional external chart indicators only when the source data is supplied.
+MACD remains outside the backend signal engine. EMA200 and +DI/-DI are now
+implemented and exposed in the backend feature payload; their predictive value
+is not established until the pre-registered OOS experiments are completed.
 
 ## 5. Skill, MCP, and backend responsibilities
 
