@@ -170,10 +170,22 @@ def analyze(candles, volume_ratio_threshold=None):
         reasons.append("ATR_PERCENT_TOO_LOW")
 
     side = "LONG" if direction == "bullish" else "SHORT" if direction == "bearish" else "WAIT"
+    stop_distance = max(volatility * 2.0, last * 0.005)
+    gross_reward = stop_distance * float(settings.reward_risk_ratio)
+    estimated_round_trip_cost = last * (
+        2.0 * float(settings.taker_fee_rate)
+        + 2.0 * float(settings.slippage_bps) / 10_000.0
+    )
+    net_reward = gross_reward - estimated_round_trip_cost
+    net_risk = stop_distance + estimated_round_trip_cost
+    net_rr = net_reward / net_risk if net_risk > 0 else 0.0
+    if net_rr < float(settings.signal_min_net_rr):
+        reasons.append("NET_REWARD_RISK_BELOW_MINIMUM")
+
+    # All hard gates, including net R/R, run before any candidate is scored.
     eligible = not reasons
     score = 0
     if eligible:
-        # Fixed, transparent ranking weights; scoring cannot override a hard gate.
         directional_rsi = (
             min(100.0, max(0.0, (strength - 50.0) * 2.0))
             if side == "LONG"
@@ -196,22 +208,8 @@ def analyze(candles, volume_ratio_threshold=None):
             + ema_alignment * 0.20
             + price_alignment * 0.20
         )
-
-    stop_distance = max(volatility * 2.0, last * 0.005)
-    gross_reward = stop_distance * float(settings.reward_risk_ratio)
-    estimated_round_trip_cost = last * (
-        2.0 * float(settings.taker_fee_rate)
-        + 2.0 * float(settings.slippage_bps) / 10_000.0
-    )
-    net_reward = gross_reward - estimated_round_trip_cost
-    net_risk = stop_distance + estimated_round_trip_cost
-    net_rr = net_reward / net_risk if net_risk > 0 else 0.0
-    if net_rr < float(settings.signal_min_net_rr):
-        reasons.append("NET_REWARD_RISK_BELOW_MINIMUM")
-        eligible = False
-    if not eligible:
+    else:
         side = "WAIT"
-        score = 0
 
     stop = last - stop_distance if direction == "bullish" else last + stop_distance
     target_distance = stop_distance * float(settings.reward_risk_ratio)
