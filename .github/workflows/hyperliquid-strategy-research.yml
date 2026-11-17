@@ -11,7 +11,7 @@ on:
       timeframes:
         description: "Comma-separated timeframes"
         required: true
-        default: "15m"
+        default: "15m,4h"
         type: string
 
 permissions:
@@ -65,12 +65,12 @@ jobs:
           RESEARCH_TIMEFRAMES: ${{ inputs.timeframes }}
         run: |
           python scripts/run_hyperliquid_strategy_research.py \
-            --start "2026-08-17T00:00:00Z" \
+            --start "2026-10-18T00:00:00Z" \
             --end "2026-11-17T00:00:00Z" \
             --symbols "${RESEARCH_SYMBOLS}" \
             --timeframes "${RESEARCH_TIMEFRAMES}" \
-            --test-bars 500 \
-            --step-bars 500 \
+            --test-bars 200 \
+            --step-bars 200 \
             --max-folds 15
 
       - name: Upload research reports (no API key)
