@@ -22,7 +22,7 @@ def candles(count):
 def fake_backtest(calls):
     def run(
         rows, *, starting_balance, instrument, volume_ratio_threshold, start_index,
-        max_holding_bars, close_open_at_end,
+        max_holding_bars, close_open_at_end, **extra,
     ):
         calls.append({
             "rows": rows,
@@ -32,6 +32,7 @@ def fake_backtest(calls):
             "start_index": start_index,
             "max_holding_bars": max_holding_bars,
             "close_open_at_end": close_open_at_end,
+            "extra": extra,
         })
         pnl = 10.0
         trade = {"pnl": pnl, "r_multiple": 0.5}
@@ -286,3 +287,24 @@ def test_walk_forward_integration_uses_real_backtest_and_closes_period_boundarie
     assert "PERIOD_END" in reasons
     assert result["policy"]["max_holding_bars"] == 3
     assert result["policy"]["boundary_gaps"]["purge_minimum"] == "max_holding_bars"
+
+
+
+def test_signal_overrides_are_identical_across_train_validation_and_test(monkeypatch):
+    calls = []
+    monkeypatch.setattr(walk_forward, "run_backtest", fake_backtest(calls))
+    overrides = {"adx_min": 18.0}
+    walk_forward.run_walk_forward_backtest(
+        candles(1000),
+        train_bars=100,
+        validation_bars=40,
+        test_bars=40,
+        step_bars=40,
+        warmup_bars=200,
+        purge_bars=20,
+        embargo_bars=200,
+        max_folds=1,
+        signal_overrides=overrides,
+    )
+    assert len(calls) == 3
+    assert all(call["extra"]["signal_overrides"] == overrides for call in calls)
