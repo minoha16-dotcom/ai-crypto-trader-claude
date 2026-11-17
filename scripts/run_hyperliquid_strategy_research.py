@@ -21,8 +21,8 @@ from backend.strategy_research import evaluate_strategy_group, build_approval_ar
 
 
 API = "https://data.vike.io/v1/hyperliquid"
-DEFAULT_START = "2026-10-16T00:00:00Z"
-DEFAULT_END = "2026-11-16T00:00:00Z"
+DEFAULT_START = "2026-08-17T00:00:00Z"
+DEFAULT_END = "2026-11-17T00:00:00Z"
 DEFAULT_SYMBOLS = ("BTC", "ETH", "SOL", "HYPE")
 
 
@@ -74,6 +74,19 @@ def fetch_ndjson_candles(symbol, interval, start, end, api_key, market="perp"):
     return candles
 
 
+
+def fetch_ndjson_candles_chunked(symbol, interval, start, end, api_key, market="perp", chunk_days=28):
+    """Fetch bounded date chunks so long 15m histories never exceed provider row limits."""
+    rows = []
+    cursor = start
+    while cursor < end:
+        chunk_end = min(cursor + timedelta(days=chunk_days), end)
+        rows.extend(fetch_ndjson_candles(symbol, interval, cursor, chunk_end, api_key, market=market))
+        cursor = chunk_end
+    by_timestamp = {int(row[0]): row for row in rows}
+    return [by_timestamp[key] for key in sorted(by_timestamp)]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--start", default=DEFAULT_START)
@@ -84,9 +97,9 @@ def main():
     parser.add_argument("--output-dir", default="data/strategy-research/hyperliquid")
     parser.add_argument("--reports", default="data/strategy-research/hyperliquid/reports.json")
     parser.add_argument("--approval-output", default="data/strategy-research/hyperliquid/approval-candidate.json")
-    parser.add_argument("--max-folds", type=int, default=10)
-    parser.add_argument("--direction-modes", default="BOTH,LONG,SHORT",
-                        help="Comma-separated experiment modes: BOTH,LONG,SHORT")
+    parser.add_argument("--max-folds", type=int, default=15)
+    parser.add_argument("--test-bars", type=int, default=500)
+    parser.add_argument("--step-bars", type=int, default=500)
     args = parser.parse_args()
 
     api_key = os.environ.get("VIKE_API_KEY", "").strip()
@@ -118,13 +131,13 @@ def main():
             warmup = 200
             lower_start = start - interval * warmup
             print(f"Fetching Hyperliquid {symbol} perp {timeframe}: {lower_start} -> {end}", flush=True)
-            candles = fetch_ndjson_candles(
+            candles = fetch_ndjson_candles_chunked(
                 symbol, timeframe, lower_start, end, api_key, market="perp"
             )
             higher = None
             if timeframe == "15m":
                 higher_start = start - timedelta(hours=4 * 200)
-                higher = fetch_ndjson_candles(
+                higher = fetch_ndjson_candles_chunked(
                     symbol, args.higher_timeframe, higher_start, end, api_key, market="perp"
                 )
             cache_path = output_dir / f"{symbol}_{timeframe}.json"
