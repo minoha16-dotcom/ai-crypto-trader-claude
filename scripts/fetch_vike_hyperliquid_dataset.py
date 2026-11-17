@@ -44,7 +44,7 @@ FILL_COLUMNS = (
     "fill_ts", "wallet", "asset", "side", "size_token", "price", "fee",
     "fee_token", "order_id", "trade_id", "closed_pnl", "start_position",
 )
-DEFAULT_COHORT = "3x smart"
+DEFAULT_COHORT = "3x_smart"
 START_POSITION_AVAILABLE_FROM_MS = int(
     datetime(2026, 9, 29, tzinfo=timezone.utc).timestamp() * 1000
 )
@@ -344,6 +344,11 @@ def _fill_direction(start_position: Any, size: Any, side: str) -> str:
     eps = max(1e-10, abs(before) * 1e-9)
     if abs(before) <= eps:
         return "Open Long" if after > 0 else "Open Short" if after < 0 else "UNCLASSIFIED"
+    # A single fill that crosses through flat both closes and opens a new
+    # opposite position. The current conservative lifecycle builder models
+    # those as separate events, so fail closed rather than label it a close.
+    if before * after < 0:
+        return "UNCLASSIFIED"
     if before > 0:
         return "Add Long" if after > before + eps else "Close Long"
     return "Add Short" if after < before - eps else "Close Short"
@@ -393,7 +398,11 @@ def _append_fills_for_day(
     if missing:
         raise RuntimeError("Vike fills archive is missing columns: " + ", ".join(sorted(missing)))
     filtered = (
-        lazy.filter(pl.col("wallet").is_in(selected_wallets))
+        lazy.filter(
+            pl.col("wallet").is_in(selected_wallets)
+            & pl.col("asset").is_not_null()
+            & ~pl.col("asset").str.contains(r"^[@#]")
+        )
         .select(FILL_COLUMNS)
         .collect(engine="streaming")
     )
