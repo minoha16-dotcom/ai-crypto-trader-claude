@@ -69,6 +69,7 @@ def run_backtest(
     candle_timeframe=None,
     higher_timeframe_candles=None,
     higher_timeframe="4h",
+    require_mtf_confirmation=True,
 ):
     if len(candles) < 52:
         raise ValueError("At least 52 candles are required for next-open backtesting")
@@ -81,7 +82,7 @@ def run_backtest(
     higher_end_times = []
     if candle_timeframe is not None:
         lower_interval_ms = timeframe_milliseconds(candle_timeframe)
-    if candle_timeframe == "15m":
+    if candle_timeframe == "15m" and require_mtf_confirmation:
         if not isinstance(higher_timeframe_candles, (list, tuple)):
             raise ValueError("15m backtests require higher-timeframe OHLCV data")
         if len(higher_timeframe_candles) < 200:
@@ -168,7 +169,7 @@ def run_backtest(
         if side not in ("LONG", "SHORT"):
             i += 1
             continue
-        if candle_timeframe == "15m":
+        if candle_timeframe == "15m" and require_mtf_confirmation:
             decision_close_ms = int(float(candles[i][0])) + lower_interval_ms
             eligible_higher_count = bisect_right(higher_end_times, decision_close_ms)
             if eligible_higher_count < 200:
@@ -538,6 +539,8 @@ def run_backtest(
                 else "reported as unrealized; not added to realized balance"
             ),
             "max_holding_bars": max_holding_bars,
+            "mtf_confirmation": bool(candle_timeframe == "15m" and require_mtf_confirmation),
+            "higher_timeframe": higher_timeframe if candle_timeframe == "15m" and require_mtf_confirmation else None,
             "fee_rate_per_side": fee_rate,
             "slippage_bps_per_side": float(settings.slippage_bps),
             "funding": "not modeled",
