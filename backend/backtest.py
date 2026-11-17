@@ -71,6 +71,7 @@ def run_backtest(
     higher_timeframe="4h",
     require_mtf_confirmation=True,
     direction_filter=None,
+    signal_overrides=None,
 ):
     if direction_filter not in (None, "LONG", "SHORT"):
         raise ValueError("direction_filter must be None, LONG or SHORT")
@@ -162,11 +163,12 @@ def run_backtest(
 
     while i < len(candles) - 1:
         metrics = (
-            analyze(candles[: i + 1])
+            analyze(candles[: i + 1], signal_overrides=signal_overrides)
             if volume_ratio_threshold is None
             else analyze(
                 candles[: i + 1],
                 volume_ratio_threshold=volume_ratio_threshold,
+                signal_overrides=signal_overrides,
             )
         )
         side = metrics["signal"]
@@ -212,7 +214,8 @@ def run_backtest(
                 i += 1
                 continue
             higher_context = market_context(
-                higher_timeframe_candles[:eligible_higher_count]
+                higher_timeframe_candles[:eligible_higher_count],
+                min_adx=(signal_overrides or {}).get("adx_min"),
             )
             required_direction = "bullish" if side == "LONG" else "bearish"
             if (
