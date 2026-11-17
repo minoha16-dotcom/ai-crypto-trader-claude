@@ -25,6 +25,7 @@ import polars as pl
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from dotenv import load_dotenv
 
 from scripts.fetch_hyperliquid_leader_fills import (
     _fetch_historical_orders,
@@ -42,6 +43,9 @@ FILL_COLUMNS = (
     "fee_token", "order_id", "trade_id", "closed_pnl", "start_position",
 )
 DEFAULT_COHORT = "3x smart"
+START_POSITION_AVAILABLE_FROM_MS = int(
+    datetime(2026, 9, 29, tzinfo=timezone.utc).timestamp() * 1000
+)
 VENDOR_LICENSE_NOTE = (
     "Vike Hyperliquid historical data: personal use under Vike Terms of Service; "
     "commercial use requires written agreement. Do not redistribute raw archives. "
@@ -742,7 +746,7 @@ def main() -> int:
     parser.add_argument(
         "--history-warmup-days",
         type=int,
-        default=30,
+        default=17,
         help="Days of pre-window fills used only to reconstruct positions opened before the observation window.",
     )
     args = parser.parse_args()
@@ -762,11 +766,17 @@ def main() -> int:
         raise SystemExit("--pause-seconds cannot be negative")
     if args.history_warmup_days < 1 or args.history_warmup_days > 180:
         raise SystemExit("--history-warmup-days must be between 1 and 180")
+    if start_ms - args.history_warmup_days * 24 * 60 * 60 * 1000 < START_POSITION_AVAILABLE_FROM_MS:
+        raise SystemExit(
+            "the requested warm-up starts before Vike's start_position field "
+            "was available (2026-09-29); reduce --history-warmup-days"
+        )
     if not re.fullmatch(r"[0-9a-fA-F]{7,40}", args.collector_code_sha):
         raise SystemExit("--collector-code-sha must be a 7-40 character Git SHA")
     if args.snapshot_only == bool(args.snapshot_file):
         raise SystemExit("choose exactly one of --snapshot-only or --snapshot-file")
 
+    load_dotenv()
     api_key = os.environ.get("VIKE_API_KEY", "").strip()
     if not api_key:
         raise SystemExit("VIKE_API_KEY is not set in the environment; no data was requested")
