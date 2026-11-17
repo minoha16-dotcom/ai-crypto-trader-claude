@@ -12,7 +12,7 @@ execution, add it to .env (already excluded by .gitignore). Install dependencies
 python -m pip install -r requirements-test.txt
 ~~~
 
-The script loads .env when python-dotenv is installed. GitHub Actions injects
+The script loads .env automatically through python-dotenv (included in requirements.txt). GitHub Actions injects
 the repository secret of the same name and never prints it.
 
 ## Point-in-time cohort
@@ -37,7 +37,7 @@ Each market-wide raw file is downloaded to a temporary path, filtered to the
 selected wallets with Polars, hashed, and deleted before moving to the next day.
 No signed archive URL is written to logs or the output manifest.
 
-The default 30-day pre-window warm-up is used only to reconstruct positions that
+The default 17-day pre-window warm-up is used only to reconstruct positions that
 were already open near the observation start. The preparer excludes trades whose
 entry predates 2026-10-16 from the training sample. A wallet is marked incomplete
 and rejected from preparation if its first observed fill for an asset already
@@ -68,7 +68,7 @@ $sha = git rev-parse HEAD
 
 python scripts/fetch_vike_hyperliquid_dataset.py --snapshot-only --start 2026-10-16T00:00:00Z --end 2026-11-16T00:00:00Z --cohort-label "3x smart" --wallet-limit 200 --collector-code-sha $sha --out artifacts/vike-cohort-snapshot.json
 
-python scripts/fetch_vike_hyperliquid_dataset.py --snapshot-file artifacts/vike-cohort-snapshot.json --start 2026-10-16T00:00:00Z --end 2026-11-16T00:00:00Z --history-warmup-days 30 --collector-code-sha $sha --out artifacts/hyperliquid-vike-raw-dataset.json
+python scripts/fetch_vike_hyperliquid_dataset.py --snapshot-file artifacts/vike-cohort-snapshot.json --start 2026-10-16T00:00:00Z --end 2026-11-16T00:00:00Z --history-warmup-days 17 --collector-code-sha $sha --out artifacts/hyperliquid-vike-raw-dataset.json
 
 python scripts/prepare_hyperliquid_advisor_dataset.py --raw-dataset artifacts/hyperliquid-vike-raw-dataset.json --out artifacts/advisor-training-dataset.json --code-sha $sha --timeframes 1h,4h
 
