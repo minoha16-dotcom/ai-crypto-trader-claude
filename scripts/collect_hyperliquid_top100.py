@@ -120,7 +120,7 @@ def main():
         label_rows.join(pnl_by_wallet, on="wallet", how="inner")
         .filter(pl.col("prior_30d_realized_pnl") > 0)
         .sort("prior_30d_realized_pnl", descending=True)
-        .unique(subset=["wallet"], keep="first")
+        .unique(subset=["wallet"], keep="first", maintain_order=True)
         .head(args.top_n)
     )
     if ranked.height < args.top_n:
@@ -150,11 +150,17 @@ def main():
         (pl.col("snapshot_ts") < TARGET_START) & pl.col("wallet").is_in(wallet_set)
     )
     if opening.is_empty():
-        raise RuntimeError("No opening positions for the selected top-100 cohort")
-    opening_ts = opening.select(pl.col("snapshot_ts").max()).item()
-    opening.filter(pl.col("snapshot_ts") == opening_ts).write_parquet(
-        selected_dir / "opening_positions.parquet"
-    )
+        opening_ts = None
+        opening.write_parquet(selected_dir / "opening_positions.parquet")
+    else:
+        latest_by_position = opening.group_by("wallet", "asset").agg(
+            pl.col("snapshot_ts").max().alias("snapshot_ts")
+        )
+        opening = opening.join(
+            latest_by_position, on=["wallet", "asset", "snapshot_ts"], how="inner"
+        )
+        opening_ts = opening.select(pl.col("snapshot_ts").max()).item()
+        opening.write_parquet(selected_dir / "opening_positions.parquet")
 
     # Download and filter every fill in the requested 31-day target period.
     selected_fill_rows = 0
