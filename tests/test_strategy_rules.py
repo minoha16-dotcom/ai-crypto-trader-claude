@@ -186,3 +186,12 @@ def test_15m_backtest_accepts_only_closed_aligned_4h_context(monkeypatch):
     )
     assert result["trade_count"] == 1
     assert result["trades"][0]["side"] == "LONG"
+
+
+def test_net_reward_risk_is_a_hard_gate_not_a_score_override(monkeypatch):
+    monkeypatch.setattr(settings, "signal_min_net_rr", 10.0)
+    result = analyze(rising_candles())
+    assert result["net_reward_risk"] < 10.0
+    assert result["signal"] == "WAIT"
+    assert result["score"] == 0
+    assert "NET_REWARD_RISK_BELOW_MINIMUM" in result["filter_reasons"]
