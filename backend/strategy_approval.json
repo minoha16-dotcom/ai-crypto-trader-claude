@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "strategy_id": "trend-following-ema-di-mtf",
+  "strategy_version": "3.0.0",
+  "status": "research_only",
+  "approved_at": null,
+  "validation_report_id": null,
+  "approved_groups": [],
+  "policy": {
+    "minimum_qualified_examples_per_group": 200,
+    "minimum_valid_walk_forward_folds": 3,
+    "requires_out_of_sample_evidence": true,
+    "requires_positive_net_expectancy_after_costs": true,
+    "requires_positive_confidence_interval_for_uplift": true,
+    "paper_trading_only": true
+  },
+  "note": "No group is approved. Live technical scans must remain WAIT until a reproducible validation report satisfies every acceptance criterion and an exact group entry is explicitly approved."
+}
