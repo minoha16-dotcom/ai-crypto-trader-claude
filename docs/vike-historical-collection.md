@@ -37,8 +37,12 @@ Each market-wide raw file is downloaded to a temporary path, filtered to the
 selected wallets with Polars, hashed, and deleted before moving to the next day.
 No signed archive URL is written to logs or the output manifest.
 
-The default 17-day pre-window warm-up is used only to reconstruct positions that
-were already open near the observation start. The preparer excludes trades whose
+The default 17-day pre-window warm-up (2026-09-29 00:00 UTC onward) is used only
+to reconstruct positions that were already open near the observation start.
+The cohort is selected from the daily positions archive, not positions_hourly,
+because only the former contains the causal pnl_cohort wallet label. This file
+is large; the collector projects only wallet, snapshot_ts and pnl_cohort and
+uses Polars streaming execution. The preparer excludes trades whose
 entry predates 2026-10-16 from the training sample. A wallet is marked incomplete
 and rejected from preparation if its first observed fill for an asset already
 has a non-zero start_position, because its original position lifecycle predates
@@ -81,10 +85,14 @@ PowerShell; the Python script loads it through python-dotenv.
 
 ## Run in GitHub Actions
 
-Open Actions → Hyperliquid historical Advisor training → Run workflow.
-Choose the branch containing this change and keep the requested observation
-start/end. The workflow runs only on manual dispatch; it does not run on every
-push. It reads secrets.VIKE_API_KEY.
+For this open pull request, add the label
+run-vike-historical-training to PR #48. The Tests workflow starts the
+historical job only for that explicit label event and only from the
+feat/vike-hyperliquid-historical-cohort branch; ordinary pushes and test runs
+do not start data collection. It reads secrets.VIKE_API_KEY.
+
+The standalone workflow_dispatch entry is also included for use after this
+workflow file is present on the repository default branch.
 
 Only the approval report and research-only model JSON files are uploaded as a
 short-lived artifact. The workflow deliberately deletes the Vike cohort file,
