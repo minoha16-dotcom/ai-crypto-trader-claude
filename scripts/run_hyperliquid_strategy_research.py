@@ -111,11 +111,6 @@ def main():
 
     symbols = [item.strip().upper() for item in args.symbols.split(",") if item.strip()]
     timeframes = [item.strip() for item in args.timeframes.split(",") if item.strip()]
-    direction_modes = [item.strip().upper() for item in args.direction_modes.split(",") if item.strip()]
-    if not direction_modes or any(mode not in ("BOTH", "LONG", "SHORT") for mode in direction_modes):
-        parser.error("--direction-modes must contain only BOTH, LONG and/or SHORT")
-    if len(set(direction_modes)) != len(direction_modes):
-        parser.error("--direction-modes must not contain duplicates")
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     reports = []
