@@ -21,7 +21,7 @@ from backend.strategy_research import evaluate_strategy_group, build_approval_ar
 
 
 API = "https://data.vike.io/v1/hyperliquid"
-DEFAULT_START = "2026-08-17T00:00:00Z"
+DEFAULT_START = "2026-10-18T00:00:00Z"
 DEFAULT_END = "2026-11-17T00:00:00Z"
 DEFAULT_SYMBOLS = ("BTC", "ETH", "SOL", "HYPE")
 
@@ -92,14 +92,14 @@ def main():
     parser.add_argument("--start", default=DEFAULT_START)
     parser.add_argument("--end", default=DEFAULT_END)
     parser.add_argument("--symbols", default=",".join(DEFAULT_SYMBOLS))
-    parser.add_argument("--timeframes", default="15m")
+    parser.add_argument("--timeframes", default="15m,4h")
     parser.add_argument("--higher-timeframe", default="4h")
     parser.add_argument("--output-dir", default="data/strategy-research/hyperliquid")
     parser.add_argument("--reports", default="data/strategy-research/hyperliquid/reports.json")
     parser.add_argument("--approval-output", default="data/strategy-research/hyperliquid/approval-candidate.json")
     parser.add_argument("--max-folds", type=int, default=15)
-    parser.add_argument("--test-bars", type=int, default=500)
-    parser.add_argument("--step-bars", type=int, default=500)
+    parser.add_argument("--test-bars", type=int, default=200)
+    parser.add_argument("--step-bars", type=int, default=200)
     args = parser.parse_args()
 
     api_key = os.environ.get("VIKE_API_KEY", "").strip()
@@ -165,14 +165,24 @@ def main():
                 ("LONG_MTF_OFF", "LONG", {}, False),
             ]
             for experiment_name, side_filter, overrides, mtf_enabled in experiments:
+                # A 30-day 4h window has only ~180 scored candles. Use
+                # compact chronological folds for exploratory diagnostics;
+                # the independent 200-qualified-example acceptance gate remains
+                # unchanged and therefore cannot be met by 4h in this window.
+                fold_settings = (
+                    {"train_bars": 250, "validation_bars": 100,
+                     "test_bars": args.test_bars, "step_bars": args.step_bars}
+                    if timeframe != "4h"
+                    else {"train_bars": 60, "validation_bars": 20,
+                          "test_bars": 30, "step_bars": 30}
+                )
                 report = evaluate_strategy_group(
                     exchange="hyperliquid", symbol=symbol, market_type="futures",
                     timeframe=timeframe, candles=evaluation_candles,
                     higher_timeframe_candles=higher,
                     higher_timeframe=args.higher_timeframe,
                     start_utc=args.start, end_utc=args.end,
-                    train_bars=250, validation_bars=100,
-                    test_bars=args.test_bars, step_bars=args.step_bars,
+                    **fold_settings,
                     max_folds=args.max_folds,
                     direction_filter=side_filter,
                     signal_overrides=overrides,
