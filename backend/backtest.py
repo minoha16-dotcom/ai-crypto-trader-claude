@@ -6,6 +6,7 @@ opens beyond the stop. If stop and target both trade inside one candle, stop
 is assumed first. This remains a bar-based simulation, not exchange execution.
 """
 import math
+from bisect import bisect_right
 from datetime import datetime, timezone
 
 from .config import settings
@@ -15,7 +16,8 @@ from .contracts import (
     contract_risk_amount,
     normalize_amount,
 )
-from .indicators import analyze
+from .indicators import analyze, market_context
+from .data_validation import timeframe_milliseconds
 from .metrics import validate_trading_configuration
 
 
@@ -64,6 +66,9 @@ def run_backtest(
     start_index=49,
     max_holding_bars=None,
     close_open_at_end=False,
+    candle_timeframe=None,
+    higher_timeframe_candles=None,
+    higher_timeframe="4h",
 ):
     if len(candles) < 52:
         raise ValueError("At least 52 candles are required for next-open backtesting")
@@ -72,6 +77,28 @@ def run_backtest(
         if not math.isfinite(volume_ratio_threshold) or volume_ratio_threshold < 0:
             raise ValueError("volume_ratio_threshold must be finite and non-negative")
     _validate_candles(candles)
+    lower_interval_ms = higher_interval_ms = None
+    higher_end_times = []
+    if candle_timeframe is not None:
+        lower_interval_ms = timeframe_milliseconds(candle_timeframe)
+    if candle_timeframe == "15m":
+        if not isinstance(higher_timeframe_candles, (list, tuple)):
+            raise ValueError("15m backtests require higher-timeframe OHLCV data")
+        if len(higher_timeframe_candles) < 200:
+            raise ValueError("At least 200 closed higher-timeframe candles are required")
+        _validate_candles(higher_timeframe_candles)
+        higher_interval_ms = timeframe_milliseconds(higher_timeframe)
+        previous_timestamp = None
+        for index, candle in enumerate(higher_timeframe_candles):
+            timestamp = int(float(candle[0]))
+            if previous_timestamp is not None:
+                delta = timestamp - previous_timestamp
+                if delta != higher_interval_ms:
+                    raise ValueError(
+                        f"Higher-timeframe data gap or ordering error at candle {index}"
+                    )
+            previous_timestamp = timestamp
+            higher_end_times.append(timestamp + higher_interval_ms)
     if isinstance(start_index, bool) or not isinstance(start_index, int):
         raise ValueError("start_index must be an integer")
     if start_index < 49 or start_index >= len(candles) - 1:
@@ -136,6 +163,29 @@ def run_backtest(
         if side not in ("LONG", "SHORT"):
             i += 1
             continue
+        if candle_timeframe == "15m":
+            decision_close_ms = int(float(candles[i][0])) + lower_interval_ms
+            eligible_higher_count = bisect_right(higher_end_times, decision_close_ms)
+            if eligible_higher_count < 200:
+                skipped_signals.append({
+                    "index": i, "reason": "MTF_HIGHER_TIMEFRAME_WARMUP_NOT_READY"
+                })
+                i += 1
+                continue
+            higher_context = market_context(
+                higher_timeframe_candles[:eligible_higher_count]
+            )
+            required_direction = "bullish" if side == "LONG" else "bearish"
+            if (
+                higher_context["regime"] != "trending"
+                or higher_context["direction"] != required_direction
+            ):
+                skipped_signals.append({
+                    "index": i, "reason": "MTF_DIRECTION_NOT_CONFIRMED",
+                    "higher_timeframe_context": higher_context,
+                })
+                i += 1
+                continue
 
         entry_day = _utc_day(candles[i + 1][0])
         daily_start_equity.setdefault(entry_day, equity)
