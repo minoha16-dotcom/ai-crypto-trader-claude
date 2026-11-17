@@ -103,7 +103,8 @@ def market_context(candles):
     if len(candles) < 200:
         raise ValueError("At least 200 candles required for EMA200 market context")
     closes = [float(candle[4]) for candle in candles]
-    ema20, ema50, ema200 = ema(closes, 20), ema(closes, 50), ema(closes, 200)
+    ema20, ema50 = ema(closes, 20), ema(closes, 50)
+    ema200 = ema(closes, 200) if len(closes) >= 200 else None
     dm = directional_indicators(candles)
     regime = "trending" if dm["adx14"] >= float(settings.signal_min_adx) else "ranging"
     bullish = (
@@ -123,8 +124,8 @@ def market_context(candles):
 
 def analyze(candles, volume_ratio_threshold=None):
     """Apply hard eligibility gates first; score only eligible trend candidates."""
-    if len(candles) < 200:
-        raise ValueError("At least 200 candles required for EMA200")
+    if len(candles) < 50:
+        raise ValueError("At least 50 candles required for indicators")
     closes = [float(candle[4]) for candle in candles]
     threshold = (
         float(settings.signal_min_volume_ratio)
@@ -149,19 +150,19 @@ def analyze(candles, volume_ratio_threshold=None):
     bullish = (
         dm["plus_di14"] > dm["minus_di14"]
         and ema20 > ema50
-        and last > ema200
+        and ema200 is not None and last > ema200
     )
     bearish = (
         dm["minus_di14"] > dm["plus_di14"]
         and ema20 < ema50
-        and last < ema200
+        and ema200 is not None and last < ema200
     )
     direction = "bullish" if bullish else "bearish" if bearish else "neutral"
     reasons = []
     if regime != "trending":
         reasons.append("REGIME_RANGING")
     if direction == "neutral":
-        reasons.append("DIRECTION_NEUTRAL")
+        reasons.append("DIRECTION_NEUTRAL" if ema200 is not None else "EMA200_HISTORY_NOT_READY")
     if volume_ratio < threshold:
         reasons.append("VOLUME_BELOW_AVERAGE")
     if atr_pct < float(settings.signal_min_atr_pct):
