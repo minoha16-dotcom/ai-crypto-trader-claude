@@ -98,7 +98,7 @@ def adx(candles, period=14):
     return directional_indicators(candles, period)["adx14"]
 
 
-def market_context(candles):
+def market_context(candles, min_adx=None):
     """Classify a timeframe using its latest supplied (already closed) candle."""
     if len(candles) < 200:
         raise ValueError("At least 200 candles required for EMA200 market context")
@@ -106,7 +106,8 @@ def market_context(candles):
     ema20, ema50 = ema(closes, 20), ema(closes, 50)
     ema200 = ema(closes, 200) if len(closes) >= 200 else None
     dm = directional_indicators(candles)
-    regime = "trending" if dm["adx14"] >= float(settings.signal_min_adx) else "ranging"
+    adx_threshold = float(settings.signal_min_adx if min_adx is None else min_adx)
+    regime = "trending" if dm["adx14"] >= adx_threshold else "ranging"
     bullish = (
         dm["plus_di14"] > dm["minus_di14"] and ema20 > ema50 and closes[-1] > ema200
     )
@@ -122,7 +123,20 @@ def market_context(candles):
     }
 
 
-def analyze(candles, volume_ratio_threshold=None):
+def analyze(candles, volume_ratio_threshold=None, signal_overrides=None):
+    """Apply frozen production rules or explicit research-only single-factor overrides."""
+    overrides = dict(signal_overrides or {})
+    allowed = {"adx_min", "long_require_ema200", "long_require_ema20_50"}
+    unknown = set(overrides) - allowed
+    if unknown:
+        raise ValueError("Unsupported signal override(s): " + ", ".join(sorted(unknown)))
+    adx_min = float(overrides.get("adx_min", settings.signal_min_adx))
+    if not math.isfinite(adx_min) or not 0 <= adx_min <= 100:
+        raise ValueError("adx_min override must be finite and between 0 and 100")
+    long_require_ema200 = overrides.get("long_require_ema200", True)
+    long_require_ema20_50 = overrides.get("long_require_ema20_50", True)
+    if not isinstance(long_require_ema200, bool) or not isinstance(long_require_ema20_50, bool):
+        raise ValueError("EMA signal overrides must be booleans")
     """Apply hard eligibility gates first; score only eligible trend candidates."""
     if len(candles) < 50:
         raise ValueError("At least 50 candles required for indicators")
@@ -143,15 +157,18 @@ def analyze(candles, volume_ratio_threshold=None):
     volume_ratio = volumes[-1] / average_volume if average_volume > 0 else 0.0
     atr_pct = volatility / last * 100 if last else 0.0
 
-    if dm["adx14"] < float(settings.signal_min_adx):
+    if dm["adx14"] < adx_min:
         regime = "ranging"
     else:
         regime = "trending"
 
+    long_di_aligned = dm["plus_di14"] > dm["minus_di14"]
+    long_ema_aligned = ema20 > ema50
+    long_price_above_ema200 = ema200 is not None and last > ema200
     bullish = (
-        dm["plus_di14"] > dm["minus_di14"]
-        and ema20 > ema50
-        and ema200 is not None and last > ema200
+        long_di_aligned
+        and (long_ema_aligned or not long_require_ema20_50)
+        and (long_price_above_ema200 or not long_require_ema200)
     )
     bearish = (
         dm["minus_di14"] > dm["plus_di14"]
@@ -159,6 +176,15 @@ def analyze(candles, volume_ratio_threshold=None):
         and ema200 is not None and last < ema200
     )
     direction = "bullish" if bullish else "bearish" if bearish else "neutral"
+    long_gate_diagnostics = {
+        "di_bullish": long_di_aligned,
+        "ema20_above_ema50": long_ema_aligned,
+        "price_above_ema200": long_price_above_ema200,
+        "adx_pass": dm["adx14"] >= adx_min,
+        "adx_threshold": adx_min,
+        "ema200_required": long_require_ema200,
+        "ema20_50_required": long_require_ema20_50,
+    }
     reasons = []
     if regime != "trending":
         reasons.append("REGIME_RANGING")
@@ -237,4 +263,6 @@ def analyze(candles, volume_ratio_threshold=None):
         "gross_reward_risk": float(settings.reward_risk_ratio),
         "estimated_round_trip_cost": estimated_round_trip_cost,
         "net_reward_risk": net_rr,
+        "long_gate_diagnostics": long_gate_diagnostics,
+        "signal_overrides": overrides,
     }
