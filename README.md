@@ -189,7 +189,7 @@ GET /api/backtest?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&
 GET /api/backtest?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1000&volume_ratio_threshold=1.2
 ~~~
 
-Omitting the override uses SIGNAL_MIN_VOLUME_RATIO. The same optional parameter is available on the MCP run_backtest tool. The MCP run_walk_forward tool exposes the chronological evaluation endpoint and its fold/window controls.
+Omitting the override uses SIGNAL_MIN_VOLUME_RATIO. The same optional parameter is available on the MCP run_backtest tool. The MCP run_walk_forward tool exposes the chronological evaluation endpoint and its fold/window controls. For a controlled 15m ablation, compare the default 4h-confirmed run with the same request using `mtf_confirmation=false`; keep all other inputs identical. The live scanner always requires 4h confirmation for 15m signals.
 
 ## Walk-Forward evaluation
 
