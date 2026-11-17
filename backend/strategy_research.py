@@ -100,7 +100,7 @@ def count_qualified_examples(candles, timeframe, higher_timeframe_candles=None,
     for index in range(next_allowed_index, len(candles)):
         if index < next_allowed_index:
             continue
-        metrics = analyze(candles[:index + 1], signal_overrides=signal_overrides)
+        metrics = (analyze(candles[:index + 1]) if signal_overrides is None else analyze(candles[:index + 1], signal_overrides=signal_overrides))
         side = metrics.get("signal")
         if side not in ("LONG", "SHORT"):
             continue
