@@ -8,7 +8,7 @@ from backend.backtest import run_backtest
 from backend.indicators import analyze
 
 
-def rising_candles(count=100):
+def rising_candles(count=260):
     candles = []
     for i in range(count):
         close = 100 + i * 0.5
@@ -39,7 +39,7 @@ def exit_on_target_candles():
 
 
 def test_adx_and_quality_filters_are_reported():
-    metrics = analyze(rising_candles(80))
+    metrics = analyze(rising_candles(260))
     assert metrics["adx14"] >= 20
     assert metrics["volume_ratio"] == pytest.approx(1.0)
     assert metrics["signal"] == "LONG"
@@ -128,7 +128,7 @@ def test_backtest_profit_factor_is_json_safe_when_no_losses(monkeypatch):
 
 @pytest.mark.parametrize("threshold", [0.8, 1.0, 1.2])
 def test_volume_ratio_thresholds_are_configurable_at_08_10_12(threshold):
-    candles = rising_candles(80)
+    candles = rising_candles(260)
     # The previous 20 closed candles average exactly 100 volume units.
     candles[-1][5] = threshold * 100
     metrics = analyze(candles, volume_ratio_threshold=threshold)
