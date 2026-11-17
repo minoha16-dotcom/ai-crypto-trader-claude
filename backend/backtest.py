@@ -330,6 +330,7 @@ def run_backtest(
             "notional": notional,
             "entry_index": i + 1,
             "entry_timestamp": candles[i + 1][0],
+            "signal_score": float(metrics.get("score", 0.0)),
         }
         exit_reference = None
         exit_reason = None
