@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from .config import settings
 from .data_validation import timeframe_milliseconds
 from .indicators import analyze, market_context
+from .signal_gate_diagnostics import long_gate_diagnostics
 from .strategy_approval import current_strategy_config_hash
 from .walk_forward import run_walk_forward_backtest
 
@@ -229,6 +230,11 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
         mtf_enabled, start_index=warmup_bars,
         direction_filter=direction_filter, signal_overrides=signal_overrides,
     )
+    gate_diagnostics = long_gate_diagnostics(
+        candles, timeframe, higher_timeframe_candles, higher_timeframe,
+        require_mtf_confirmation=mtf_enabled,
+        start_index=warmup_bars, signal_overrides=signal_overrides,
+    )
     wf = run_walk_forward_backtest(
         candles,
         train_bars=train_bars,
@@ -327,6 +333,7 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
         "worst_fold_max_drawdown_pct": wf["aggregate_test"]["worst_fold_max_drawdown_pct"],
         "trade_diagnostics": _trade_diagnostics(valid_trades),
         "signal_rejection_diagnostics": _signal_rejection_diagnostics(wf["folds"]),
+        "long_gate_diagnostics": gate_diagnostics,
         "uplift": uplift,
         "checks": checks,
         "validation_status": "accepted" if not reasons else "rejected",
