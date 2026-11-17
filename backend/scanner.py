@@ -6,7 +6,6 @@ from .indicators import analyze, market_context
 from .database import connect, archive_expired_signals
 from .config import settings
 from .data_validation import validate_scan_candles, MIN_SCAN_CANDLES
-from .config import settings
 from .strategy_approval import approval_for_group
 
 
@@ -20,6 +19,21 @@ def _persist_signal(exchange, symbol, market_type, timeframe, metrics, item):
         signal_id = cursor.fetchone()["id"]
     archive_expired_signals()
     return signal_id
+
+
+def apply_higher_timeframe_confirmation(metrics, higher_context):
+    """Require aligned trending direction; neutral or ranging higher TF blocks."""
+    side = metrics.get("signal")
+    required_direction = "bullish" if side == "LONG" else "bearish" if side == "SHORT" else None
+    confirmed = (
+        required_direction is not None
+        and higher_context.get("regime") == "trending"
+        and higher_context.get("direction") == required_direction
+    )
+    if not confirmed:
+        metrics["signal"] = "WAIT"
+        metrics.setdefault("filter_reasons", []).append("MTF_DIRECTION_NOT_CONFIRMED")
+    return confirmed
 
 
 def _data_rejection(exchange, symbol, market_type, timeframe, error):
@@ -73,14 +87,7 @@ async def scan(exchange, symbols=None, market_type="spot", timeframe=None):
                 higher_context = market_context(higher_candles)
                 metrics["higher_timeframe"] = higher_timeframe
                 metrics["higher_timeframe_context"] = higher_context
-                required_direction = "bullish" if metrics["signal"] == "LONG" else "bearish"
-                if (
-                    metrics["signal"] not in ("LONG", "SHORT")
-                    or higher_context["regime"] != "trending"
-                    or higher_context["direction"] != required_direction
-                ):
-                    metrics["signal"] = "WAIT"
-                    metrics.setdefault("filter_reasons", []).append("MTF_DIRECTION_NOT_CONFIRMED")
+                if not apply_higher_timeframe_confirmation(metrics, higher_context):
                     item_status = "MTF_REJECTED"
 
             approved, approval_reason, artifact = approval_for_group(
