@@ -211,6 +211,7 @@ def analyze(candles, volume_ratio_threshold=None):
         eligible = False
     if not eligible:
         side = "WAIT"
+        score = 0
 
     stop = last - stop_distance if direction == "bullish" else last + stop_distance
     target_distance = stop_distance * float(settings.reward_risk_ratio)
