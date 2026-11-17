@@ -76,13 +76,13 @@ def test_rolling_walk_forward_creates_chronological_non_overlapping_test_folds(m
     assert result["fold_count"] == 2
     assert result["max_folds_reached"] is True
     first, second = result["folds"]
-    assert first["ranges"]["train"]["start_index"] == 500
+    assert first["ranges"]["train"]["start_index"] == 200
     assert first["ranges"]["train"]["end_index_exclusive"] == 280
-    assert first["ranges"]["validation"]["start_index"] == 200
+    assert first["ranges"]["validation"]["start_index"] == 500
     assert first["ranges"]["validation"]["end_index_exclusive"] == 520
     assert first["ranges"]["test"]["start_index"] == 740
     assert first["ranges"]["test"]["end_index_exclusive"] == 780
-    assert second["ranges"]["test"]["start_index"] == 330
+    assert second["ranges"]["test"]["start_index"] == 780
     assert second["ranges"]["test"]["end_index_exclusive"] == 820
     assert result["policy"]["test_windows_overlap"] is False
     assert result["aggregate_test"]["total_closed_trades"] == 2
@@ -120,8 +120,8 @@ def test_expanding_mode_keeps_training_start_fixed_and_grows_training_window(mon
     )
 
     first, second = result["folds"]
-    assert first["ranges"]["train"]["start_index"] == 50
-    assert second["ranges"]["train"]["start_index"] == 50
+    assert first["ranges"]["train"]["start_index"] == 200
+    assert second["ranges"]["train"]["start_index"] == 200
     assert second["ranges"]["train"]["candle_count"] > first["ranges"]["train"]["candle_count"]
     assert first["ranges"]["test"]["end_index_exclusive"] <= second["ranges"]["test"]["start_index"]
 
@@ -215,7 +215,7 @@ def test_aggregate_test_counts_breakeven_trades_separately(monkeypatch):
 
     monkeypatch.setattr(walk_forward, "run_backtest", mixed_result)
     result = walk_forward.run_walk_forward_backtest(
-        candles(400),
+        candles(1000),
         train_bars=100,
         validation_bars=40,
         test_bars=40,
