@@ -63,6 +63,10 @@ jobs:
       - name: Freeze the historical point-in-time cohort
         env:
           VIKE_API_KEY: ${{ secrets.VIKE_API_KEY }}
+          START_UTC: ${{ inputs.start }}
+          END_UTC: ${{ inputs.end }}
+          COHORT_LABEL: ${{ inputs.cohort_label }}
+          WALLET_LIMIT: ${{ inputs.wallet_limit }}
         run: |
           set -euo pipefail
           mkdir -p artifacts
@@ -70,23 +74,26 @@ jobs:
           echo "CODE_SHA=$CODE_SHA" >> "$GITHUB_ENV"
           python scripts/fetch_vike_hyperliquid_dataset.py \
             --snapshot-only \
-            --start "${{ inputs.start }}" \
-            --end "${{ inputs.end }}" \
-            --cohort-label "${{ inputs.cohort_label }}" \
-            --wallet-limit "${{ inputs.wallet_limit }}" \
+            --start "$START_UTC" \
+            --end "$END_UTC" \
+            --cohort-label "$COHORT_LABEL" \
+            --wallet-limit "$WALLET_LIMIT" \
             --collector-code-sha "$CODE_SHA" \
             --out artifacts/vike-cohort-snapshot.json
 
       - name: Collect historical fills and accounting evidence
         env:
           VIKE_API_KEY: ${{ secrets.VIKE_API_KEY }}
+          START_UTC: ${{ inputs.start }}
+          END_UTC: ${{ inputs.end }}
+          HISTORY_WARMUP_DAYS: ${{ inputs.history_warmup_days }}
         run: |
           set -euo pipefail
           python scripts/fetch_vike_hyperliquid_dataset.py \
             --snapshot-file artifacts/vike-cohort-snapshot.json \
-            --start "${{ inputs.start }}" \
-            --end "${{ inputs.end }}" \
-            --history-warmup-days "${{ inputs.history_warmup_days }}" \
+            --start "$START_UTC" \
+            --end "$END_UTC" \
+            --history-warmup-days "$HISTORY_WARMUP_DAYS" \
             --collector-code-sha "$CODE_SHA" \
             --out artifacts/hyperliquid-vike-raw-dataset.json
 
@@ -101,7 +108,6 @@ jobs:
 
       - name: Train and validate each independent group
         id: train
-        continue-on-error: true
         run: |
           set +e
           python scripts/train_advisor_model.py \
