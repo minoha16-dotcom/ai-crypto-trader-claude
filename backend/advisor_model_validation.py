@@ -758,10 +758,28 @@ def _manifest_rejection_reasons(
                 "code": "COHORT_SELECTION_PRECEDES_SOURCE_SNAPSHOT",
                 "detail": "source snapshot must exist no later than the cohort-selection cutoff",
             })
-        if retrieved_ms > cohort_ms:
+        snapshot_kind = str(provenance.get("source_snapshot_kind") or "")
+        if snapshot_kind == "historical_archive_causal":
+            # A historical archive may be downloaded after the observation
+            # window, provided the archived cohort label itself is explicitly
+            # defined at a timestamp strictly before the first training signal.
+            # The source retrieval time is retained honestly and is not
+            # misrepresented as the time the cohort was known.
+            if retrieved_ms < snapshot_ms:
+                reasons.append({
+                    "code": "HISTORICAL_ARCHIVE_RETRIEVED_BEFORE_SOURCE",
+                    "detail": "historical archive retrieval cannot predate its source snapshot",
+                })
+            label_basis = str(provenance.get("cohort_selection_label_basis") or "")
+            if "fills strictly before that hour" not in label_basis:
+                reasons.append({
+                    "code": "MISSING_CAUSAL_COHORT_LABEL_BASIS",
+                    "detail": "historical archive approval requires a point-in-time cohort label based only on fills before the selection hour",
+                })
+        elif retrieved_ms > cohort_ms:
             reasons.append({
                 "code": "COHORT_SELECTION_PRECEDES_ACTUAL_RETRIEVAL",
-                "detail": "cohort selection cutoff must be no earlier than actual leaderboard retrieval",
+                "detail": "live cohort selection cutoff must be no earlier than actual leaderboard retrieval",
             })
         if cohort_ms >= data_start_ms:
             reasons.append({
