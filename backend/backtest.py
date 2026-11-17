@@ -70,7 +70,10 @@ def run_backtest(
     higher_timeframe_candles=None,
     higher_timeframe="4h",
     require_mtf_confirmation=True,
+    direction_filter=None,
 ):
+    if direction_filter not in (None, "LONG", "SHORT"):
+        raise ValueError("direction_filter must be None, LONG or SHORT")
     if len(candles) < 52:
         raise ValueError("At least 52 candles are required for next-open backtesting")
     if volume_ratio_threshold is not None:
@@ -171,6 +174,12 @@ def run_backtest(
             "timestamp": candles[i][0],
             "side": side if side in ("LONG", "SHORT") else str(metrics.get("direction", "neutral")).upper(),
         }
+        if side in ("LONG", "SHORT") and direction_filter and side != direction_filter:
+            skipped_signals.append({"index": i, "timestamp": candles[i][0], "side": side,
+                                    "reason": "EXPERIMENT_DIRECTION_FILTER_" + direction_filter,
+                                    "stage": "experiment_filter"})
+            i += 1
+            continue
         if side not in ("LONG", "SHORT"):
             # Preserve every closed-candle rejection, including WAIT decisions.
             # One event is emitted per reason so multi-gate rejections remain auditable.
