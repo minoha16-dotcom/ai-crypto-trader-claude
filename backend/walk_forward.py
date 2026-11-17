@@ -158,6 +158,8 @@ def _evaluate_period(
             "higher_timeframe": higher_timeframe,
             "require_mtf_confirmation": require_mtf_confirmation,
         }
+    if direction_filter is not None:
+        backtest_options["direction_filter"] = direction_filter
     if signal_overrides is not None:
         backtest_options["signal_overrides"] = signal_overrides
     result = run_backtest(
@@ -166,7 +168,6 @@ def _evaluate_period(
         instrument=instrument,
         volume_ratio_threshold=volume_ratio_threshold,
         start_index=warmup_bars,
-        direction_filter=direction_filter,
         max_holding_bars=max_holding_bars,
         close_open_at_end=True,
         **backtest_options,
