@@ -85,6 +85,8 @@ def main():
     parser.add_argument("--reports", default="data/strategy-research/hyperliquid/reports.json")
     parser.add_argument("--approval-output", default="data/strategy-research/hyperliquid/approval-candidate.json")
     parser.add_argument("--max-folds", type=int, default=10)
+    parser.add_argument("--direction-modes", default="BOTH,LONG,SHORT",
+                        help="Comma-separated experiment modes: BOTH,LONG,SHORT")
     args = parser.parse_args()
 
     api_key = os.environ.get("VIKE_API_KEY", "").strip()
@@ -96,6 +98,11 @@ def main():
 
     symbols = [item.strip().upper() for item in args.symbols.split(",") if item.strip()]
     timeframes = [item.strip() for item in args.timeframes.split(",") if item.strip()]
+    direction_modes = [item.strip().upper() for item in args.direction_modes.split(",") if item.strip()]
+    if not direction_modes or any(mode not in ("BOTH", "LONG", "SHORT") for mode in direction_modes):
+        parser.error("--direction-modes must contain only BOTH, LONG and/or SHORT")
+    if len(set(direction_modes)) != len(direction_modes):
+        parser.error("--direction-modes must not contain duplicates")
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     reports = []
@@ -140,23 +147,25 @@ def main():
                     f"received {len(lower_warmup)}"
                 )
             evaluation_candles = lower_warmup + lower_scoring
-            report = evaluate_strategy_group(
-                exchange="hyperliquid", symbol=symbol, market_type="futures",
-                timeframe=timeframe, candles=evaluation_candles,
-                higher_timeframe_candles=higher,
-                higher_timeframe=args.higher_timeframe,
-                start_utc=args.start, end_utc=args.end,
-                max_folds=args.max_folds,
-            )
-            reports.append(report)
-            print(
-                f"{symbol} {timeframe}: {report['validation_status']} | "
-                f"qualified={report['qualified_examples']} | folds={report['walk_forward_folds']} | "
-                f"OOS={report['oos_trade_count']} | expectancy_R={report['net_expectancy_r']} | "
-                f"uplift_CI_low={report['uplift'].get('ci_lower')} | "
-                f"reasons={','.join(report['rejection_reasons']) or 'none'}",
-                flush=True,
-            )
+            for mode in direction_modes:
+                report = evaluate_strategy_group(
+                    exchange="hyperliquid", symbol=symbol, market_type="futures",
+                    timeframe=timeframe, candles=evaluation_candles,
+                    higher_timeframe_candles=higher,
+                    higher_timeframe=args.higher_timeframe,
+                    start_utc=args.start, end_utc=args.end,
+                    max_folds=args.max_folds,
+                    direction_filter=None if mode == "BOTH" else mode,
+                )
+                reports.append(report)
+                print(
+                    f"{symbol} {timeframe} {mode}: {report['validation_status']} | "
+                    f"qualified={report['qualified_examples']} | folds={report['walk_forward_folds']} | "
+                    f"OOS={report['oos_trade_count']} | expectancy_R={report['net_expectancy_r']} | "
+                    f"uplift_CI_low={report['uplift'].get('ci_lower')} | "
+                    f"reasons={','.join(report['rejection_reasons']) or 'none'}",
+                    flush=True,
+                )
 
     Path(args.reports).parent.mkdir(parents=True, exist_ok=True)
     Path(args.reports).write_text(json.dumps(reports, indent=2, default=str), encoding="utf-8")
