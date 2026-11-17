@@ -75,16 +75,25 @@ async def scan(exchange, symbols=None, market_type="spot", timeframe=None):
 
             metrics = analyze(candles)
             item_status = "CANDIDATE"
-            if timeframe == "15m":
+            if timeframe == "15m" and metrics["signal"] in ("LONG", "SHORT"):
                 higher_timeframe = settings.signal_higher_timeframe
                 raw_higher = await registry.ohlcv(
                     exchange, resolved_symbol, higher_timeframe,
                     MIN_SCAN_CANDLES + 1, market_type,
                 )
-                higher_candles = validate_scan_candles(
-                    raw_higher, higher_timeframe, min_candles=MIN_SCAN_CANDLES
-                )
-                higher_context = market_context(higher_candles)
+                try:
+                    higher_candles = validate_scan_candles(
+                        raw_higher, higher_timeframe, min_candles=MIN_SCAN_CANDLES
+                    )
+                    higher_context = market_context(higher_candles)
+                except ValueError as exc:
+                    rejected = _data_rejection(
+                        exchange, resolved_symbol, market_type, higher_timeframe, exc
+                    )
+                    rejected["status"] = "MTF_DATA_REJECTED"
+                    rejected["signal_timeframe"] = timeframe
+                    results.append(rejected)
+                    continue
                 metrics["higher_timeframe"] = higher_timeframe
                 metrics["higher_timeframe_context"] = higher_context
                 if not apply_higher_timeframe_confirmation(metrics, higher_context):
