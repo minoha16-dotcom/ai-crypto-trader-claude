@@ -96,7 +96,7 @@ jobs:
           START_UTC: "2026-10-16T00:00:00Z"
           END_UTC: "2026-11-16T00:00:00Z"
           COHORT_LABEL: "3x_smart"
-          WALLET_LIMIT: "200"
+          WALLET_LIMIT: "1000"
         run: |
           set -euo pipefail
           mkdir -p artifacts
