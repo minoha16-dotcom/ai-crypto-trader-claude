@@ -116,6 +116,42 @@ def count_qualified_examples(candles, timeframe, higher_timeframe_candles=None,
     return qualified
 
 
+
+def _signal_rejection_diagnostics(folds):
+    """Aggregate rejected decisions by walk-forward test fold, direction and reason."""
+    grouped = {}
+    total = 0
+    for fold_number, fold in enumerate(folds, 1):
+        period = fold.get("test", {})
+        for event in period.get("skipped_signal_diagnostics", []):
+            total += 1
+            key = (
+                event.get("side") or "unknown",
+                event.get("reason") or "unknown",
+                event.get("stage") or "execution_gate",
+            )
+            row = grouped.setdefault(key, {"count": 0, "fold_counts": {}})
+            row["count"] += 1
+            row["fold_counts"][str(fold_number)] = (
+                row["fold_counts"].get(str(fold_number), 0) + 1
+            )
+    rows = [
+        {
+            "direction": key[0],
+            "reason": key[1],
+            "stage": key[2],
+            "count": value["count"],
+            "fold_counts": value["fold_counts"],
+        }
+        for key, value in sorted(grouped.items())
+    ]
+    return {
+        "total_rejected_decisions": total,
+        "grouped_by_direction_reason_stage": rows,
+        "scope": "walk-forward test folds only; each fold is independently scored",
+    }
+
+
 def _trade_diagnostics(trades):
     """Summarize OOS outcomes by direction and exit mechanism without tuning rules."""
     by_side = {}
@@ -258,6 +294,7 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
         "oos_profit_factor": wf["aggregate_test"]["profit_factor"],
         "worst_fold_max_drawdown_pct": wf["aggregate_test"]["worst_fold_max_drawdown_pct"],
         "trade_diagnostics": _trade_diagnostics(valid_trades),
+        "signal_rejection_diagnostics": _signal_rejection_diagnostics(wf["folds"]),
         "uplift": uplift,
         "checks": checks,
         "validation_status": "accepted" if not reasons else "rejected",
