@@ -114,3 +114,12 @@ Vike states that its historical Hyperliquid data is for personal use under its
 Terms of Service and that commercial use requires written agreement. Do not
 redistribute raw archives or derived account-level records without reviewing
 the current terms and obtaining any required permission.
+
+
+## Checkpoint and resume behavior
+
+The collector accepts `--state-dir` (default `.vike-checkpoints`) and writes atomic, checksummed checkpoints for each archive day and for each wallet API phase. Checkpoints are bound to the exact cohort snapshot hash, observation dates, warm-up length, selected-wallet digest, and collector code SHA. A changed binding, corrupt checkpoint, or changed cached archive fails closed. Completed API phases are reused, while a new collection run rebuilds the output from the frozen snapshot and verified daily archives, preventing duplicate appends. The final `vike-collection-complete.json` marker is written only after every requested archive day and dataset hash have been verified.
+
+Checkpoint contents and cached Vike archives are local working data. The Actions workflow places them in the runner temporary directory and removes them before artifact upload; it does not cache or upload raw Vike data. GitHub-hosted runners are ephemeral, so cancellation destroys that local state. Cross-run continuation after cancellation requires a private persistent runner or an approved private storage service. None is configured for this repository; therefore a cancelled hosted run can safely restart, but cannot reuse its prior runner-local checkpoint. Do not add Actions cache or artifacts for the raw data to work around this limitation.
+
+Training in the Actions workflow runs only after the completion marker verifies the exact requested 2026-10-16T00:00:00Z–2026-11-16T00:00:00Z window, the dataset hash, and all 48 warm-up and observation archive-day hashes.
