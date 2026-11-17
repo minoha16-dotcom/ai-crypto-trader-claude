@@ -80,7 +80,8 @@ def _bootstrap_top_tercile_uplift(trades, seed, replicates=BOOTSTRAP_REPLICATES)
 
 def count_qualified_examples(candles, timeframe, higher_timeframe_candles=None,
                              higher_timeframe="4h", require_mtf_confirmation=True,
-                             cooldown_bars=1, start_index=199, direction_filter=None):
+                             cooldown_bars=1, start_index=199, direction_filter=None,
+                             signal_overrides=None):
     """Count eligible signal candles; adjacent examples may be autocorrelated."""
     if direction_filter not in (None, "LONG", "SHORT"):
         raise ValueError("direction_filter must be None, LONG or SHORT")
@@ -99,7 +100,7 @@ def count_qualified_examples(candles, timeframe, higher_timeframe_candles=None,
     for index in range(next_allowed_index, len(candles)):
         if index < next_allowed_index:
             continue
-        metrics = analyze(candles[:index + 1])
+        metrics = analyze(candles[:index + 1], signal_overrides=signal_overrides)
         side = metrics.get("signal")
         if side not in ("LONG", "SHORT"):
             continue
@@ -111,7 +112,10 @@ def count_qualified_examples(candles, timeframe, higher_timeframe_candles=None,
             eligible = bisect_right(higher_end_times, close_ms)
             if eligible < 200:
                 continue
-            context = market_context(higher_timeframe_candles[:eligible])
+            context = market_context(
+                higher_timeframe_candles[:eligible],
+                min_adx=(signal_overrides or {}).get("adx_min"),
+            )
             direction = "bullish" if side == "LONG" else "bearish"
             if context["regime"] != "trending" or context["direction"] != direction:
                 continue
@@ -203,7 +207,8 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
                             step_bars=100, warmup_bars=200, purge_bars=20,
                             embargo_bars=200, max_holding_bars=20, max_folds=10,
                             min_oos_trades=MIN_OOS_TRADES, bootstrap_replicates=BOOTSTRAP_REPLICATES,
-                            direction_filter=None):
+                            direction_filter=None, signal_overrides=None,
+                            require_mtf_confirmation=None, experiment_name="BASELINE"): 
     """Return a reproducible ACCEPT/REJECT report for one exact independent group."""
     if not all(isinstance(value, str) and value.strip() for value in
                (exchange, symbol, market_type, timeframe)):
@@ -218,10 +223,11 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
     ).hexdigest()
     if direction_filter not in (None, "LONG", "SHORT"):
         raise ValueError("direction_filter must be None, LONG or SHORT")
+    mtf_enabled = (timeframe == "15m") if require_mtf_confirmation is None else bool(require_mtf_confirmation)
     qualified = count_qualified_examples(
         candles, timeframe, higher_timeframe_candles, higher_timeframe,
-        timeframe == "15m", start_index=warmup_bars,
-        direction_filter=direction_filter,
+        mtf_enabled, start_index=warmup_bars,
+        direction_filter=direction_filter, signal_overrides=signal_overrides,
     )
     wf = run_walk_forward_backtest(
         candles,
@@ -240,8 +246,9 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
         candle_timeframe=timeframe,
         higher_timeframe_candles=higher_timeframe_candles,
         higher_timeframe=higher_timeframe,
-        require_mtf_confirmation=(timeframe == "15m"),
+        require_mtf_confirmation=mtf_enabled,
         direction_filter=direction_filter,
+        signal_overrides=signal_overrides,
     )
     trades = [
         row
@@ -280,8 +287,14 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
     }
     reasons = [name for name, passed in checks.items() if not passed]
     base_config_hash = current_strategy_config_hash()
+    experiment_payload = {
+        "direction_filter": direction_filter or "BOTH",
+        "signal_overrides": signal_overrides or {},
+        "require_mtf_confirmation": mtf_enabled,
+        "experiment_name": experiment_name,
+    }
     experiment_config_hash = hashlib.sha256(
-        (base_config_hash + "|direction_filter=" + (direction_filter or "BOTH")).encode()
+        (base_config_hash + "|" + json.dumps(experiment_payload, sort_keys=True)).encode()
     ).hexdigest()
     report_core = {
         "group": {
@@ -289,7 +302,11 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
             "market_type": market_type, "timeframe": timeframe,
         },
         "strategy_version": "3.0.0",
-        "experiment": {"type": "direction_isolation", "mode": direction_filter or "BOTH"},
+        "experiment": {
+            "type": "single_factor_signal_rule",
+            "name": experiment_name,
+            **experiment_payload,
+        },
         "base_config_hash": base_config_hash,
         "config_hash": experiment_config_hash,
         "data_sha256": data_hash,
