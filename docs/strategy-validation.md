@@ -113,7 +113,7 @@ The committed artifact is `research_only` and contains no approved groups.
 An exact Exchange × Symbol × Market Type × Timeframe group requires:
 - at least 200 qualified examples for that independent group;
 - at least three valid walk-forward folds;
-- sufficient OOS trades and positive net expectancy after modeled costs;
+- non-zero OOS trades and positive net expectancy after modeled costs;
 - a positive, adequately powered confidence interval for the pre-registered
   uplift comparison;
 - a saved validation report ID, matching strategy version and configuration
