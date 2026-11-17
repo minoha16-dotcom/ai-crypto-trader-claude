@@ -11,6 +11,9 @@ def _fake_wf(trade_count=60, folds=3, expectancy=0.4):
             "entry_timestamp": index,
             "exit_timestamp": index + 1,
             "pnl": 1.0,
+            "side": "LONG" if index % 2 == 0 else "SHORT",
+            "exit_reason": "STOP" if index % 4 == 0 else "TARGET",
+            "bars_held": 5,
         }
         for index in range(trade_count)
     ]
@@ -65,6 +68,11 @@ def test_report_accepts_only_when_every_group_gate_passes(monkeypatch):
     assert report["walk_forward_folds"] == 3
     assert report["oos_trade_count"] == 60
     assert report["uplift"]["ci_lower"] > 0
+    diagnostics = report["trade_diagnostics"]
+    assert diagnostics["by_side"]["LONG"]["trades"] == 30
+    assert diagnostics["by_side"]["SHORT"]["trades"] == 30
+    assert diagnostics["by_exit_reason"]["STOP"]["trades"] == 15
+    assert diagnostics["stop_exit_share_pct"] == pytest.approx(25.0)
 
 
 def test_report_rejects_groups_below_sample_and_fold_thresholds(monkeypatch):
