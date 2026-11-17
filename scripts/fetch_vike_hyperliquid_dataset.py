@@ -45,6 +45,7 @@ FILL_COLUMNS = (
     "fee_token", "order_id", "trade_id", "closed_pnl", "start_position",
 )
 DEFAULT_COHORT = "3x_smart"
+MIN_COHORT_SNAPSHOT_COUNT = 6
 START_POSITION_AVAILABLE_FROM_MS = int(
     datetime(2026, 9, 29, tzinfo=timezone.utc).timestamp() * 1000
 )
@@ -207,9 +208,9 @@ def _select_wallets_from_positions(
             & (pl.col("snapshot_ts") < pl.lit(end))
             & (pl.col("pnl_cohort") == cohort_label)
         )
-        .select("wallet")
+        .group_by("wallet")
+        .agg(pl.col("snapshot_ts").max().alias("last_seen_in_selection_hour"))
         .drop_nulls()
-        .unique()
         .collect(engine="streaming")
     )
     wallets = sorted(
@@ -222,7 +223,15 @@ def _select_wallets_from_positions(
             ("ai-crypto-v1|" + address).encode("ascii")
         ).hexdigest(),
     )
-    return wallets[:wallet_limit]
+    latest_snapshot = selected["last_seen_in_selection_hour"].max()
+    distinct_snapshot_count = selected["last_seen_in_selection_hour"].n_unique()
+    if latest_snapshot is None:
+        return [], None, int(distinct_snapshot_count)
+    return (
+        wallets[:wallet_limit],
+        _as_ms(latest_snapshot, "latest cohort selection snapshot"),
+        int(distinct_snapshot_count),
+    )
 
 
 def _write_snapshot(
@@ -269,13 +278,20 @@ def _write_snapshot(
                 "Vike positions archive is missing required cohort columns: "
                 + ", ".join(sorted(needed - set(schema)))
             )
-        wallets = _select_wallets_from_positions(
+        wallets, cohort_selection_as_of_ms, distinct_snapshot_count = _select_wallets_from_positions(
             lazy,
             selection_start_ms=selection_start_ms,
             selection_end_ms=selection_end_ms,
             cohort_label=cohort_label,
             wallet_limit=wallet_limit,
         )
+    if distinct_snapshot_count < MIN_COHORT_SNAPSHOT_COUNT:
+        raise RuntimeError(
+            "the selected PnL cohort appears in too few distinct position snapshots "
+            f"({distinct_snapshot_count}); at least {MIN_COHORT_SNAPSHOT_COUNT} are required"
+        )
+    if cohort_selection_as_of_ms is None or cohort_selection_as_of_ms >= start_ms:
+        raise RuntimeError("the historical cohort selection did not finish strictly before the observation start")
     if not wallets:
         raise RuntimeError(
             f"No wallets with pnl_cohort={cohort_label!r} were open in the hour "
@@ -329,7 +345,9 @@ def _write_snapshot(
     print(f"SNAPSHOT {output}")
     print(f"SNAPSHOT_SHA256 {_sha256_file(output)}")
     print(f"COHORT_LABEL {cohort_label}")
-    print(f"COHORT_AS_OF_UTC {_iso(selection_start_ms)}")
+    print(f"COHORT_LABEL_AS_OF_UTC {_iso(selection_start_ms)}")
+    print(f"COHORT_SELECTION_CUTOFF_UTC {_iso(cohort_selection_as_of_ms)}")
+    print(f"COHORT_DISTINCT_SNAPSHOTS {distinct_snapshot_count}")
     print(f"WALLETS_SELECTED {len(wallets)}")
 
 
