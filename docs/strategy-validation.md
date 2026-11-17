@@ -277,10 +277,12 @@ The report includes the source and data SHA-256, actual date range, candle
 coverage, separated eligible signal events, fold boundaries and metrics,
 trade-level OOS R multiples and signal scores, net expectancy, profit factor,
 worst-fold drawdown, top-tercile uplift, bootstrap 95% confidence interval,
-and explicit pass/fail reasons. Qualified examples are separated by a
-20-bar signal cooldown to avoid counting every adjacent candle as a new
-independent event. The top-tercile comparison is made on executed OOS trades,
-not on an unobserved hypothetical signal set.
+and explicit pass/fail reasons. Qualified examples count each eligible signal candle, not statistically
+independent trades; adjacent samples may be autocorrelated and this count is
+not itself proof of effective sample size. The uplift interval uses a
+circular moving-block bootstrap over chronological OOS trades (5-trade blocks)
+to reduce, but not eliminate, dependence concerns. The top-tercile comparison
+is made on executed OOS trades, not on an unobserved hypothetical signal set.
 
 Acceptance requires at least 200 qualified examples, at least 3 folds, at
 least 30 OOS trades, positive net expectancy, a positive lower bound of the
