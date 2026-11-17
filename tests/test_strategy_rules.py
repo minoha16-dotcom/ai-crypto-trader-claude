@@ -153,7 +153,7 @@ def test_15m_backtest_does_not_use_future_4h_candles(monkeypatch):
     high = _higher_rising_candles(500)
     # The first 15m decision closes when only 199 higher-timeframe candles
     # have closed. The remaining 301 rows are future data and must not leak in.
-    lower_start = 201 * 14_400_000 - 45 * 900_000
+    lower_start = 200 * 14_400_000 - 45 * 900_000
     result = run_backtest(
         _lower_flat_candles(lower_start),
         candle_timeframe="15m",
@@ -175,7 +175,7 @@ def test_15m_backtest_accepts_only_closed_aligned_4h_context(monkeypatch):
     monkeypatch.setattr(backtest_module, "analyze", one_long)
     high = _higher_rising_candles(500)
     # This decision closes exactly at the 200th 4h candle close.
-    lower_start = 200 * 14_400_000 - 45 * 900_000
+    lower_start = 201 * 14_400_000 - 45 * 900_000
     result = run_backtest(
         _lower_flat_candles(lower_start),
         candle_timeframe="15m",
