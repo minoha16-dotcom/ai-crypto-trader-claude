@@ -99,10 +99,17 @@ def _period_summary(result, starting_balance, candle_count):
         ),
         "oos_trades": [
             {
+                "side": trade.get("side"),
+                "exit_reason": trade.get("exit_reason"),
+                "bars_held": max(
+                    0, int(trade.get("exit_index", 0)) - int(trade.get("entry_index", 0)) + 1
+                ),
                 "r_multiple": float(trade.get("r_multiple", 0.0)),
                 "signal_score": float(trade.get("signal_score", 0.0)),
                 "entry_timestamp": trade.get("entry_timestamp"),
                 "exit_timestamp": trade.get("exit_timestamp"),
+                "gross_pnl": float(trade.get("gross_pnl", 0.0)),
+                "costs": float(trade.get("costs", 0.0)),
                 "pnl": float(trade.get("pnl", 0.0)),
             }
             for trade in trades
