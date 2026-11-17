@@ -64,24 +64,17 @@ def test_ema200_warmup_cannot_create_directional_signal():
     assert "EMA200_HISTORY_NOT_READY" in result["filter_reasons"]
 
 
-@pytest.mark.parametrize("side,direction,expected", [
-    ("LONG", "bullish", True),
-    ("SHORT", "bearish", True),
-    ("LONG", "bearish", False),
-    ("SHORT", "bullish", False),
-    ("LONG", "neutral", False),
-    ("LONG", "bullish", False),
+@pytest.mark.parametrize("side,regime,direction,expected", [
+    ("LONG", "trending", "bullish", True),
+    ("SHORT", "trending", "bearish", True),
+    ("LONG", "trending", "bearish", False),
+    ("SHORT", "trending", "bullish", False),
+    ("LONG", "trending", "neutral", False),
+    ("LONG", "ranging", "bullish", False),
 ])
-def test_mtf_gate_requires_same_trending_direction(side, direction, expected):
+def test_mtf_gate_requires_same_trending_direction(side, regime, direction, expected):
     metrics = {"signal": side, "filter_reasons": []}
-    context = {
-        "regime": "ranging" if direction == "bullish" and not expected and side == "LONG" and direction == "bullish" else "trending",
-        "direction": direction,
-    }
-    if side == "LONG" and direction == "bullish" and expected:
-        context["regime"] = "trending"
-    if side == "SHORT" and direction == "bearish" and expected:
-        context["regime"] = "trending"
+    context = {"regime": regime, "direction": direction}
     confirmed = apply_higher_timeframe_confirmation(metrics, context)
     assert confirmed is expected
     if not expected:
