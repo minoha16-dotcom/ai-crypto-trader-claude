@@ -345,6 +345,8 @@ def run_walk_forward_backtest(
             "test_windows_overlap": False,
             "period_balances_reset_independently": True,
             "strategy_parameters": "fixed from backend Settings; no automatic tuning",
+            "mtf_confirmation": bool(candle_timeframe == "15m" and require_mtf_confirmation),
+            "higher_timeframe": higher_timeframe if candle_timeframe == "15m" and require_mtf_confirmation else None,
             "train_validation_role": (
                 "diagnostic in-sample and validation measurements; no parameter "
                 "selection is performed by this runner"
