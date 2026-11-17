@@ -137,7 +137,7 @@ def run_walk_forward_backtest(
     validation_bars=100,
     test_bars=100,
     step_bars=100,
-    warmup_bars=50,
+    warmup_bars=200,
     purge_bars=20,
     embargo_bars=None,
     max_holding_bars=20,
@@ -163,7 +163,7 @@ def run_walk_forward_backtest(
     validation_bars = _integer("validation_bars", validation_bars, 3)
     test_bars = _integer("test_bars", test_bars, 2)
     step_bars = _integer("step_bars", step_bars, 1)
-    warmup_bars = _integer("warmup_bars", warmup_bars, 50)
+    warmup_bars = _integer("warmup_bars", warmup_bars, 200)
     purge_bars = _integer("purge_bars", purge_bars, 0)
     max_holding_bars = _integer("max_holding_bars", max_holding_bars, 1)
     if embargo_bars is None:
