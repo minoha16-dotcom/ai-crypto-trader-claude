@@ -1,6 +1,9 @@
 name: Hyperliquid Strategy Research
 
 on:
+  push:
+    branches:
+      - feature/scan-data-validation-v1
   workflow_dispatch:
     inputs:
       symbols:
