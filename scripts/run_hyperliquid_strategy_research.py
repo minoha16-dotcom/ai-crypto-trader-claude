@@ -160,22 +160,36 @@ def main():
                     f"received {len(lower_warmup)}"
                 )
             evaluation_candles = lower_warmup + lower_scoring
-            for mode in direction_modes:
+            experiments = [
+                ("BASELINE_BOTH", None, {}, True),
+                ("BASELINE_LONG", "LONG", {}, True),
+                ("LONG_NO_EMA200", "LONG", {"long_require_ema200": False}, True),
+                ("LONG_NO_EMA20_50", "LONG", {"long_require_ema20_50": False}, True),
+                ("LONG_ADX18", "LONG", {"adx_min": 18.0}, True),
+                ("LONG_ADX15", "LONG", {"adx_min": 15.0}, True),
+                ("LONG_MTF_OFF", "LONG", {}, False),
+            ]
+            for experiment_name, side_filter, overrides, mtf_enabled in experiments:
                 report = evaluate_strategy_group(
                     exchange="hyperliquid", symbol=symbol, market_type="futures",
                     timeframe=timeframe, candles=evaluation_candles,
                     higher_timeframe_candles=higher,
                     higher_timeframe=args.higher_timeframe,
                     start_utc=args.start, end_utc=args.end,
+                    train_bars=250, validation_bars=100,
+                    test_bars=args.test_bars, step_bars=args.step_bars,
                     max_folds=args.max_folds,
-                    direction_filter=None if mode == "BOTH" else mode,
+                    direction_filter=side_filter,
+                    signal_overrides=overrides,
+                    require_mtf_confirmation=mtf_enabled,
+                    experiment_name=experiment_name,
                 )
                 reports.append(report)
                 print(
-                    f"{symbol} {timeframe} {mode}: {report['validation_status']} | "
+                    f"{symbol} {timeframe} {experiment_name}: {report['validation_status']} | "
                     f"qualified={report['qualified_examples']} | folds={report['walk_forward_folds']} | "
                     f"OOS={report['oos_trade_count']} | expectancy_R={report['net_expectancy_r']} | "
-                    f"uplift_CI_low={report['uplift'].get('ci_lower')} | "
+                    f"config={report['config_hash'][:12]} | "
                     f"reasons={','.join(report['rejection_reasons']) or 'none'}",
                     flush=True,
                 )
