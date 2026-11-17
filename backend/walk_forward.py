@@ -81,6 +81,17 @@ def _period_summary(result, starting_balance, candle_count):
         ),
         "open_positions_at_end": len(result.get("open_positions", [])),
         "skipped_signals": len(result.get("skipped_signals", [])),
+        "skipped_signal_diagnostics": [
+            {
+                "index": row.get("index"),
+                "timestamp": row.get("timestamp"),
+                "side": row.get("side"),
+                "reason": row.get("reason"),
+                "stage": row.get("stage", "execution_gate"),
+                "indicators": row.get("indicators"),
+            }
+            for row in result.get("skipped_signals", [])
+        ],
         "starting_balance": float(starting_balance),
         "ending_balance": float(result.get("ending_balance", starting_balance)),
         "ending_equity": float(result.get("ending_equity", starting_balance)),
