@@ -143,7 +143,7 @@ def _evaluate_period(
     candles, start, end, warmup_bars, starting_balance,
     instrument, volume_ratio_threshold, max_holding_bars,
     candle_timeframe=None, higher_timeframe_candles=None, higher_timeframe="4h",
-    require_mtf_confirmation=True,
+    require_mtf_confirmation=True, direction_filter=None,
 ):
     history_start = start - warmup_bars
     period_candles = candles[history_start:end]
@@ -163,6 +163,7 @@ def _evaluate_period(
         instrument=instrument,
         volume_ratio_threshold=volume_ratio_threshold,
         start_index=warmup_bars,
+        direction_filter=direction_filter,
         max_holding_bars=max_holding_bars,
         close_open_at_end=True,
         **backtest_options,
@@ -192,6 +193,7 @@ def run_walk_forward_backtest(
     higher_timeframe_candles=None,
     higher_timeframe="4h",
     require_mtf_confirmation=True,
+    direction_filter=None,
 ):
     """Evaluate a fixed strategy in non-overlapping chronological test folds.
 
@@ -282,7 +284,7 @@ def run_walk_forward_backtest(
             candles, train_start, train_end, warmup_bars, starting_balance,
             instrument, volume_ratio_threshold, max_holding_bars,
             candle_timeframe, higher_timeframe_candles, higher_timeframe,
-            require_mtf_confirmation,
+            require_mtf_confirmation, direction_filter,
         )
         validation_result = _evaluate_period(
             candles, validation_start, validation_end, warmup_bars, starting_balance,
