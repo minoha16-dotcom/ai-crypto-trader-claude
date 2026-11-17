@@ -5,7 +5,7 @@ import pytest
 from backend.config import settings
 from backend.indicators import analyze, directional_indicators, market_context
 from backend.scanner import apply_higher_timeframe_confirmation
-from backend.strategy_approval import approval_for_group
+from backend.strategy_approval import approval_for_group, current_strategy_config_hash
 
 
 def rising_candles(count=260):
@@ -115,6 +115,8 @@ def test_strategy_approval_requires_exact_group_and_report(tmp_path):
             "timeframe": "15m",
             "strategy_version": "3.0.0",
             "validation_report_id": "wf-report-001",
+            "config_hash": current_strategy_config_hash(),
+            "expires_at": "2099-01-01T00:00:00+00:00",
             "status": "approved",
         }],
     }), encoding="utf-8")
