@@ -56,6 +56,28 @@ Example:
 GET /api/walk-forward?exchange=kucoin&symbol=BTC/USDT&market_type=spot&timeframe=1h&limit=1500&train_bars=250&validation_bars=100&test_bars=100&step_bars=100&warmup_bars=50&purge_bars=20&embargo_bars=50&max_holding_bars=20&window_mode=rolling&max_folds=10
 ```
 
+
+## 0.1 Live scan data gate (Phase 1)
+
+The live scanner now requests 501 OHLCV rows and passes them through a
+fail-closed validation gate before indicator analysis. It retains the latest
+500 fully closed candles; a candle is closed only when its open timestamp plus
+the timeframe duration is no later than the current UTC clock. The forming
+candle is never analyzed.
+
+The gate rejects malformed/non-finite OHLCV, non-positive prices, negative
+volume, inconsistent high/low values, non-integral or misaligned timestamps,
+duplicate/out-of-order timestamps, and any missing timeframe interval. It
+also rejects fewer than 500 closed candles. Rejections are returned per
+symbol with `status=DATA_REJECTED`, a stable `reason_code`, and a diagnostic
+message; they are not persisted as technical WAIT signals.
+
+The 500-candle requirement is a warm-up/data-quality policy, not evidence that
+a strategy is profitable. It provides history beyond the 200-period EMA
+planned for the next strategy phase. Exchange-specific timestamp alignment
+must be verified before adding further timeframes; weekly candles use the
+Monday UTC boundary.
+
 ## 1. Objective and non-goals
 
 Build a repeatable evaluation process that estimates whether a rule set
