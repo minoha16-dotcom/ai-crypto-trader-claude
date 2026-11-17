@@ -158,6 +158,8 @@ def _evaluate_period(
             "higher_timeframe": higher_timeframe,
             "require_mtf_confirmation": require_mtf_confirmation,
         }
+    if signal_overrides is not None:
+        backtest_options["signal_overrides"] = signal_overrides
     result = run_backtest(
         period_candles,
         starting_balance=starting_balance,
@@ -165,7 +167,6 @@ def _evaluate_period(
         volume_ratio_threshold=volume_ratio_threshold,
         start_index=warmup_bars,
         direction_filter=direction_filter,
-        signal_overrides=signal_overrides,
         max_holding_bars=max_holding_bars,
         close_open_at_end=True,
         **backtest_options,
