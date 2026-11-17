@@ -261,3 +261,50 @@ consistent fee/risk assumptions with the existing paper engine.
 
 No threshold or strategy should be labelled validated until all pre-registered
 folds and ablations have been run and their out-of-sample results reviewed.
+
+
+## 4. Automated per-group research reports
+
+\`scripts/run_hyperliquid_strategy_research.py\` downloads historical Hyperliquid
+perpetual OHLCV from Vike's \`/ohlcv/export\` endpoint and evaluates each exact
+\`Exchange × Symbol × Market Type × Timeframe\` group independently. The default
+research window is **2026-10-16 00:00 UTC through 2026-11-16 00:00 UTC**. It
+downloads 200 lower-timeframe warm-up bars before the scoring window; for 15m
+groups it also downloads the preceding 200 closed 4h bars. Warm-up candles are
+not counted as qualified examples or scored as trades.
+
+The report includes the source and data SHA-256, actual date range, candle
+coverage, separated eligible signal events, fold boundaries and metrics,
+trade-level OOS R multiples and signal scores, net expectancy, profit factor,
+worst-fold drawdown, top-tercile uplift, bootstrap 95% confidence interval,
+and explicit pass/fail reasons. Qualified examples are separated by a
+20-bar signal cooldown to avoid counting every adjacent candle as a new
+independent event. The top-tercile comparison is made on executed OOS trades,
+not on an unobserved hypothetical signal set.
+
+Acceptance requires at least 200 qualified examples, at least 3 folds, at
+least 30 OOS trades, positive net expectancy, a positive lower bound of the
+top-tercile uplift bootstrap interval, and no positions left open at fold
+boundaries. Every failed check is recorded in \`rejection_reasons\`.
+
+Run locally from the repository root (PowerShell):
+
+\`\`\`powershell
+$env:VIKE_API_KEY = "your Vike key"
+python scripts/run_hyperliquid_strategy_research.py
+\`\`\`
+
+The key is read only from the process environment; never commit it, put it in
+\`.env.example\`, or paste it into chat. The default output is stored under
+\`data/strategy-research/hyperliquid/\` and should remain local/ignored. The
+script writes a report and a **research-only** candidate artifact. It does not
+overwrite the active scanner approval file.
+
+Important scope distinction: this runner downloads market OHLCV and evaluates
+the current fixed technical strategy. It does not yet download the archived
+fills of the 100 point-in-time selected Hyperliquid wallets, rebuild their
+open positions, or reconcile wallet funding. Those wallet-level labels are a
+separate data-ingestion task and must not be represented as collected or used
+for model training by this OHLCV run. Hyperliquid is also not one of the
+application's configured live exchange adapters, so its research reports
+cannot enable live scanner signals.
