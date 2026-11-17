@@ -47,7 +47,7 @@ def test_all_mcp_tools_route_to_paper_backend_endpoints(monkeypatch):
         ("GET", "/api/opportunities", {"limit": 4}, None),
         ("GET", "/api/backtest", {
             "exchange": "okx", "symbol": "BTC/USDT", "market_type": "spot",
-            "timeframe": "4h", "limit": 300,
+            "timeframe": "4h", "limit": 300, "mtf_confirmation": True,
         }, None),
         ("GET", "/api/signals", {"limit": 5}, None),
         ("GET", "/api/account", None, None),
