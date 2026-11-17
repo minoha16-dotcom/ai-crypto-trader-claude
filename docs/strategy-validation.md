@@ -99,7 +99,7 @@ candle. The 4h context must be trending and have the same bullish/bearish
 direction. Neutral, ranging, opposite-direction, or invalid higher-timeframe
 data blocks the candidate. Other scan timeframes do not yet apply this 15m/4h
 filter; compare 15m alone against 15m+4h in controlled walk-forward research
-before considering a different production default.
+before considering a different production default. The backtest and Walk-Forward APIs expose `mtf_confirmation=false` for the 15m-only baseline; production scanning does not expose this bypass.
 
 The trade plan uses a stop distance of max(2×ATR, 0.5% of price) and the
 configured gross reward/risk target. Both live analysis and the historical
