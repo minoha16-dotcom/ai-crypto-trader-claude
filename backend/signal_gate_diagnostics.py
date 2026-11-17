@@ -17,7 +17,7 @@ def long_gate_diagnostics(candles, timeframe, higher_timeframe_candles=None,
     pairwise = {
         f"{left}&{right}": {"both_pass": 0, "left_pass_right_fail": 0,
                             "left_fail_right_pass": 0, "both_fail": 0}
-        for left, right in combinations(gates[:4], 2)
+        for left, right in combinations(gates, 2)
     }
     interval_ms = timeframe_milliseconds(timeframe)
     higher_interval_ms = timeframe_milliseconds(higher_timeframe)
@@ -61,7 +61,7 @@ def long_gate_diagnostics(candles, timeframe, higher_timeframe_candles=None,
                 counts[name]["not_applicable"] += 1
             else:
                 counts[name]["pass" if value else "fail"] += 1
-        for left, right in combinations(gates[:4], 2):
+        for left, right in combinations(gates, 2):
             a, b = values[left], values[right]
             key = f"{left}&{right}"
             if a and b:
