@@ -194,3 +194,21 @@ def test_net_reward_risk_is_a_hard_gate_not_a_score_override(monkeypatch):
     assert result["signal"] == "WAIT"
     assert result["score"] == 0
     assert "NET_REWARD_RISK_BELOW_MINIMUM" in result["filter_reasons"]
+
+
+def test_15m_backtest_can_run_unfiltered_baseline_without_4h(monkeypatch):
+    calls = {"count": 0}
+
+    def one_long(_history, volume_ratio_threshold=None):
+        calls["count"] += 1
+        return {"signal": "LONG" if calls["count"] == 1 else "WAIT", "price": 100, "atr14": 2}
+
+    monkeypatch.setattr(backtest_module, "analyze", one_long)
+    result = run_backtest(
+        _lower_flat_candles(200 * 14_400_000 - 45 * 900_000),
+        candle_timeframe="15m",
+        require_mtf_confirmation=False,
+        max_holding_bars=1,
+    )
+    assert result["trade_count"] == 1
+    assert result["assumptions"]["mtf_confirmation"] is False
