@@ -403,7 +403,7 @@ async def walk_forward(
     validation_bars: int = 100,
     test_bars: int = 100,
     step_bars: int = 100,
-    warmup_bars: int = 50,
+    warmup_bars: int = 200,
     purge_bars: int = 20,
     embargo_bars: int | None = None,
     max_holding_bars: int = 20,
