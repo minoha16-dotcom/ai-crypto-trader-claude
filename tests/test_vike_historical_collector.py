@@ -9,6 +9,7 @@ from scripts.fetch_vike_hyperliquid_dataset import (
     _fill_direction,
     _history_start_ms,
     _native_fill,
+    _normalize_cohort_label,
     _select_wallets_from_positions,
 )
 
@@ -53,7 +54,7 @@ def test_point_in_time_cohort_filters_exact_previous_utc_hour_and_label():
         frame,
         selection_start_ms=int(hour_start.timestamp() * 1000),
         selection_end_ms=int(datetime(2026, 10, 16, 0, 0, tzinfo=timezone.utc).timestamp() * 1000),
-        cohort_label="3x smart",
+        cohort_label="3x_smart",
         wallet_limit=10,
     )
 
@@ -135,3 +136,22 @@ def test_warmup_cannot_cross_before_start_position_schema_availability():
 
     with pytest.raises(ValueError, match="start_position field"):
         _history_start_ms(start, 18)
+
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("3x_smart", "3x smart"),
+        ("3x smart", "3x smart"),
+        ("2X_SMART", "2x smart"),
+        ("smart", "smart"),
+    ],
+)
+def test_normalize_cohort_label_accepts_api_slug_and_archive_display_value(raw, expected):
+    assert _normalize_cohort_label(raw) == expected
+
+
+def test_normalize_cohort_label_rejects_unknown_value():
+    with pytest.raises(ValueError, match="unsupported Vike PnL cohort"):
+        _normalize_cohort_label("top trader")
