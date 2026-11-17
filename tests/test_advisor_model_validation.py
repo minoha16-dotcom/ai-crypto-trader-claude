@@ -11,6 +11,7 @@ from backend.advisor_model_validation import (
     predict_ridge,
     train_validate_group,
     walk_forward_predict,
+    _manifest_rejection_reasons,
 )
 
 
@@ -754,4 +755,52 @@ def test_approval_rejects_cohort_cutoff_earlier_than_actual_leaderboard_retrieva
     assert any(
         reason["code"] == "COHORT_SELECTION_PRECEDES_ACTUAL_RETRIEVAL"
         for reason in result["rejection_reasons"]
+    )
+
+
+
+def test_causal_historical_archive_accepts_later_retrieval_without_lookahead():
+    manifest = _manifest()
+    manifest.update({
+        "source_snapshot_kind": "historical_archive_causal",
+        "source_snapshot_utc": "2026-10-15T23:00:00+00:00",
+        "leaderboard_retrieved_at_utc": "2026-11-17T08:00:00+00:00",
+        "cohort_selection_as_of_utc": "2026-10-15T23:00:00+00:00",
+        "cohort_selection_label_basis": (
+            "start_of_snapshot_clock_hour; fills strictly before that hour"
+        ),
+        "data_start_utc": "2026-10-16T00:00:00+00:00",
+        "data_end_utc": "2026-11-16T00:00:00+00:00",
+    })
+
+    reasons = _manifest_rejection_reasons(
+        manifest,
+        {},
+        dataset_sha256="f" * 64,
+    )
+
+    assert reasons == []
+
+
+def test_causal_historical_archive_requires_pre_hour_label_basis():
+    manifest = _manifest()
+    manifest.update({
+        "source_snapshot_kind": "historical_archive_causal",
+        "source_snapshot_utc": "2026-10-15T23:00:00+00:00",
+        "leaderboard_retrieved_at_utc": "2026-11-17T08:00:00+00:00",
+        "cohort_selection_as_of_utc": "2026-10-15T23:00:00+00:00",
+        "cohort_selection_label_basis": "unknown cohort basis",
+        "data_start_utc": "2026-10-16T00:00:00+00:00",
+        "data_end_utc": "2026-11-16T00:00:00+00:00",
+    })
+
+    reasons = _manifest_rejection_reasons(
+        manifest,
+        {},
+        dataset_sha256="f" * 64,
+    )
+
+    assert any(
+        row["code"] == "MISSING_CAUSAL_COHORT_LABEL_BASIS"
+        for row in reasons
     )

@@ -1,0 +1,193 @@
+from datetime import datetime, timezone
+
+import polars as pl
+import pytest
+
+from scripts.fetch_vike_hyperliquid_dataset import (
+    START_POSITION_AVAILABLE_FROM_MS,
+    _daily_dates,
+    _fill_direction,
+    _history_start_ms,
+    _native_fill,
+    _normalize_cohort_label,
+    _select_wallets_from_positions,
+    _read_checkpoint,
+    _write_checkpoint,
+)
+
+
+def _address(last_hex: str) -> str:
+    return "0x" + ("0" * 39) + last_hex
+
+
+def test_point_in_time_cohort_filters_exact_previous_utc_hour_and_label():
+    hour_start = datetime(2026, 10, 15, 23, 0, tzinfo=timezone.utc)
+    rows = [
+        {
+            "wallet": _address(str(index)),
+            "snapshot_ts": datetime(2026, 10, 15, 23, minute, tzinfo=timezone.utc),
+            "pnl_cohort": "3x smart",
+        }
+        for index, minute in enumerate((0, 10, 20, 30, 40, 59), start=1)
+    ]
+    rows.extend([
+        {
+            # Prior hour is outside the selection hour.
+            "wallet": _address("7"),
+            "snapshot_ts": datetime(2026, 10, 15, 22, 59, tzinfo=timezone.utc),
+            "pnl_cohort": "3x smart",
+        },
+        {
+            # A different cohort in the correct hour is not selected.
+            "wallet": _address("8"),
+            "snapshot_ts": datetime(2026, 10, 15, 23, 15, tzinfo=timezone.utc),
+            "pnl_cohort": "2x smart",
+        },
+        {
+            # End timestamp is exclusive.
+            "wallet": _address("9"),
+            "snapshot_ts": datetime(2026, 10, 16, 0, 0, tzinfo=timezone.utc),
+            "pnl_cohort": "3x smart",
+        },
+    ])
+    frame = pl.DataFrame(rows).lazy()
+
+    selected, selection_cutoff_ms, snapshot_count = _select_wallets_from_positions(
+        frame,
+        selection_start_ms=int(hour_start.timestamp() * 1000),
+        selection_end_ms=int(datetime(2026, 10, 16, 0, 0, tzinfo=timezone.utc).timestamp() * 1000),
+        cohort_label="3x_smart",
+        wallet_limit=10,
+    )
+
+    assert set(selected) == {_address(str(index)) for index in range(1, 7)}
+    assert len(selected) == 6
+    assert selection_cutoff_ms == int(datetime(2026, 10, 15, 23, 59, tzinfo=timezone.utc).timestamp() * 1000)
+    assert snapshot_count == 6
+
+@pytest.mark.parametrize(
+    ("start_position", "size", "side", "expected"),
+    [
+        (0.0, 1.0, "buy", "Open Long"),
+        (0.0, 1.0, "sell", "Open Short"),
+        (2.0, 1.0, "buy", "Add Long"),
+        (2.0, 1.0, "sell", "Close Long"),
+        (-2.0, 1.0, "sell", "Add Short"),
+        (-2.0, 1.0, "buy", "Close Short"),
+    ],
+)
+def test_fill_direction_uses_start_position_and_side(start_position, size, side, expected):
+    assert _fill_direction(start_position, size, side) == expected
+
+
+def test_fill_direction_rejects_unknown_or_nonpositive_size():
+    assert _fill_direction(None, 1.0, "buy") == "UNCLASSIFIED"
+    assert _fill_direction(0.0, 0.0, "buy") == "UNCLASSIFIED"
+    assert _fill_direction(0.0, 1.0, "unknown") == "UNCLASSIFIED"
+    assert _fill_direction(1.0, 2.0, "sell") == "UNCLASSIFIED"
+
+
+def test_native_fill_maps_vike_archive_schema_to_hyperliquid_position_schema():
+    fill = _native_fill({
+        "fill_ts": datetime(2026, 10, 16, 1, 2, tzinfo=timezone.utc),
+        "wallet": _address("a"),
+        "asset": "BTC",
+        "side": "buy",
+        "size_token": 0.25,
+        "price": 65000.0,
+        "fee": 1.2,
+        "fee_token": "USDC",
+        "order_id": 1234,
+        "trade_id": 5678,
+        "closed_pnl": -12.5,
+        "start_position": -0.25,
+    })
+
+    assert fill["coin"] == "BTC"
+    assert fill["time"] == int(datetime(2026, 10, 16, 1, 2, tzinfo=timezone.utc).timestamp() * 1000)
+    assert fill["px"] == 65000.0
+    assert fill["sz"] == 0.25
+    assert fill["dir"] == "Close Short"
+    assert fill["fee"] == 1.2
+    assert fill["feeToken"] == "USDC"
+    assert fill["oid"] == 1234
+    assert fill["tid"] == 5678
+    assert fill["closedPnl"] == -12.5
+    assert fill["startPosition"] == -0.25
+
+
+def test_daily_dates_respects_exclusive_end_boundary():
+    start = int(datetime(2026, 10, 16, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
+    end = int(datetime(2026, 11, 16, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
+
+    days = _daily_dates(start, end)
+
+    assert len(days) == 31
+    assert days[0] == "2026-10-16"
+    assert days[-1] == "2026-11-15"
+
+
+def test_default_warmup_starts_on_start_position_schema_availability_date():
+    start = int(datetime(2026, 10, 16, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
+
+    assert _history_start_ms(start, 17) == START_POSITION_AVAILABLE_FROM_MS
+
+
+def test_warmup_cannot_cross_before_start_position_schema_availability():
+    start = int(datetime(2026, 10, 16, 0, 0, tzinfo=timezone.utc).timestamp() * 1000)
+
+    with pytest.raises(ValueError, match="start_position field"):
+        _history_start_ms(start, 18)
+
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("3x_smart", "3x smart"),
+        ("3x smart", "3x smart"),
+        ("2X_SMART", "2x smart"),
+        ("smart", "smart"),
+    ],
+)
+def test_normalize_cohort_label_accepts_api_slug_and_archive_display_value(raw, expected):
+    assert _normalize_cohort_label(raw) == expected
+
+
+def test_normalize_cohort_label_rejects_unknown_value():
+    with pytest.raises(ValueError, match="unsupported Vike PnL cohort"):
+        _normalize_cohort_label("top trader")
+
+
+def test_checkpoint_round_trip_is_atomic_and_bound_to_inputs(tmp_path):
+    path = tmp_path / "state" / "day.json"
+    binding = {
+        "start": "2026-10-16T00:00:00Z",
+        "end": "2026-11-16T00:00:00Z",
+        "snapshot_sha256": "a" * 64,
+        "collector_code_sha": "b" * 40,
+    }
+    _write_checkpoint(path, binding=binding, state={"rows": 2, "archive_sha256": "c" * 64})
+
+    resumed = _read_checkpoint(path, binding=binding)
+    assert resumed["state"]["rows"] == 2
+    assert not list(path.parent.glob("*.tmp"))
+
+    with pytest.raises(RuntimeError, match="parameters, snapshot, or collector code changed"):
+        _read_checkpoint(path, binding={**binding, "end": "2026-11-17T00:00:00Z"})
+    with pytest.raises(RuntimeError, match="parameters, snapshot, or collector code changed"):
+        _read_checkpoint(path, binding={**binding, "snapshot_sha256": "d" * 64})
+    with pytest.raises(RuntimeError, match="parameters, snapshot, or collector code changed"):
+        _read_checkpoint(path, binding={**binding, "collector_code_sha": "e" * 40})
+
+
+def test_checkpoint_rejects_tampering(tmp_path):
+    path = tmp_path / "day.json"
+    binding = {"day": "2026-10-16", "snapshot_sha256": "f" * 64}
+    _write_checkpoint(path, binding=binding, state={"archive_sha256": "1" * 64})
+    text = path.read_text(encoding="utf-8").replace("111111", "222222")
+    path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="checkpoint checksum mismatch"):
+        _read_checkpoint(path, binding=binding)
+
