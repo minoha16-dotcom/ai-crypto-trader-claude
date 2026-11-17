@@ -95,7 +95,46 @@ jobs:
             --end "$END_UTC" \
             --history-warmup-days "$HISTORY_WARMUP_DAYS" \
             --collector-code-sha "$CODE_SHA" \
+            --state-dir "$RUNNER_TEMP/vike-checkpoints" \
             --out artifacts/hyperliquid-vike-raw-dataset.json
+
+      - name: Verify complete collection before training
+        env:
+          CODE_SHA: ${{ env.CODE_SHA }}
+          START_UTC: ${{ inputs.start }}
+          END_UTC: ${{ inputs.end }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, os
+          from datetime import date, timedelta
+          from pathlib import Path
+
+          root = Path("artifacts")
+          assert os.environ["START_UTC"] == "2026-10-16T00:00:00Z", "the approval run requires the full study start"
+          assert os.environ["END_UTC"] == "2026-11-16T00:00:00Z", "the approval run requires the full study end"
+          marker = json.loads((root / "vike-collection-complete.json").read_text())
+          dataset = root / "hyperliquid-vike-raw-dataset.json"
+          expected_sha = hashlib.sha256(dataset.read_bytes()).hexdigest()
+          assert marker.get("complete") is True, "collector completion marker is absent"
+          assert marker.get("data_start_utc") == os.environ["START_UTC"]
+          assert marker.get("data_end_utc") == os.environ["END_UTC"]
+          assert marker.get("collector_code_sha") == os.environ["CODE_SHA"]
+          assert marker.get("dataset_sha256") == expected_sha, "dataset hash differs from completion marker"
+          manifest = json.loads(dataset.read_text())["manifest"]
+          assert manifest.get("data_start_utc", "").replace("Z", "+00:00").startswith(os.environ["START_UTC"].replace("Z", "+00:00"))
+          assert manifest.get("data_end_utc", "").replace("Z", "+00:00").startswith(os.environ["END_UTC"].replace("Z", "+00:00"))
+          expected = []
+          day = date(2026, 9, 29)
+          while day < date(2026, 11, 16):
+              expected.append(day.isoformat())
+              day += timedelta(days=1)
+          observed = marker.get("archive_days", [])
+          assert [row["date"] for row in observed] == expected, "one or more warm-up/observation archive days are missing"
+          assert all(len(row.get("sha256", "")) == 64 for row in observed), "an archive hash is missing"
+          print(f"VERIFIED_COLLECTION_DAYS {len(observed)}")
+          print(f"VERIFIED_OBSERVATION_WINDOW {marker['data_start_utc']} .. {marker['data_end_utc']}")
+          PY
 
       - name: Prepare independent symbol and timeframe datasets
         run: |
@@ -155,6 +194,7 @@ jobs:
           rm -f artifacts/vike-cohort-snapshot.json
           rm -f artifacts/hyperliquid-vike-raw-dataset.json
           rm -f artifacts/advisor-training-dataset.json
+          rm -rf "$RUNNER_TEMP/vike-checkpoints"
 
       - name: Upload approval report and research-only model artifacts
         if: always()
@@ -166,3 +206,4 @@ jobs:
             artifacts/advisor-models/advisor-model-*.json
           if-no-files-found: warn
           retention-days: 14
+
