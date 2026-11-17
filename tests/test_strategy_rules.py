@@ -5,6 +5,8 @@ import pytest
 from backend.config import settings
 from backend.indicators import analyze, directional_indicators, market_context
 from backend.scanner import apply_higher_timeframe_confirmation
+from backend import backtest as backtest_module
+from backend.backtest import run_backtest
 from backend.strategy_approval import approval_for_group, current_strategy_config_hash
 
 
@@ -122,3 +124,65 @@ def test_strategy_approval_requires_exact_group_and_report(tmp_path):
     }), encoding="utf-8")
     assert approval_for_group("kucoin", "BTC/USDT", "spot", "15m", path)[0]
     assert not approval_for_group("kucoin", "ETH/USDT", "spot", "15m", path)[0]
+
+
+def _higher_rising_candles(count=500):
+    rows = []
+    for index in range(count):
+        close = 100.0 + index * 0.5
+        rows.append([
+            index * 14_400_000, close - 0.2, close + 1, close - 1, close, 1000
+        ])
+    return rows
+
+
+def _lower_flat_candles(start_timestamp, count=60):
+    return [
+        [start_timestamp + index * 900_000, 100, 101, 99, 100, 100]
+        for index in range(count)
+    ]
+
+
+def test_15m_backtest_does_not_use_future_4h_candles(monkeypatch):
+    calls = {"count": 0}
+
+    def one_long(_history, volume_ratio_threshold=None):
+        calls["count"] += 1
+        return {"signal": "LONG" if calls["count"] == 1 else "WAIT", "price": 100, "atr14": 2}
+
+    monkeypatch.setattr(backtest_module, "analyze", one_long)
+    high = _higher_rising_candles(500)
+    # The first 15m decision closes when only 199 higher-timeframe candles
+    # have closed. The remaining 301 rows are future data and must not leak in.
+    lower_start = 198 * 14_400_000 + 13_500_000
+    result = run_backtest(
+        _lower_flat_candles(lower_start),
+        candle_timeframe="15m",
+        higher_timeframe_candles=high,
+        higher_timeframe="4h",
+        max_holding_bars=1,
+    )
+    assert result["trade_count"] == 0
+    assert result["skipped_signals"][0]["reason"] == "MTF_HIGHER_TIMEFRAME_WARMUP_NOT_READY"
+
+
+def test_15m_backtest_accepts_only_closed_aligned_4h_context(monkeypatch):
+    calls = {"count": 0}
+
+    def one_long(_history, volume_ratio_threshold=None):
+        calls["count"] += 1
+        return {"signal": "LONG" if calls["count"] == 1 else "WAIT", "price": 100, "atr14": 2}
+
+    monkeypatch.setattr(backtest_module, "analyze", one_long)
+    high = _higher_rising_candles(500)
+    # This decision closes exactly at the 200th 4h candle close.
+    lower_start = 199 * 14_400_000 + 13_500_000
+    result = run_backtest(
+        _lower_flat_candles(lower_start),
+        candle_timeframe="15m",
+        higher_timeframe_candles=high,
+        higher_timeframe="4h",
+        max_holding_bars=1,
+    )
+    assert result["trade_count"] == 1
+    assert result["trades"][0]["side"] == "LONG"
