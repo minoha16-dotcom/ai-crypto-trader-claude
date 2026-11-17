@@ -282,3 +282,29 @@ def test_backtest_records_each_wait_rejection_with_context(monkeypatch):
     assert first["timestamp"] == rising_candles(60)[55][0]
     assert first["side"] == "NEUTRAL"
     assert first["indicators"]["adx14"] == 12.0
+
+
+
+def test_direction_filter_excludes_opposite_signals_and_is_reported(monkeypatch):
+    def short_signal(_history):
+        return {"signal": "SHORT", "direction": "bearish", "price": 100.0, "atr14": 2.0}
+
+    monkeypatch.setattr(backtest, "analyze", short_signal)
+    result = run_backtest(
+        rising_candles(60), start_index=55, direction_filter="LONG"
+    )
+
+    assert result["trade_count"] == 0
+    assert result["assumptions"]["direction_filter"] == "LONG"
+    assert all(
+        row["reason"] == "EXPERIMENT_DIRECTION_FILTER_LONG"
+        and row["stage"] == "experiment_filter"
+        and row["side"] == "SHORT"
+        for row in result["skipped_signals"]
+    )
+
+
+@pytest.mark.parametrize("direction_filter", ["BOTH", "NEUTRAL", ""])
+def test_direction_filter_rejects_invalid_values(direction_filter):
+    with pytest.raises(ValueError, match="direction_filter"):
+        run_backtest(rising_candles(60), direction_filter=direction_filter)
