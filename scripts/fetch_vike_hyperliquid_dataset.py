@@ -46,6 +46,22 @@ FILL_COLUMNS = (
 )
 DEFAULT_COHORT = "3x_smart"
 MIN_COHORT_SNAPSHOT_COUNT = 6
+VALID_COHORT_LABELS = {
+    "3x smart", "2x smart", "smart",
+    "3x winner", "2x winner", "winner",
+    "loser", "2x loser", "3x loser",
+    "rekt", "2x rekt", "3x rekt", "unknown",
+}
+
+
+def _normalize_cohort_label(value: str) -> str:
+    normalized = str(value).strip().lower().replace("_", " ")
+    if normalized not in VALID_COHORT_LABELS:
+        raise ValueError(
+            "unsupported Vike PnL cohort; expected one of: "
+            + ", ".join(sorted(VALID_COHORT_LABELS))
+        )
+    return normalized
 START_POSITION_AVAILABLE_FROM_MS = int(
     datetime(2026, 9, 29, tzinfo=timezone.utc).timestamp() * 1000
 )
@@ -201,12 +217,19 @@ def _select_wallets_from_positions(
 ) -> list[str]:
     start = datetime.fromtimestamp(selection_start_ms / 1000, tz=timezone.utc)
     end = datetime.fromtimestamp(selection_end_ms / 1000, tz=timezone.utc)
+    normalized_cohort_label = _normalize_cohort_label(cohort_label)
     selected = (
         positions
         .filter(
             (pl.col("snapshot_ts") >= pl.lit(start))
             & (pl.col("snapshot_ts") < pl.lit(end))
-            & (pl.col("pnl_cohort") == cohort_label)
+            & (
+                pl.col("pnl_cohort")
+                .str.to_lowercase()
+                .str.replace_all("_", " ")
+                .str.strip_chars()
+                == normalized_cohort_label
+            )
         )
         .select("wallet", "snapshot_ts")
         .drop_nulls()
@@ -246,6 +269,7 @@ def _write_snapshot(
 ) -> None:
     selection_start_ms = start_ms - 60 * 60 * 1000
     selection_end_ms = start_ms
+    cohort_label = _normalize_cohort_label(cohort_label)
     selection_hour = datetime.fromtimestamp(
         selection_start_ms / 1000, tz=timezone.utc
     ).replace(minute=0, second=0, microsecond=0)
