@@ -76,7 +76,7 @@ jobs:
       - name: Check out the Vike collector branch
         uses: actions/checkout@v4
         with:
-          ref: \${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -92,7 +92,7 @@ jobs:
 
       - name: Freeze historical point-in-time cohort
         env:
-          VIKE_API_KEY: \${{ secrets.VIKE_API_KEY }}
+          VIKE_API_KEY: ${{ secrets.VIKE_API_KEY }}
           START_UTC: "2026-10-16T00:00:00Z"
           END_UTC: "2026-11-16T00:00:00Z"
           COHORT_LABEL: "3x_smart"
@@ -113,7 +113,7 @@ jobs:
 
       - name: Collect historical fills and accounting evidence
         env:
-          VIKE_API_KEY: \${{ secrets.VIKE_API_KEY }}
+          VIKE_API_KEY: ${{ secrets.VIKE_API_KEY }}
           START_UTC: "2026-10-16T00:00:00Z"
           END_UTC: "2026-11-16T00:00:00Z"
           HISTORY_WARMUP_DAYS: "17"
@@ -188,7 +188,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hyperliquid-advisor-approval-\${{ github.run_number }}
+          name: hyperliquid-advisor-approval-${{ github.run_number }}
           path: |
             artifacts/advisor-models/advisor-model-approval.json
             artifacts/advisor-models/advisor-model-*.json
