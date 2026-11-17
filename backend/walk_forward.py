@@ -300,7 +300,7 @@ def run_walk_forward_backtest(
             candles, test_start, test_end, warmup_bars, starting_balance,
             instrument, volume_ratio_threshold, max_holding_bars,
             candle_timeframe, higher_timeframe_candles, higher_timeframe,
-            require_mtf_confirmation, direction_filter,
+            require_mtf_confirmation, direction_filter, signal_overrides,
         )
 
         folds.append({
