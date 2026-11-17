@@ -2,10 +2,12 @@ import json
 import asyncio
 
 from .exchanges import registry, ExchangeRateLimitCooldown
-from .indicators import analyze
+from .indicators import analyze, market_context
 from .database import connect, archive_expired_signals
 from .config import settings
 from .data_validation import validate_scan_candles, MIN_SCAN_CANDLES
+from .config import settings
+from .strategy_approval import approval_for_group
 
 
 def _persist_signal(exchange, symbol, market_type, timeframe, metrics, item):
@@ -58,12 +60,46 @@ async def scan(exchange, symbols=None, market_type="spot", timeframe=None):
                 continue
 
             metrics = analyze(candles)
+            item_status = "CANDIDATE"
+            if timeframe == "15m":
+                higher_timeframe = settings.signal_higher_timeframe
+                raw_higher = await registry.ohlcv(
+                    exchange, resolved_symbol, higher_timeframe,
+                    MIN_SCAN_CANDLES + 1, market_type,
+                )
+                higher_candles = validate_scan_candles(
+                    raw_higher, higher_timeframe, min_candles=MIN_SCAN_CANDLES
+                )
+                higher_context = market_context(higher_candles)
+                metrics["higher_timeframe"] = higher_timeframe
+                metrics["higher_timeframe_context"] = higher_context
+                required_direction = "bullish" if metrics["signal"] == "LONG" else "bearish"
+                if (
+                    metrics["signal"] not in ("LONG", "SHORT")
+                    or higher_context["regime"] != "trending"
+                    or higher_context["direction"] != required_direction
+                ):
+                    metrics["signal"] = "WAIT"
+                    metrics.setdefault("filter_reasons", []).append("MTF_DIRECTION_NOT_CONFIRMED")
+                    item_status = "MTF_REJECTED"
+
+            approved, approval_reason, artifact = approval_for_group(
+                exchange, resolved_symbol, market_type, timeframe
+            )
+            if not approved:
+                metrics["signal"] = "WAIT"
+                metrics.setdefault("filter_reasons", []).append(approval_reason)
+                item_status = "STRATEGY_NOT_APPROVED"
+
             item = {
                 "exchange": exchange,
                 "symbol": resolved_symbol,
                 "market_type": market_type,
                 "timeframe": timeframe,
                 "data_status": "VALIDATED",
+                "status": item_status,
+                "strategy_version": artifact.get("strategy_version") if artifact else None,
+                "strategy_approval_reason": approval_reason,
                 "closed_candles": len(candles),
                 **metrics,
             }
