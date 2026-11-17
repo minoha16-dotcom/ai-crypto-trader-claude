@@ -13,6 +13,10 @@ from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+# Running a script by path puts scripts/ (not the repository root) on sys.path.
+# Add the project root so backend.* imports work consistently in GitHub Actions.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from backend.strategy_research import evaluate_strategy_group, build_approval_artifact
 
 
