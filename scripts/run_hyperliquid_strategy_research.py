@@ -1,8 +1,8 @@
 """Fetch point-in-time Hyperliquid candles from Vike and run per-group WF reports.
 
 Requires VIKE_API_KEY in the local environment. Never commit the key or data files.
-The requested 2026-10-16..2026-11-16 UTC interval is scored; preceding candles
-are warm-up only. This is research-only for Hyperliquid until a live adapter exists.
+The default 2026-08-17..2026-11-17 UTC interval is scored; preceding candles
+are warm-up only. The runner compares frozen one-factor LONG rule variants. This is research-only for Hyperliquid until a live adapter exists.
 """
 import argparse
 import json
