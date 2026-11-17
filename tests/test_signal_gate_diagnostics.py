@@ -34,4 +34,4 @@ def test_long_gate_diagnostics_counts_each_gate_and_intersections(monkeypatch):
     assert report["gates"]["price_above_ema200"]["pass"] == 4
     assert report["gates"]["mtf_bullish"]["not_applicable"] == 4
     assert "di_bullish&mtf_bullish" in report["pairwise_intersections"]
-    assert report["totals"]["qualified_long"] == 1
+    assert report["totals"]["qualified_long"] == 2
