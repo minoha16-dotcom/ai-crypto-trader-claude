@@ -11,6 +11,8 @@ from scripts.fetch_vike_hyperliquid_dataset import (
     _native_fill,
     _normalize_cohort_label,
     _select_wallets_from_positions,
+    _read_checkpoint,
+    _write_checkpoint,
 )
 
 
@@ -155,3 +157,37 @@ def test_normalize_cohort_label_accepts_api_slug_and_archive_display_value(raw, 
 def test_normalize_cohort_label_rejects_unknown_value():
     with pytest.raises(ValueError, match="unsupported Vike PnL cohort"):
         _normalize_cohort_label("top trader")
+
+
+def test_checkpoint_round_trip_is_atomic_and_bound_to_inputs(tmp_path):
+    path = tmp_path / "state" / "day.json"
+    binding = {
+        "start": "2026-10-16T00:00:00Z",
+        "end": "2026-11-16T00:00:00Z",
+        "snapshot_sha256": "a" * 64,
+        "collector_code_sha": "b" * 40,
+    }
+    _write_checkpoint(path, binding=binding, state={"rows": 2, "archive_sha256": "c" * 64})
+
+    resumed = _read_checkpoint(path, binding=binding)
+    assert resumed["state"]["rows"] == 2
+    assert not list(path.parent.glob("*.tmp"))
+
+    with pytest.raises(RuntimeError, match="parameters, snapshot, or collector code changed"):
+        _read_checkpoint(path, binding={**binding, "end": "2026-11-17T00:00:00Z"})
+    with pytest.raises(RuntimeError, match="parameters, snapshot, or collector code changed"):
+        _read_checkpoint(path, binding={**binding, "snapshot_sha256": "d" * 64})
+    with pytest.raises(RuntimeError, match="parameters, snapshot, or collector code changed"):
+        _read_checkpoint(path, binding={**binding, "collector_code_sha": "e" * 40})
+
+
+def test_checkpoint_rejects_tampering(tmp_path):
+    path = tmp_path / "day.json"
+    binding = {"day": "2026-10-16", "snapshot_sha256": "f" * 64}
+    _write_checkpoint(path, binding=binding, state={"archive_sha256": "1" * 64})
+    text = path.read_text(encoding="utf-8").replace("111111", "222222")
+    path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="checkpoint checksum mismatch"):
+        _read_checkpoint(path, binding=binding)
+
