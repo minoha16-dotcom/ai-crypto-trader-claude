@@ -316,6 +316,9 @@ The Render Free web service spins down after 15 consecutive minutes without inbo
 ├── backend/
 │   ├── config.py
 │   ├── indicators.py
+│   ├── data_validation.py
+│   ├── strategy_approval.py
+│   ├── strategy_approval.json
 │   ├── backtest.py
 │   ├── walk_forward.py
 │   └── version.py
