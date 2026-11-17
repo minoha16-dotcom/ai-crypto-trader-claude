@@ -308,3 +308,82 @@ def test_direction_filter_excludes_opposite_signals_and_is_reported(monkeypatch)
 def test_direction_filter_rejects_invalid_values(direction_filter):
     with pytest.raises(ValueError, match="direction_filter"):
         run_backtest(rising_candles(60), direction_filter=direction_filter)
+
+
+
+def test_long_ema_gates_can_be_tested_independently(monkeypatch):
+    from backend import indicators
+
+    monkeypatch.setattr(
+        indicators, "directional_indicators",
+        lambda _rows: {"adx14": 30.0, "plus_di14": 30.0, "minus_di14": 10.0},
+    )
+    monkeypatch.setattr(indicators, "ema", lambda _values, period: {
+        20: 120.0, 50: 110.0, 200: 300.0
+    }[period])
+    monkeypatch.setattr(indicators, "atr", lambda _rows: 2.0)
+    monkeypatch.setattr(indicators, "rsi", lambda _values: 60.0)
+
+    rows = rising_candles(260)
+    baseline = indicators.analyze(rows)
+    relaxed = indicators.analyze(rows, signal_overrides={"long_require_ema200": False})
+
+    assert baseline["signal"] == "WAIT"
+    assert relaxed["signal"] == "LONG"
+    assert relaxed["long_gate_diagnostics"]["price_above_ema200"] is False
+    assert relaxed["signal_overrides"] == {"long_require_ema200": False}
+
+
+def test_long_ema20_50_gate_can_be_tested_independently(monkeypatch):
+    from backend import indicators
+
+    monkeypatch.setattr(
+        indicators, "directional_indicators",
+        lambda _rows: {"adx14": 30.0, "plus_di14": 30.0, "minus_di14": 10.0},
+    )
+    monkeypatch.setattr(indicators, "ema", lambda _values, period: {
+        20: 100.0, 50: 110.0, 200: 200.0
+    }[period])
+    monkeypatch.setattr(indicators, "atr", lambda _rows: 2.0)
+    monkeypatch.setattr(indicators, "rsi", lambda _values: 60.0)
+
+    rows = rising_candles(260)
+    baseline = indicators.analyze(rows)
+    relaxed = indicators.analyze(rows, signal_overrides={"long_require_ema20_50": False})
+
+    assert baseline["signal"] == "WAIT"
+    assert relaxed["signal"] == "LONG"
+    assert relaxed["long_gate_diagnostics"]["ema20_above_ema50"] is False
+
+
+def test_adx_threshold_experiment_changes_only_adx_gate(monkeypatch):
+    from backend import indicators
+
+    monkeypatch.setattr(
+        indicators, "directional_indicators",
+        lambda _rows: {"adx14": 18.0, "plus_di14": 30.0, "minus_di14": 10.0},
+    )
+    monkeypatch.setattr(indicators, "ema", lambda _values, period: {
+        20: 120.0, 50: 110.0, 200: 200.0
+    }[period])
+    monkeypatch.setattr(indicators, "atr", lambda _rows: 2.0)
+    monkeypatch.setattr(indicators, "rsi", lambda _values: 60.0)
+
+    rows = rising_candles(260)
+    baseline = indicators.analyze(rows)
+    relaxed = indicators.analyze(rows, signal_overrides={"adx_min": 15.0})
+
+    assert baseline["signal"] == "WAIT"
+    assert "REGIME_RANGING" in baseline["filter_reasons"]
+    assert relaxed["signal"] == "LONG"
+    assert relaxed["long_gate_diagnostics"]["adx_threshold"] == 15.0
+
+
+def test_signal_overrides_reject_unknown_or_invalid_values():
+    rows = rising_candles(260)
+    with pytest.raises(ValueError, match="Unsupported signal override"):
+        analyze(rows, signal_overrides={"rsi_min": 55})
+    with pytest.raises(ValueError, match="adx_min override"):
+        analyze(rows, signal_overrides={"adx_min": 101})
+    with pytest.raises(ValueError, match="EMA signal overrides"):
+        analyze(rows, signal_overrides={"long_require_ema200": 0})
