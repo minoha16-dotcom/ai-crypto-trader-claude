@@ -30,7 +30,7 @@ on:
       history_warmup_days:
         description: Pre-window days used only to reconstruct open positions
         required: true
-        default: "30"
+        default: "17"
         type: string
 
 permissions:
