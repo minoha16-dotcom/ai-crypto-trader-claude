@@ -64,4 +64,126 @@ jobs:
           POSTGRES_TEST_URL: postgresql://postgres:postgres@localhost:5432/trader_test
         run: python -m pytest -q tests/test_postgres_integration.py
 
+  vike-historical-training:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'run-vike-historical-training' &&
+      github.event.pull_request.head.ref == 'feat/vike-hyperliquid-historical-cohort'
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Check out the labeled Vike branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.18"
+          cache: pip
+          cache-dependency-path: requirements-test.txt
+
+      - name: Install project dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-test.txt
+
+      - name: Freeze the historical cohort
+        env:
+          VIKE_API_KEY: ${{ secrets.VIKE_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          CODE_SHA="$(git rev-parse HEAD)"
+          echo "CODE_SHA=$CODE_SHA" >> "$GITHUB_ENV"
+          python scripts/fetch_vike_hyperliquid_dataset.py \
+            --snapshot-only \
+            --start "2026-10-16T00:00:00Z" \
+            --end "2026-11-16T00:00:00Z" \
+            --cohort-label "3x_smart" \
+            --wallet-limit "1000" \
+            --collector-code-sha "$CODE_SHA" \
+            --out artifacts/vike-cohort-snapshot.json
+
+      - name: Collect historical fills and evidence
+        env:
+          VIKE_API_KEY: ${{ secrets.VIKE_API_KEY }}
+        run: |
+          set -euo pipefail
+          python scripts/fetch_vike_hyperliquid_dataset.py \
+            --snapshot-file artifacts/vike-cohort-snapshot.json \
+            --start "2026-10-16T00:00:00Z" \
+            --end "2026-11-16T00:00:00Z" \
+            --history-warmup-days "17" \
+            --collector-code-sha "$CODE_SHA" \
+            --state-dir "$RUNNER_TEMP/vike-checkpoints" \
+            --out artifacts/hyperliquid-vike-raw-dataset.json
+
+      - name: Verify complete collection before training
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json
+          from datetime import date, timedelta
+          from pathlib import Path
+          root = Path("artifacts")
+          marker = json.loads((root / "vike-collection-complete.json").read_text())
+          dataset = root / "hyperliquid-vike-raw-dataset.json"
+          assert marker.get("complete") is True
+          assert marker.get("data_start_utc") == "2026-10-16T00:00:00Z"
+          assert marker.get("data_end_utc") == "2026-11-16T00:00:00Z"
+          assert marker.get("collector_code_sha") == __import__("os").environ["CODE_SHA"]
+          assert marker.get("dataset_sha256") == hashlib.sha256(dataset.read_bytes()).hexdigest()
+          expected, day = [], date(2026, 9, 29)
+          while day < date(2026, 11, 16):
+              expected.append(day.isoformat())
+              day += timedelta(days=1)
+          observed = marker.get("archive_days", [])
+          assert [row["date"] for row in observed] == expected
+          assert all(len(row.get("sha256", "")) == 64 for row in observed)
+          print(f"VERIFIED_COLLECTION_DAYS {len(observed)}")
+          PY
+
+      - name: Prepare independent symbol and timeframe datasets
+        run: |
+          set -euo pipefail
+          python scripts/prepare_hyperliquid_advisor_dataset.py \
+            --raw-dataset artifacts/hyperliquid-vike-raw-dataset.json \
+            --out artifacts/advisor-training-dataset.json \
+            --code-sha "$CODE_SHA" \
+            --timeframes 1h,4h
+
+      - name: Train and validate each independent group
+        run: |
+          set +e
+          python scripts/train_advisor_model.py \
+            --dataset artifacts/advisor-training-dataset.json \
+            --out-dir artifacts/advisor-models \
+            --code-sha "$CODE_SHA"
+          status=$?
+          if [ "$status" -eq 2 ]; then
+            echo "::warning::No independent market group passed every approval gate."
+            exit 0
+          fi
+          exit "$status"
+
+      - name: Remove raw licensed data and local checkpoints
+        if: always()
+        run: |
+          rm -f artifacts/vike-cohort-snapshot.json
+          rm -f artifacts/hyperliquid-vike-raw-dataset.json
+          rm -f artifacts/advisor-training-dataset.json
+          rm -rf "$RUNNER_TEMP/vike-checkpoints"
+
+      - name: Upload approval reports only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vike-advisor-approval-${{ github.run_number }}
+          path: |
+            artifacts/advisor-models/advisor-model-approval.json
+            artifacts/advisor-models/advisor-model-*.json
+          if-no-files-found: warn
+          retention-days: 14
