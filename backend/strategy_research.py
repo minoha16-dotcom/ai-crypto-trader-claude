@@ -209,7 +209,10 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
                             embargo_bars=200, max_holding_bars=20, max_folds=10,
                             min_oos_trades=MIN_OOS_TRADES, bootstrap_replicates=BOOTSTRAP_REPLICATES,
                             direction_filter=None, signal_overrides=None,
-                            require_mtf_confirmation=None, experiment_name="BASELINE"): 
+                            require_mtf_confirmation=None, experiment_name="BASELINE",
+                            max_holding_bars=20, stop_model="fixed",
+                            atr_stop_multiple=2.0, structural_lookback_bars=20,
+                            structural_atr_buffer=0.2): 
     """Return a reproducible ACCEPT/REJECT report for one exact independent group."""
     if not all(isinstance(value, str) and value.strip() for value in
                (exchange, symbol, market_type, timeframe)):
@@ -255,6 +258,11 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
         require_mtf_confirmation=mtf_enabled,
         direction_filter=direction_filter,
         signal_overrides=signal_overrides,
+        max_holding_bars=max_holding_bars,
+        stop_model=stop_model,
+        atr_stop_multiple=atr_stop_multiple,
+        structural_lookback_bars=structural_lookback_bars,
+        structural_atr_buffer=structural_atr_buffer,
     )
     trades = [
         row
@@ -298,6 +306,11 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
         "signal_overrides": signal_overrides or {},
         "require_mtf_confirmation": mtf_enabled,
         "experiment_name": experiment_name,
+        "max_holding_bars": max_holding_bars,
+        "stop_model": stop_model,
+        "atr_stop_multiple": atr_stop_multiple,
+        "structural_lookback_bars": structural_lookback_bars,
+        "structural_atr_buffer": structural_atr_buffer,
     }
     experiment_config_hash = hashlib.sha256(
         (base_config_hash + "|" + json.dumps(experiment_payload, sort_keys=True)).encode()
@@ -307,7 +320,7 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
             "exchange": exchange, "symbol": symbol,
             "market_type": market_type, "timeframe": timeframe,
         },
-        "strategy_version": "3.0.0",
+        "strategy_version": "3.1.0-exit-research",
         "experiment": {
             "type": "single_factor_signal_rule",
             "name": experiment_name,
@@ -327,6 +340,13 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
         "data": {"candle_count": max(0, len(candles) - warmup_bars), "warmup_candles": warmup_bars, "interval_ms": interval_ms},
         "qualified_examples": qualified,
         "walk_forward_folds": wf["fold_count"],
+        "exit_policy": {
+            "stop_model": stop_model,
+            "atr_stop_multiple": atr_stop_multiple,
+            "structural_lookback_bars": structural_lookback_bars,
+            "structural_atr_buffer": structural_atr_buffer,
+            "max_holding_bars": max_holding_bars,
+        },
         "oos_trade_count": oos_count,
         "net_expectancy_r": expectancy,
         "oos_profit_factor": wf["aggregate_test"]["profit_factor"],
