@@ -209,7 +209,7 @@ def write_outputs(symbols, rows_by_symbol, output_dir: Path, source_files,
         "dataset_url": f"https://huggingface.co/datasets/{DATASET}",
         "credit": "Ironflow (ironflow.sh)",
         "license": "CC BY 4.0 for files published before 2026-11-10; verify each file license before redistribution or commercial use",
-        "requested_start": "2025-05-25T00:00:00Z",
+        "requested_start": "2025-05-25T14:00:00Z",
         "requested_end_exclusive": "2026-11-01T00:00:00Z",
         "source_timeframe": "1h",
         "derived_timeframes": ["4h", "1d"],
@@ -307,7 +307,7 @@ def main():
         for month in month_range(args.start_month, args.end_month)
     ]
     rows_by_symbol, schema = load_hourly(files, symbols)
-    start_text = "2025-05-25T00:00:00+00:00"
+    start_text = "2025-05-25T14:00:00+00:00"
     end_text = "2026-11-01T00:00:00+00:00"
     expected_start_ms = int(datetime.fromisoformat(start_text).timestamp() * 1000)
     expected_end_ms = int(datetime.fromisoformat(end_text).timestamp() * 1000)
