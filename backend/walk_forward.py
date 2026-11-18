@@ -308,12 +308,14 @@ def run_walk_forward_backtest(
             instrument, volume_ratio_threshold, max_holding_bars,
             candle_timeframe, higher_timeframe_candles, higher_timeframe,
             require_mtf_confirmation, direction_filter, signal_overrides,
+            stop_model, atr_stop_multiple, structural_lookback_bars, structural_atr_buffer,
         )
         test_result = _evaluate_period(
             candles, test_start, test_end, warmup_bars, starting_balance,
             instrument, volume_ratio_threshold, max_holding_bars,
             candle_timeframe, higher_timeframe_candles, higher_timeframe,
             require_mtf_confirmation, direction_filter, signal_overrides,
+            stop_model, atr_stop_multiple, structural_lookback_bars, structural_atr_buffer,
         )
 
         folds.append({
