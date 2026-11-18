@@ -296,6 +296,12 @@ def main():
     symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     if not symbols:
         parser.error("--symbols must contain at least one symbol")
+    if args.start_month != START_MONTH or args.end_month != END_MONTH:
+        parser.error(
+            f"This research run validates the fixed requested window "
+            f"{START_MONTH} through {END_MONTH}; received "
+            f"{args.start_month} through {args.end_month}"
+        )
     files = [
         download_month(month, Path(args.raw_dir))
         for month in month_range(args.start_month, args.end_month)
