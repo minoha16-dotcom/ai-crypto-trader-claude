@@ -50,6 +50,8 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11.18"
+      - name: Test collector coverage logic
+        run: python -m unittest tests/test_hyperliquid_history_collector.py -v
       - name: Run Vike historical-coverage preflight
         if: inputs.mode == 'preflight'
         run: |
