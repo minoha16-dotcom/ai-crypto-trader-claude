@@ -29,8 +29,10 @@ jobs:
       VIKE_API_KEY: ${{ secrets.VIKE_API_KEY }}
       PYTHONUNBUFFERED: "1"
     steps:
-      - name: Checkout selected branch
+      - name: Checkout collector branch
         uses: actions/checkout@v4
+        with:
+          ref: feature/hyperliquid-4y-data-coverage
 
       - name: Validate Vike secret
         shell: bash
@@ -49,9 +51,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: data/strategy-research/hyperliquid-4y
-          key: hyperliquid-4y-${{ github.ref_name }}-${{ github.run_id }}
+          key: hyperliquid-4y-feature-hyperliquid-4y-data-coverage-${{ github.run_id }}
           restore-keys: |
-            hyperliquid-4y-${{ github.ref_name }}-
+            hyperliquid-4y-feature-hyperliquid-4y-data-coverage-
 
       - name: Collect four-year history and audit coverage
         run: |
