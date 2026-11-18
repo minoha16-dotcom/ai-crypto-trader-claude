@@ -28,11 +28,12 @@ Outputs in data/ironflow/processed:
 - coverage-report.json with observed start/end, row counts, missing hourly
   intervals, and an overall readiness status.
 
-STRUCTURALLY_CONTIGUOUS means only that no interior hourly gap or conflicting
-duplicate was found in the downloaded rows. It is not model approval and does
-not prove that the symbol has the entire requested history. Review the report
-before per-group walk-forward research. Groups with gaps or missing symbols
-are rejected.
+STRUCTURALLY_CONTIGUOUS means the symbol has every hourly candle in the full
+requested UTC interval (2025-05-25 00:00 inclusive through 2026-11-01 00:00
+exclusive), with no interior hourly gap or conflicting duplicate. A contiguous
+subset that starts late or ends early is INCOMPLETE and is rejected. This is
+data-coverage validation only, not model approval. Review coverage-report.json
+before per-group walk-forward research.
 
 ## Source and license
 
