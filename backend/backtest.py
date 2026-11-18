@@ -72,9 +72,23 @@ def run_backtest(
     require_mtf_confirmation=True,
     direction_filter=None,
     signal_overrides=None,
+    stop_model="fixed",
+    atr_stop_multiple=2.0,
+    structural_lookback_bars=20,
+    structural_atr_buffer=0.2,
 ):
     if direction_filter not in (None, "LONG", "SHORT"):
         raise ValueError("direction_filter must be None, LONG or SHORT")
+    if stop_model not in ("fixed", "atr", "structural"):
+        raise ValueError("stop_model must be fixed, atr or structural")
+    atr_stop_multiple = float(atr_stop_multiple)
+    structural_atr_buffer = float(structural_atr_buffer)
+    if not math.isfinite(atr_stop_multiple) or atr_stop_multiple <= 0:
+        raise ValueError("atr_stop_multiple must be finite and positive")
+    if not math.isfinite(structural_atr_buffer) or structural_atr_buffer < 0:
+        raise ValueError("structural_atr_buffer must be finite and non-negative")
+    if isinstance(structural_lookback_bars, bool) or not isinstance(structural_lookback_bars, int) or structural_lookback_bars < 2:
+        raise ValueError("structural_lookback_bars must be an integer >= 2")
     if len(candles) < 52:
         raise ValueError("At least 52 candles are required for next-open backtesting")
     if volume_ratio_threshold is not None:
@@ -258,8 +272,24 @@ def run_backtest(
             continue
 
         entry = raw_entry * (1 + slippage if side == "LONG" else 1 - slippage)
-        distance = max(atr_value * 2, reference_price * 0.005)
-        stop = raw_entry - distance if side == "LONG" else raw_entry + distance
+        if stop_model == "fixed":
+            distance = max(atr_value * 2, reference_price * 0.005)
+            stop = raw_entry - distance if side == "LONG" else raw_entry + distance
+        elif stop_model == "atr":
+            distance = atr_value * atr_stop_multiple
+            stop = raw_entry - distance if side == "LONG" else raw_entry + distance
+        else:
+            structure = candles[max(0, i - structural_lookback_bars + 1): i + 1]
+            if side == "LONG":
+                stop = min(float(row[3]) for row in structure) - atr_value * structural_atr_buffer
+                distance = raw_entry - stop
+            else:
+                stop = max(float(row[2]) for row in structure) + atr_value * structural_atr_buffer
+                distance = stop - raw_entry
+            if not math.isfinite(distance) or distance <= 0:
+                skipped_signals.append({"index": i, "reason": "INVALID_STRUCTURAL_STOP"})
+                i += 1
+                continue
         reward_distance = distance * float(settings.reward_risk_ratio)
         target = raw_entry + reward_distance if side == "LONG" else raw_entry - reward_distance
         estimated_round_trip_cost = raw_entry * (
