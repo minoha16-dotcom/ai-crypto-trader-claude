@@ -158,7 +158,7 @@ def main():
             report["data_source"] = "Ironflow ironflow/hyperliquid-candles-1h"
             report["data_coverage_status"] = group_coverage.get("status")
             report["strategy_family"] = "current_frozen_ema_di_strategy"
-            report["walk_forward_policy"]["minimum_folds"] = MIN_FOLDS
+            report["walk_forward_policy"] = report_base["walk_forward_policy"]
             reports.append(report)
             print(
                 f"{symbol} {timeframe}: {report['validation_status']} "
