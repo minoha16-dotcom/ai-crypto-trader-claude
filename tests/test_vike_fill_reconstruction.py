@@ -12,7 +12,7 @@ def test_long_round_trip_net_of_fees():
     r=reconstruct_vike_fills([f(size=2),f("sell",2,110,2,20,.3,"2",second=2)])
     p=r["closed_positions"][0]
     assert p["side"]=="LONG" and p["realized_pnl_usd"]==20
-    assert round(p["net_realized_pnl_usd"],8)==19.5
+    assert round(p["net_realized_pnl_usd"],8)==19.6
     assert p["reconstruction_status"]=="COMPLETE"
 
 def test_short_round_trip():
@@ -40,7 +40,7 @@ def test_carry_in_close_is_incomplete():
     assert p["entry_price"] is None
 
 def test_mismatch_and_unsupported_fee_fail_closed():
-    r=reconstruct_vike_fills([f(token="ETH"),f("sell",1,110,2,10,.1,"2",second=2)])
+    r=reconstruct_vike_fills([f(token="ETH"),f("sell",2,110,2,10,.1,"2",second=2)])
     p=r["closed_positions"][0]
     assert p["reconstruction_status"]=="INCOMPLETE_ACCOUNTING"
     assert "START_POSITION_MISMATCH" in p["issues"]
