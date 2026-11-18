@@ -1,0 +1,67 @@
+name: Ironflow Hyperliquid Historical Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Comma-separated native Hyperliquid perp symbols"
+        required: true
+        default: "BTC,ETH,SOL,HYPE"
+        type: string
+      start_month:
+        description: "First monthly Parquet file (YYYY-MM)"
+        required: true
+        default: "2025-05"
+        type: string
+      end_month:
+        description: "Last monthly Parquet file (YYYY-MM)"
+        required: true
+        default: "2026-10"
+        type: string
+
+permissions:
+  contents: read
+concurrency:
+  group: ironflow-hyperliquid-data-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-research.txt
+      - name: Install research dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-research.txt
+          python -m pip install pytest
+      - name: Test collector and resampling
+        run: python -m pytest -q tests/test_ironflow_hyperliquid_collector.py
+      - name: Download public Parquet files and validate coverage
+        env:
+          SYMBOLS: ${{ inputs.symbols }}
+          START_MONTH: ${{ inputs.start_month }}
+          END_MONTH: ${{ inputs.end_month }}
+        run: |
+          python scripts/download_ironflow_hyperliquid_candles.py \
+            --symbols "$SYMBOLS" \
+            --start-month "$START_MONTH" \
+            --end-month "$END_MONTH"
+      - name: Upload coverage report and processed candles
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ironflow-hyperliquid-data-${{ github.run_id }}
+          path: |
+            data/ironflow/processed/coverage-report.json
+            data/ironflow/processed/*.json
+          if-no-files-found: warn
+          retention-days: 14
