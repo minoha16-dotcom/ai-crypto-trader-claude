@@ -3,6 +3,14 @@ name: Hyperliquid 4Y Data Coverage
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: "Preflight verifies Vike history bounds; collect is blocked for unsupported horizons"
+        required: true
+        default: "preflight"
+        type: choice
+        options:
+          - preflight
+          - collect
       symbols:
         description: "Comma-separated Hyperliquid perpetual symbols"
         required: true
@@ -31,7 +39,6 @@ jobs:
     steps:
       - name: Checkout selected branch
         uses: actions/checkout@v4
-
       - name: Validate Vike secret
         shell: bash
         run: |
@@ -39,29 +46,34 @@ jobs:
             echo "::error::Repository secret VIKE_API_KEY is missing or empty."
             exit 1
           fi
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11.18"
-
+      - name: Run Vike historical-coverage preflight
+        if: inputs.mode == 'preflight'
+        run: |
+          python scripts/collect_hyperliquid_history.py \
+            --symbols "${{ inputs.symbols }}" \
+            --timeframes "${{ inputs.timeframes }}" \
+            --preflight-only
       - name: Restore resumable candle chunks
+        if: inputs.mode == 'collect'
         uses: actions/cache@v4
         with:
           path: data/strategy-research/hyperliquid-4y
           key: hyperliquid-4y-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
             hyperliquid-4y-${{ github.ref_name }}-
-
-      - name: Collect four-year history and audit coverage
+      - name: Collect and audit history
+        if: inputs.mode == 'collect'
         run: |
           python scripts/collect_hyperliquid_history.py \
             --symbols "${{ inputs.symbols }}" \
             --timeframes "${{ inputs.timeframes }}" \
             --output-dir data/strategy-research/hyperliquid-4y
-
-      - name: Upload coverage report and cached data
-        if: always()
+      - name: Upload coverage report
+        if: always() && inputs.mode == 'collect'
         uses: actions/upload-artifact@v4
         with:
           name: hyperliquid-4y-coverage-${{ github.run_id }}
