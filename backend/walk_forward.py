@@ -144,7 +144,8 @@ def _evaluate_period(
     instrument, volume_ratio_threshold, max_holding_bars,
     candle_timeframe=None, higher_timeframe_candles=None, higher_timeframe="4h",
     require_mtf_confirmation=True, direction_filter=None,
-    signal_overrides=None,
+    signal_overrides=None, stop_model="fixed", atr_stop_multiple=2.0,
+    structural_lookback_bars=20, structural_atr_buffer=0.2,
 ):
     history_start = start - warmup_bars
     period_candles = candles[history_start:end]
@@ -162,6 +163,12 @@ def _evaluate_period(
         backtest_options["direction_filter"] = direction_filter
     if signal_overrides is not None:
         backtest_options["signal_overrides"] = signal_overrides
+    backtest_options.update({
+        "stop_model": stop_model,
+        "atr_stop_multiple": atr_stop_multiple,
+        "structural_lookback_bars": structural_lookback_bars,
+        "structural_atr_buffer": structural_atr_buffer,
+    })
     result = run_backtest(
         period_candles,
         starting_balance=starting_balance,
@@ -199,6 +206,10 @@ def run_walk_forward_backtest(
     require_mtf_confirmation=True,
     direction_filter=None,
     signal_overrides=None,
+    stop_model="fixed",
+    atr_stop_multiple=2.0,
+    structural_lookback_bars=20,
+    structural_atr_buffer=0.2,
 ):
     """Evaluate a fixed strategy in non-overlapping chronological test folds.
 
@@ -290,6 +301,7 @@ def run_walk_forward_backtest(
             instrument, volume_ratio_threshold, max_holding_bars,
             candle_timeframe, higher_timeframe_candles, higher_timeframe,
             require_mtf_confirmation, direction_filter, signal_overrides,
+            stop_model, atr_stop_multiple, structural_lookback_bars, structural_atr_buffer,
         )
         validation_result = _evaluate_period(
             candles, validation_start, validation_end, warmup_bars, starting_balance,
@@ -375,6 +387,10 @@ def run_walk_forward_backtest(
             "purge_bars": purge_bars,
             "embargo_bars": embargo_bars,
             "max_holding_bars": max_holding_bars,
+            "stop_model": stop_model,
+            "atr_stop_multiple": atr_stop_multiple,
+            "structural_lookback_bars": structural_lookback_bars,
+            "structural_atr_buffer": structural_atr_buffer,
             "boundary_gaps": {
                 "purge_minimum": "max_holding_bars",
                 "embargo_minimum": "max(warmup_bars, max_holding_bars)",
