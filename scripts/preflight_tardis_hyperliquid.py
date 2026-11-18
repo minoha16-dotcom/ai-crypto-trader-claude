@@ -65,12 +65,31 @@ def main():
         p.error("TARDIS_API_KEY is required. Add it as a GitHub Actions secret; never paste it into chat.")
     symbols = [x.strip().upper() for x in args.symbols.split(",") if x.strip()]
     exchange = get_json(f"{BASE}/exchanges/{EXCHANGE}")
-    if not exchange.get("enabled") or not exchange.get("supportsDatasets", False):
-        raise RuntimeError("Tardis metadata does not report Hyperliquid CSV datasets as enabled")
-    datasets = exchange.get("datasets", {})
-    metadata = {item.get("id"): item for item in datasets.get("symbols", [])}
+    if not isinstance(exchange, dict):
+        raise RuntimeError(f"Unexpected Tardis exchange metadata type: {type(exchange).__name__}")
+    # Use the documented datasets.symbols allow-list, not optional boolean flags.
+    datasets = exchange.get("datasets")
+    if not isinstance(datasets, dict):
+        raise RuntimeError(
+            "Tardis exchange metadata has no datasets object. "
+            f"Top-level fields returned: {sorted(exchange.keys())}"
+        )
+    dataset_symbols = datasets.get("symbols")
+    if not isinstance(dataset_symbols, list):
+        raise RuntimeError(
+            "Tardis exchange metadata has no datasets.symbols list. "
+            f"datasets fields returned: {sorted(datasets.keys())}"
+        )
+    metadata = {
+        str(item.get("id", "")).upper(): item
+        for item in dataset_symbols if isinstance(item, dict) and item.get("id")
+    }
     if not metadata:
-        raise RuntimeError("Tardis exchange metadata returned no downloadable dataset symbols")
+        raise RuntimeError(
+            "Tardis metadata returned an empty datasets.symbols list. "
+            f"Exchange fields: {sorted(exchange.keys())}; "
+            f"datasets fields: {sorted(datasets.keys())}"
+        )
 
     entitlement = get_json(f"{BASE}/api-key-info", key)
     # Emit only non-secret entitlement metadata. The API key itself is never logged.
@@ -83,12 +102,12 @@ def main():
     checks = []
     failures = []
     for symbol in symbols:
-        item = metadata.get(symbol)
+        item = metadata.get(symbol.upper())
         if not item:
             failures.append(f"{symbol}: not present in Tardis downloadable dataset symbols")
             checks.append({"symbol": symbol, "status": "symbol_unavailable"})
             continue
-        available_since = item.get("availableSince") or exchange.get("datasets", {}).get("exportedFrom")
+        available_since = item.get("availableSince") or datasets.get("exportedFrom") or exchange.get("availableSince")
         if not available_since:
             failures.append(f"{symbol}: Tardis did not publish an availableSince date")
             checks.append({"symbol": symbol, "status": "missing_available_since"})
@@ -111,6 +130,9 @@ def main():
         "exchange": EXCHANGE,
         "checked_at_utc": datetime.now(timezone.utc).isoformat(),
         "exchange_available_since": exchange.get("availableSince"),
+        "exchange_metadata_fields": sorted(exchange.keys()),
+        "dataset_metadata_fields": sorted(datasets.keys()),
+        "dataset_symbol_count": len(metadata),
         "datasets_exported_from": datasets.get("exportedFrom"),
         "datasets_exported_until": datasets.get("exportedUntil"),
         "entitlement_summary": entitlement_summary,
