@@ -128,7 +128,10 @@ def main():
                 raise ValueError(f"Unsupported research timeframe: {timeframe}")
             interval = timedelta(minutes=interval_minutes)
             warmup = 200
-            lower_start = start - interval * warmup
+            # 4h needs >~102 scored days to form three valid folds with the
+            # unchanged 200-bar warm-up, purge and embargo. Keep 15m at 90 days.
+            group_start = end - timedelta(days=136) if timeframe == "4h" else start
+            lower_start = group_start - interval * warmup
             print(f"Fetching Hyperliquid {symbol} perp {timeframe}: {lower_start} -> {end}", flush=True)
             candles = fetch_ndjson_candles_chunked(
                 symbol, timeframe, lower_start, end, api_key, market="perp"
@@ -143,7 +146,8 @@ def main():
             cache_path.write_text(json.dumps({
                 "exchange": "hyperliquid", "symbol": symbol,
                 "market_type": "futures", "timeframe": timeframe,
-                "start_utc": args.start, "end_utc": args.end,
+                "start_utc": group_start.isoformat().replace("+00:00", "Z"),
+                "end_utc": args.end,
                 "candles": candles, "higher_timeframe": args.higher_timeframe,
                 "higher_timeframe_candles": higher,
                 "source": "Vike Hyperliquid OHLCV export",
@@ -151,8 +155,8 @@ def main():
 
             # Keep only 200 lower-timeframe warm-up bars before the requested
             # scoring window; do not silently score the earlier 4h warm-up span.
-            lower_scoring = [row for row in candles if row[0] >= int(start.timestamp() * 1000)]
-            lower_warmup = [row for row in candles if row[0] < int(start.timestamp() * 1000)][-warmup:]
+            lower_scoring = [row for row in candles if row[0] >= int(group_start.timestamp() * 1000)]
+            lower_warmup = [row for row in candles if row[0] < int(group_start.timestamp() * 1000)][-warmup:]
             if len(lower_warmup) < warmup:
                 raise ValueError(
                     f"{symbol} {timeframe}: need {warmup} lower-timeframe warm-up bars, "
@@ -185,13 +189,53 @@ def main():
                     timeframe=timeframe, candles=evaluation_candles,
                     higher_timeframe_candles=higher,
                     higher_timeframe=args.higher_timeframe,
-                    start_utc=args.start, end_utc=args.end,
+                    start_utc=group_start.isoformat().replace("+00:00", "Z"),
+                    end_utc=args.end,
                     **fold_settings,
                     max_folds=args.max_folds,
                     direction_filter=side_filter,
                     signal_overrides=overrides,
                     require_mtf_confirmation=mtf_enabled,
                     experiment_name=experiment_name,
+                )
+                reports.append(report)
+                print(
+                    f"{symbol} {timeframe} {experiment_name}: {report['validation_status']} | "
+                    f"qualified={report['qualified_examples']} | folds={report['walk_forward_folds']} | "
+                    f"OOS={report['oos_trade_count']} | expectancy_R={report['net_expectancy_r']} | "
+                    f"config={report['config_hash'][:12]} | "
+                    f"reasons={','.join(report['rejection_reasons']) or 'none'}",
+                    flush=True,
+                )
+
+            # Exit-management experiments keep the baseline signal rules fixed.
+            # Each stop/time policy has a distinct experiment/config hash.
+            exit_experiments = [
+                ("EXIT_ATR_1_5", "atr", 1.5, 20, 0.2, 20),
+                ("EXIT_ATR_2_5", "atr", 2.5, 20, 0.2, 20),
+                ("EXIT_STRUCTURAL_20", "structural", 2.0, 20, 0.2, 20),
+                ("EXIT_TIME_10", "fixed", 2.0, 20, 0.2, 10),
+                ("EXIT_TIME_30", "fixed", 2.0, 20, 0.2, 30),
+            ]
+            for experiment_name, stop_model, atr_multiple, lookback, buffer, holding in exit_experiments:
+                report = evaluate_strategy_group(
+                    exchange="hyperliquid", symbol=symbol, market_type="futures",
+                    timeframe=timeframe, candles=evaluation_candles,
+                    higher_timeframe_candles=higher,
+                    higher_timeframe=args.higher_timeframe,
+                    start_utc=group_start.isoformat().replace("+00:00", "Z"),
+                    end_utc=args.end,
+                    **fold_settings,
+                    max_folds=args.max_folds,
+                    direction_filter=None,
+                    signal_overrides=None,
+                    require_mtf_confirmation=(timeframe == "15m"),
+                    experiment_name=experiment_name,
+                    stop_model=stop_model,
+                    atr_stop_multiple=atr_multiple,
+                    structural_lookback_bars=lookback,
+                    structural_atr_buffer=buffer,
+                    max_holding_bars=holding,
                 )
                 reports.append(report)
                 print(
