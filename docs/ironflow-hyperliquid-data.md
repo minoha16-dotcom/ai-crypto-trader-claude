@@ -29,11 +29,15 @@ Outputs in data/ironflow/processed:
   intervals, and an overall readiness status.
 
 STRUCTURALLY_CONTIGUOUS means the symbol has every hourly candle in the full
-requested UTC interval (2025-05-25 00:00 inclusive through 2026-11-01 00:00
-exclusive), with no interior hourly gap or conflicting duplicate. A contiguous
-subset that starts late or ends early is INCOMPLETE and is rejected. This is
-data-coverage validation only, not model approval. Review coverage-report.json
-before per-group walk-forward research.
+available UTC interval (2025-05-25 14:00 inclusive through 2026-11-01 00:00
+exclusive), with no interior hourly gap or conflicting duplicate. Ironflow's
+historical-data guide identifies the first Hyperliquid fill at 2025-05-25
+14:32 UTC and says every UTC day is complete from 26 May; therefore no earlier
+hourly OHLCV candle is available from fills for 25 May. The downloaded Parquet
+files confirm the first 1h candle at 14:00 UTC for BTC, ETH, SOL and HYPE.
+A contiguous subset that starts later or ends early is INCOMPLETE and rejected.
+This is data-coverage validation only, not model approval. Review
+coverage-report.json before per-group walk-forward research.
 
 ## Source and license
 
