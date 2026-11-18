@@ -210,7 +210,7 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
                             min_oos_trades=MIN_OOS_TRADES, bootstrap_replicates=BOOTSTRAP_REPLICATES,
                             direction_filter=None, signal_overrides=None,
                             require_mtf_confirmation=None, experiment_name="BASELINE",
-                            max_holding_bars=20, stop_model="fixed",
+                            stop_model="fixed",
                             atr_stop_multiple=2.0, structural_lookback_bars=20,
                             structural_atr_buffer=0.2): 
     """Return a reproducible ACCEPT/REJECT report for one exact independent group."""
@@ -258,7 +258,6 @@ def evaluate_strategy_group(*, exchange, symbol, market_type, timeframe, candles
         require_mtf_confirmation=mtf_enabled,
         direction_filter=direction_filter,
         signal_overrides=signal_overrides,
-        max_holding_bars=max_holding_bars,
         stop_model=stop_model,
         atr_stop_multiple=atr_stop_multiple,
         structural_lookback_bars=structural_lookback_bars,
