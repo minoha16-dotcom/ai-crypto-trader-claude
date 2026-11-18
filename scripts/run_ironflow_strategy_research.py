@@ -111,10 +111,22 @@ def main():
             if interval_ms is None:
                 raise ValueError(f"Unsupported timeframe: {timeframe}")
             # Exact timestamp continuity and full requested-window bounds.
-            if candles[0][0] != utc_ms(EXPECTED_START):
-                raise ValueError(f"{symbol} {timeframe}: unexpected first candle")
-            if candles[-1][0] != utc_ms(EXPECTED_END_EXCLUSIVE) - interval_ms:
-                raise ValueError(f"{symbol} {timeframe}: unexpected last candle")
+            requested_start_ms = utc_ms(EXPECTED_START)
+            requested_end_ms = utc_ms(EXPECTED_END_EXCLUSIVE)
+            # Derived 4h/1d candles only exist for complete UTC buckets.
+            # Align the first expected bucket upward to the next timeframe boundary.
+            expected_first_ms = ((requested_start_ms + interval_ms - 1) // interval_ms) * interval_ms
+            expected_last_ms = requested_end_ms - interval_ms
+            if candles[0][0] != expected_first_ms:
+                raise ValueError(
+                    f"{symbol} {timeframe}: expected first complete UTC bucket "
+                    f"{expected_first_ms}, got {candles[0][0]}"
+                )
+            if candles[-1][0] != expected_last_ms:
+                raise ValueError(
+                    f"{symbol} {timeframe}: expected last complete UTC bucket "
+                    f"{expected_last_ms}, got {candles[-1][0]}"
+                )
             for left, right in zip(candles, candles[1:]):
                 if right[0] - left[0] != interval_ms:
                     raise ValueError(f"{symbol} {timeframe}: missing/irregular candle interval")
