@@ -9,7 +9,7 @@ import gzip
 import io
 import json
 import os
-from datetime import datetime, timezone
+from datetime import date as date_type, datetime, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -40,14 +40,21 @@ def get_dataset_sample(symbol, date, api_key):
         with urlopen(req, timeout=90) as response:
             payload = response.read()
     except HTTPError as exc:
+        detail = exc.read(500).decode("utf-8", errors="replace").strip()
         if exc.code == 404:
-            return {"status": "not_found", "http_status": 404, "rows": 0}
-        if exc.code in (401, 403):
+            return {"status": "not_found", "http_status": 404, "rows": 0, "detail": detail}
+        if exc.code in (400, 401, 403):
+            status = "bad_request" if exc.code == 400 else "access_denied"
             return {
-                "status": "access_denied",
+                "status": status,
                 "http_status": exc.code,
                 "rows": 0,
-                "reason": "Tardis rejected this authenticated dataset request; check subscription entitlement and API-key access window.",
+                "detail": detail,
+                "reason": (
+                    "Tardis rejected the dataset URL or one of its path parameters."
+                    if exc.code == 400 else
+                    "Tardis rejected this authenticated dataset request; check subscription entitlement and API-key access window."
+                ),
             }
         raise
     try:
@@ -144,22 +151,47 @@ def main():
             failures.append(f"{symbol}: Tardis did not publish an availableSince date")
             checks.append({"symbol": symbol, "status": "missing_available_since"})
             continue
-        # Public Tardis samples are available on the first day of each month.
-        # Test the public sample without a key, separately from paid data entitlement.
-        date = available_since[:7] + "-01"
-        sample = get_dataset_sample(symbol, date, "")
+        data_types = item.get("dataTypes") or []
+        if "trades" not in data_types:
+            failures.append(f"{symbol}: trades is not listed in this instrument's Tardis dataTypes")
+            checks.append({
+                "symbol": symbol,
+                "dataset_symbol_id": item.get("id"),
+                "available_since": available_since,
+                "dataset_types": data_types,
+                "status": "trades_unavailable",
+            })
+            continue
+
+        # Public CSV samples are only guaranteed on month starts. If collection
+        # began mid-month, that month's day-01 predates the instrument and can
+        # produce HTTP 400. Select the first month-start on/after availableSince.
+        available_date = date_type.fromisoformat(available_since[:10])
+        sample_date = available_date.replace(day=1)
+        if sample_date < available_date:
+            year, month = sample_date.year, sample_date.month + 1
+            if month == 13:
+                year, month = year + 1, 1
+            sample_date = date_type(year, month, 1)
+        date = sample_date.isoformat()
+        dataset_symbol_id = str(item.get("id"))
+        sample = get_dataset_sample(dataset_symbol_id, date, "")
         ok = sample["status"] == "ok" and sample["rows"] > 0
         checks.append({
             "symbol": symbol,
             "available_since": available_since,
-            "dataset_types": item.get("dataTypes", []),
+            "dataset_symbol_id": dataset_symbol_id,
+            "dataset_types": data_types,
             "sample_access": "public_monthly_sample_no_api_key",
             "sample_date": date,
             "sample": sample,
             "status": "pass" if ok else "sample_unavailable",
         })
         if not ok:
-            failures.append(f"{symbol}: trades sample on {date} returned {sample['status']} ({sample['rows']} rows)")
+            failures.append(
+                f"{symbol} ({dataset_symbol_id}): trades sample on {date} "
+                f"returned {sample['status']} ({sample['rows']} rows)"
+            )
     result = {
         "source": "Tardis.dev",
         "exchange": EXCHANGE,
