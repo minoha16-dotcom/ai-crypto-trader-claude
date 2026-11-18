@@ -163,12 +163,16 @@ def _evaluate_period(
         backtest_options["direction_filter"] = direction_filter
     if signal_overrides is not None:
         backtest_options["signal_overrides"] = signal_overrides
-    backtest_options.update({
-        "stop_model": stop_model,
-        "atr_stop_multiple": atr_stop_multiple,
-        "structural_lookback_bars": structural_lookback_bars,
-        "structural_atr_buffer": structural_atr_buffer,
-    })
+    if (
+        stop_model != "fixed" or atr_stop_multiple != 2.0
+        or structural_lookback_bars != 20 or structural_atr_buffer != 0.2
+    ):
+        backtest_options.update({
+            "stop_model": stop_model,
+            "atr_stop_multiple": atr_stop_multiple,
+            "structural_lookback_bars": structural_lookback_bars,
+            "structural_atr_buffer": structural_atr_buffer,
+        })
     result = run_backtest(
         period_candles,
         starting_balance=starting_balance,
