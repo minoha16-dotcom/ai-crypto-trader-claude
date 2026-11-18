@@ -1,0 +1,72 @@
+name: Hyperliquid 4Y Data Coverage
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Comma-separated Hyperliquid perpetual symbols"
+        required: true
+        default: "BTC,ETH,SOL,HYPE"
+        type: string
+      timeframes:
+        description: "History profiles: 15m=2y, 1h=3y, 4h=4y, 1d=4y"
+        required: true
+        default: "15m,1h,4h,1d"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hyperliquid-4y-coverage
+  cancel-in-progress: false
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      VIKE_API_KEY: ${{ secrets.VIKE_API_KEY }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout selected branch
+        uses: actions/checkout@v4
+
+      - name: Validate Vike secret
+        shell: bash
+        run: |
+          if [ -z "${VIKE_API_KEY}" ]; then
+            echo "::error::Repository secret VIKE_API_KEY is missing or empty."
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.18"
+
+      - name: Restore resumable candle chunks
+        uses: actions/cache@v4
+        with:
+          path: data/strategy-research/hyperliquid-4y
+          key: hyperliquid-4y-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            hyperliquid-4y-${{ github.ref_name }}-
+
+      - name: Collect four-year history and audit coverage
+        run: |
+          python scripts/collect_hyperliquid_history.py \
+            --symbols "${{ inputs.symbols }}" \
+            --timeframes "${{ inputs.timeframes }}" \
+            --output-dir data/strategy-research/hyperliquid-4y
+
+      - name: Upload coverage report and cached data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyperliquid-4y-coverage-${{ github.run_id }}
+          path: |
+            data/strategy-research/hyperliquid-4y/coverage-report.json
+            data/strategy-research/hyperliquid-4y/*.json
+          if-no-files-found: warn
+          retention-days: 30
