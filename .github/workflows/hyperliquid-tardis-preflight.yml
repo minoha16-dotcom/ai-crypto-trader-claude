@@ -1,0 +1,44 @@
+name: Hyperliquid Tardis Historical Data Preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Hyperliquid perpetual symbols to verify"
+        required: true
+        default: "BTC,ETH,SOL,HYPE"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hyperliquid-tardis-preflight
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TARDIS_API_KEY: ${{ secrets.TARDIS_API_KEY }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - name: Checkout Tardis integration branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/hyperliquid-4y-data-coverage
+      - name: Validate Tardis secret
+        shell: bash
+        run: |
+          if [ -z "${TARDIS_API_KEY}" ]; then
+            echo "::error::Repository secret TARDIS_API_KEY is missing or empty."
+            exit 1
+          fi
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.18"
+      - name: Verify Tardis Hyperliquid history and access
+        run: |
+          python scripts/preflight_tardis_hyperliquid.py --symbols "${{ inputs.symbols }}"
