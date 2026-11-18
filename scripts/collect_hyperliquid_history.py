@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 API = "https://data.vike.io/v1/hyperliquid"
-VIKE_HISTORY_START = datetime(2025, 12, 31, 23, 59, tzinfo=timezone.utc)
+VIKE_HISTORY_START = datetime(2026, 1, 1, 0, 0, tzinfo=timezone.utc)
 DEFAULT_SYMBOLS = ("BTC", "ETH", "SOL", "HYPE")
 HORIZONS = {"15m": 730, "1h": 1095, "4h": 1460, "1d": 1460}
 MINUTES = {"15m": 15, "1h": 60, "4h": 240, "1d": 1440}
