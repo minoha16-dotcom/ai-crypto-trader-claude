@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timezone
-from scripts.collect_hyperliquid_history import coverage, parse_export, HistoryUnavailable, VIKE_HISTORY_START
+from scripts.collect_hyperliquid_history import coverage, parse_export
 
 
 class CollectorTests(unittest.TestCase):
