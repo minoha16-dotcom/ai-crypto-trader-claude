@@ -41,7 +41,14 @@ def get_dataset_sample(symbol, date, api_key):
             payload = response.read()
     except HTTPError as exc:
         if exc.code == 404:
-            return {"status": "not_found", "rows": 0, "url": url}
+            return {"status": "not_found", "http_status": 404, "rows": 0}
+        if exc.code in (401, 403):
+            return {
+                "status": "access_denied",
+                "http_status": exc.code,
+                "rows": 0,
+                "reason": "Tardis rejected this authenticated dataset request; check subscription entitlement and API-key access window.",
+            }
         raise
     try:
         decoded = gzip.decompress(payload).decode("utf-8-sig")
@@ -137,13 +144,16 @@ def main():
             failures.append(f"{symbol}: Tardis did not publish an availableSince date")
             checks.append({"symbol": symbol, "status": "missing_available_since"})
             continue
-        date = available_since[:10]
-        sample = get_dataset_sample(symbol, date, key)
+        # Public Tardis samples are available on the first day of each month.
+        # Test the public sample without a key, separately from paid data entitlement.
+        date = available_since[:7] + "-01"
+        sample = get_dataset_sample(symbol, date, "")
         ok = sample["status"] == "ok" and sample["rows"] > 0
         checks.append({
             "symbol": symbol,
             "available_since": available_since,
             "dataset_types": item.get("dataTypes", []),
+            "sample_access": "public_monthly_sample_no_api_key",
             "sample_date": date,
             "sample": sample,
             "status": "pass" if ok else "sample_unavailable",
@@ -163,6 +173,7 @@ def main():
         "entitlement_summary": entitlement_summary,
         "checks": checks,
         "status": "pass" if not failures else "fail",
+        "historical_entitlement_note": "A successful public first-of-month sample validates the CSV path and schema only. Continuous daily history requires an active subscription and matching API-key date entitlement.",
         "failures": failures,
     }
     print(json.dumps(result, indent=2), flush=True)
