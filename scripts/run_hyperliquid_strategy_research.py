@@ -218,6 +218,10 @@ def main():
                 ("EXIT_TIME_30", "fixed", 2.0, 20, 0.2, 30),
             ]
             for experiment_name, stop_model, atr_multiple, lookback, buffer, holding in exit_experiments:
+                exit_fold_settings = dict(fold_settings)
+                if timeframe == "4h" and holding > 20:
+                    # A 30-bar horizon requires >=32 validation bars after purge.
+                    exit_fold_settings["validation_bars"] = 32
                 report = evaluate_strategy_group(
                     exchange="hyperliquid", symbol=symbol, market_type="futures",
                     timeframe=timeframe, candles=evaluation_candles,
@@ -225,7 +229,7 @@ def main():
                     higher_timeframe=args.higher_timeframe,
                     start_utc=group_start.isoformat().replace("+00:00", "Z"),
                     end_utc=args.end,
-                    **fold_settings,
+                    **exit_fold_settings,
                     max_folds=args.max_folds,
                     direction_filter=None,
                     signal_overrides=None,
