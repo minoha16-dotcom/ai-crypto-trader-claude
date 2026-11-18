@@ -37,8 +37,18 @@ ALIASES = {
 
 
 def month_range(start: str, end: str):
-    sy, sm = map(int, start.split("-"))
-    ey, em = map(int, end.split("-"))
+    def parse(value):
+        try:
+            year_text, month_text = value.split("-")
+            year, month = int(year_text), int(month_text)
+        except (ValueError, AttributeError) as exc:
+            raise ValueError(f"month must use YYYY-MM format: {value!r}") from exc
+        if len(year_text) != 4 or len(month_text) != 2 or year < 2000 or not 1 <= month <= 12:
+            raise ValueError(f"invalid month: {value!r}")
+        return year, month
+
+    sy, sm = parse(start)
+    ey, em = parse(end)
     if (ey, em) < (sy, sm):
         raise ValueError("end month must not precede start month")
     year, month = sy, sm
@@ -145,6 +155,8 @@ def validate_hourly(symbol, rows):
     rows.sort(key=lambda r: r[0])
     unique = {}
     for row in rows:
+        if row[0] % 3_600_000 != 0:
+            raise ValueError(f"Non-UTC-hour-aligned candle: {symbol} {row[0]}")
         if row[0] in unique:
             if unique[row[0]] != row:
                 raise ValueError(f"Conflicting duplicate candle: {symbol} {row[0]}")
@@ -188,7 +200,8 @@ def aggregate(rows, hours):
     return result
 
 
-def write_outputs(symbols, rows_by_symbol, output_dir: Path, source_files):
+def write_outputs(symbols, rows_by_symbol, output_dir: Path, source_files,
+                  expected_start_ms: int, expected_end_ms: int):
     output_dir.mkdir(parents=True, exist_ok=True)
     report = {
         "source": "Ironflow public Hugging Face Parquet dataset",
@@ -208,7 +221,13 @@ def write_outputs(symbols, rows_by_symbol, output_dir: Path, source_files):
         if symbol not in rows_by_symbol:
             report["groups"][symbol] = {"status": "MISSING_SYMBOL", "rows_1h": 0, "rejection_reasons": ["NO_ROWS_FOR_SYMBOL"]}
             continue
-        hourly, gaps = validate_hourly(symbol, rows_by_symbol[symbol])
+        # Enforce the requested half-open UTC interval; monthly downloads can
+        # include rows outside it, and a contiguous subset is not full coverage.
+        requested_rows = [
+            row for row in rows_by_symbol[symbol]
+            if expected_start_ms <= row[0] < expected_end_ms
+        ]
+        hourly, gaps = validate_hourly(symbol, requested_rows)
         if not hourly:
             report["groups"][symbol] = {"status": "EMPTY", "rows_1h": 0, "rejection_reasons": ["NO_VALID_HOURLY_ROWS"]}
             continue
@@ -226,15 +245,36 @@ def write_outputs(symbols, rows_by_symbol, output_dir: Path, source_files):
                 "candles": bars,
             }
             path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        expected_last_ms = expected_end_ms - 3_600_000
+        boundary_gaps = []
+        if hourly[0][0] != expected_start_ms:
+            boundary_gaps.append({
+                "type": "MISSING_OR_LATE_START",
+                "expected_utc": datetime.fromtimestamp(expected_start_ms / 1000, timezone.utc).isoformat(),
+                "observed_utc": datetime.fromtimestamp(hourly[0][0] / 1000, timezone.utc).isoformat(),
+            })
+        if hourly[-1][0] != expected_last_ms:
+            boundary_gaps.append({
+                "type": "MISSING_OR_EARLY_END",
+                "expected_utc": datetime.fromtimestamp(expected_last_ms / 1000, timezone.utc).isoformat(),
+                "observed_utc": datetime.fromtimestamp(hourly[-1][0] / 1000, timezone.utc).isoformat(),
+            })
+        reasons = []
+        if gaps:
+            reasons.append("HOURLY_GAPS_PRESENT")
+        if boundary_gaps:
+            reasons.append("REQUESTED_WINDOW_NOT_FULLY_COVERED")
         report["groups"][symbol] = {
-            "status": "GAPS_FOUND" if gaps else "STRUCTURALLY_CONTIGUOUS",
+            "status": "STRUCTURALLY_CONTIGUOUS" if not reasons else "INCOMPLETE",
             "rows_1h": len(hourly),
+            "expected_rows_1h": (expected_end_ms - expected_start_ms) // 3_600_000,
             "start_utc": datetime.fromtimestamp(hourly[0][0] / 1000, timezone.utc).isoformat(),
             "end_utc": datetime.fromtimestamp(hourly[-1][0] / 1000, timezone.utc).isoformat(),
+            "boundary_gaps": boundary_gaps,
             "gaps": gaps,
             "rows_4h": len(aggregate(hourly, 4)),
             "rows_1d": len(aggregate(hourly, 24)),
-            "rejection_reasons": ["HOURLY_GAPS_PRESENT"] if gaps else [],
+            "rejection_reasons": reasons,
         }
     report["overall_status"] = (
         "READY_FOR_RESEARCH_VALIDATION"
@@ -261,7 +301,14 @@ def main():
         for month in month_range(args.start_month, args.end_month)
     ]
     rows_by_symbol, schema = load_hourly(files, symbols)
-    report = write_outputs(symbols, rows_by_symbol, Path(args.output_dir), files)
+    start_text = "2025-05-25T00:00:00+00:00"
+    end_text = "2026-11-01T00:00:00+00:00"
+    expected_start_ms = int(datetime.fromisoformat(start_text).timestamp() * 1000)
+    expected_end_ms = int(datetime.fromisoformat(end_text).timestamp() * 1000)
+    report = write_outputs(
+        symbols, rows_by_symbol, Path(args.output_dir), files,
+        expected_start_ms, expected_end_ms
+    )
     print(json.dumps({"schema": schema, "overall_status": report["overall_status"], "groups": report["groups"]}, indent=2))
     return 0 if report["overall_status"] == "READY_FOR_RESEARCH_VALIDATION" else 2
 
