@@ -9,7 +9,7 @@ import gzip
 import io
 import json
 import os
-from datetime import date as date_type, datetime, timezone
+from datetime import date as date_type, datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -180,9 +180,9 @@ def main():
 
         # A first-of-month sample is public and does not prove paid historical
         # entitlement. Probe the immediately following day with the API key.
-        paid_probe_date = (available_date.replace(day=1) + __import__("datetime").timedelta(days=1))
+        paid_probe_date = (available_date.replace(day=1) + timedelta(days=1))
         if paid_probe_date < available_date:
-            paid_probe_date = available_date + __import__("datetime").timedelta(days=1)
+            paid_probe_date = available_date + timedelta(days=1)
         paid_probe_day = paid_probe_date.isoformat()
         paid_probe = get_dataset_sample(dataset_symbol_id, paid_probe_day, key)
         paid_access_ok = paid_probe["status"] == "ok" and paid_probe["rows"] > 0
