@@ -6,7 +6,7 @@ from scripts.collect_hyperliquid_history import coverage, parse_export, HistoryU
 class CollectorTests(unittest.TestCase):
     def test_coverage_counts_leading_internal_and_trailing_gaps(self):
         start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-        end = datetime(2026, 1, 1, 0, 50, tzinfo=timezone.utc)
+        end = datetime(2026, 1, 1, 0, 45, tzinfo=timezone.utc)
         step = 15 * 60_000
         rows = [[int(start.timestamp() * 1000) + step, 1, 1, 1, 1, 1]]
         report = coverage(rows, "15m", start, end)
