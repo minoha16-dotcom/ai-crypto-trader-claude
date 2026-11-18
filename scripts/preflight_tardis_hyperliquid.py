@@ -177,20 +177,39 @@ def main():
         dataset_symbol_id = str(item.get("id"))
         sample = get_dataset_sample(dataset_symbol_id, date, "")
         ok = sample["status"] == "ok" and sample["rows"] > 0
+
+        # A first-of-month sample is public and does not prove paid historical
+        # entitlement. Probe the immediately following day with the API key.
+        paid_probe_date = (available_date.replace(day=1) + __import__("datetime").timedelta(days=1))
+        if paid_probe_date < available_date:
+            paid_probe_date = available_date + __import__("datetime").timedelta(days=1)
+        paid_probe_day = paid_probe_date.isoformat()
+        paid_probe = get_dataset_sample(dataset_symbol_id, paid_probe_day, key)
+        paid_access_ok = paid_probe["status"] == "ok" and paid_probe["rows"] > 0
+
         checks.append({
             "symbol": symbol,
             "available_since": available_since,
             "dataset_symbol_id": dataset_symbol_id,
             "dataset_types": data_types,
-            "sample_access": "public_monthly_sample_no_api_key",
+            "public_sample_access": "public_monthly_sample_no_api_key",
             "sample_date": date,
             "sample": sample,
+            "paid_entitlement_probe_date": paid_probe_day,
+            "paid_entitlement_probe": paid_probe,
+            "paid_entitlement_probe_status": "pass" if paid_access_ok else "not_confirmed",
             "status": "pass" if ok else "sample_unavailable",
         })
         if not ok:
             failures.append(
-                f"{symbol} ({dataset_symbol_id}): trades sample on {date} "
+                f"{symbol} ({dataset_symbol_id}): public trades sample on {date} "
                 f"returned {sample['status']} ({sample['rows']} rows)"
+            )
+        if not paid_access_ok:
+            failures.append(
+                f"{symbol} ({dataset_symbol_id}): authenticated non-month-start probe "
+                f"on {paid_probe_day} returned {paid_probe['status']} "
+                f"({paid_probe['rows']} rows); continuous history entitlement is not confirmed"
             )
     result = {
         "source": "Tardis.dev",
@@ -205,7 +224,7 @@ def main():
         "entitlement_summary": entitlement_summary,
         "checks": checks,
         "status": "pass" if not failures else "fail",
-        "historical_entitlement_note": "A successful public first-of-month sample validates the CSV path and schema only. Continuous daily history requires an active subscription and matching API-key date entitlement.",
+        "historical_entitlement_note": "Public first-of-month samples validate the CSV path/schema only. Authenticated non-month-start probes are required to confirm continuous daily history entitlement.",
         "failures": failures,
     }
     print(json.dumps(result, indent=2), flush=True)
