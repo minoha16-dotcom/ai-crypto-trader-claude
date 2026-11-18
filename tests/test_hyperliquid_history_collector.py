@@ -21,7 +21,7 @@ class CollectorTests(unittest.TestCase):
     def test_duplicate_candles_rejected(self):
         row = '{"ts":1,"open":1,"high":1,"low":1,"close":1,"volume":1}'
         with self.assertRaises(ValueError):
-            parse_export(row + "\\n" + row, "BTC", "15m")
+            parse_export(row + "\n" + row, "BTC", "15m")
 
 
 if __name__ == "__main__":
