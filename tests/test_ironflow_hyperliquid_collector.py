@@ -4,7 +4,7 @@ import json
 import pytest
 
 from scripts.download_ironflow_hyperliquid_candles import (
-    aggregate, month_range, validate_hourly, write_outputs,
+    START_MONTH, END_MONTH, aggregate, month_range, validate_hourly, write_outputs,
 )
 
 
@@ -84,3 +84,9 @@ def test_coverage_report_accepts_exact_contiguous_requested_window(tmp_path):
     report = write_outputs(["BTC"], {"BTC": rows}, tmp_path, [], start, end)
     assert report["groups"]["BTC"]["status"] == "STRUCTURALLY_CONTIGUOUS"
     assert report["overall_status"] == "READY_FOR_RESEARCH_VALIDATION"
+
+
+def test_research_window_starts_at_first_available_hyperliquid_hour():
+    assert START_MONTH == "2025-05"
+    assert END_MONTH == "2026-10"
+    assert utc_ms("2025-05-25T14:00:00") == 1748181600000
