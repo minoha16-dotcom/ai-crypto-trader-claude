@@ -84,12 +84,13 @@ def coverage(rows, timeframe, requested_start, requested_end):
     step = MINUTES[timeframe] * 60_000
     start_ms = int(requested_start.timestamp() * 1000)
     end_ms = int(requested_end.timestamp() * 1000)
-    expected = max(0, (end_ms - start_ms) // step)
+    first_grid = ((start_ms + step - 1) // step) * step
+    expected = max(0, ((end_ms - 1 - first_grid) // step) + 1) if end_ms > first_grid else 0
     timestamps = sorted({int(r[0]) for r in rows if start_ms <= int(r[0]) < end_ms})
-    off_grid = [ts for ts in timestamps if (ts - start_ms) % step != 0]
-    aligned = [ts for ts in timestamps if (ts - start_ms) % step == 0]
+    off_grid = [ts for ts in timestamps if ts % step != 0]
+    aligned = [ts for ts in timestamps if ts % step == 0]
     gaps = []
-    cursor = start_ms
+    cursor = first_grid
     for ts in aligned:
         if ts > cursor:
             missing = (ts - cursor) // step
@@ -97,7 +98,7 @@ def coverage(rows, timeframe, requested_start, requested_end):
                 gaps.append({"after_ms": cursor - step, "before_ms": ts, "missing_bars": missing})
         cursor = ts + step
     if cursor < end_ms:
-        missing = (end_ms - cursor) // step
+        missing = ((end_ms - 1 - cursor) // step) + 1
         if missing > 0:
             gaps.append({"after_ms": cursor - step, "before_ms": end_ms, "missing_bars": missing})
     actual = len(aligned)
