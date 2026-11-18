@@ -92,13 +92,38 @@ def main():
         )
 
     entitlement = get_json(f"{BASE}/api-key-info", key)
-    # Emit only non-secret entitlement metadata. The API key itself is never logged.
-    entitlement_summary = {
-        "exchanges": entitlement.get("exchanges"),
-        "from": entitlement.get("from"),
-        "to": entitlement.get("to"),
-        "dataTypes": entitlement.get("dataTypes"),
-    }
+    # Tardis /api-key-info may return a list (not only an object).
+    # Summarize its shape without logging the key or arbitrary response values.
+    if isinstance(entitlement, dict):
+        allowed = ("exchanges", "from", "to", "dataTypes", "data_types", "datasets")
+        entitlement_summary = {
+            name: entitlement.get(name)
+            for name in allowed if name in entitlement
+        }
+        entitlement_summary["response_type"] = "object"
+        entitlement_summary["fields"] = sorted(entitlement.keys())
+    elif isinstance(entitlement, list):
+        entitlement_summary = {
+            "response_type": "list",
+            "item_count": len(entitlement),
+            "item_fields": sorted({
+                key_name
+                for item in entitlement if isinstance(item, dict)
+                for key_name in item.keys()
+            }),
+        }
+        # Include only recognizable non-secret entitlement dimensions.
+        safe_fields = ("exchange", "exchanges", "from", "to", "dataType", "dataTypes",
+                       "data_type", "data_types", "dataset")
+        entitlement_summary["items"] = [
+            {name: item[name] for name in safe_fields if name in item}
+            for item in entitlement if isinstance(item, dict)
+        ]
+    else:
+        raise RuntimeError(
+            "Unexpected Tardis /api-key-info response type: "
+            f"{type(entitlement).__name__}; expected object or list"
+        )
     checks = []
     failures = []
     for symbol in symbols:
