@@ -97,7 +97,7 @@ def inspect_timestamp_series(
         "first_ms": normalized[0] if normalized else None,
         "last_ms": normalized[-1] if normalized else None,
         "strictly_increasing": out_of_order == 0 and duplicates == 0,
-        "duplicate_adjacent_count": duplicates,
+        "duplicate_count": duplicates,
         "out_of_order_adjacent_count": out_of_order,
         "gap_count": len(gaps),
         "gaps": gaps,
