@@ -128,7 +128,8 @@ def run_probe(symbols, start_ms, end_ms, output):
             "duration_days": round((end_ms - start_ms) / 86_400_000, 3),
         },
         "symbols": {},
-        "summary": {"pass": 0, "fail": 0, "inconclusive": 0},
+        "summary": {"pass": 0, "fail": 0, "inconclusive": 0, "blocked": 0},
+        "status": "INCOMPLETE",
         "limitations": [
             "This is a low-volume boundary probe, not a complete historical download or gap audit.",
             "Current exchangeInfo cannot establish historical listing/delisting or survivorship-free universe membership.",
@@ -137,7 +138,30 @@ def run_probe(symbols, start_ms, end_ms, output):
         ],
     }
     try:
-        exchange_info = _get(session, "/fapi/v1/exchangeInfo")
+        try:
+            exchange_info = _get(session, "/fapi/v1/exchangeInfo")
+        except requests.HTTPError as exc:
+            response = getattr(exc, "response", None)
+            if response is not None and response.status_code == 451:
+                # HTTP 451 is a provider-side legal/geographic restriction.
+                # Do not retry through alternate hosts or proxy services.
+                report["status"] = "BLOCKED_GEO_RESTRICTION"
+                report["summary"]["blocked"] = 1
+                report["error"] = (
+                    "Binance USD-M public API returned HTTP 451 for exchangeInfo. "
+                    "The provider denied access due to a legal/geographic restriction; "
+                    "no market-data coverage was established."
+                )
+                output_path = Path(output)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text(
+                    json.dumps(report, indent=2, sort_keys=True) + "\\n",
+                    encoding="utf-8",
+                )
+                print(json.dumps(report["summary"], sort_keys=True))
+                print("Probe blocked by Binance HTTP 451; report: " + str(output_path))
+                return 0
+            raise
         contracts = {
             row["symbol"]: row for row in exchange_info.get("symbols", [])
             if row.get("contractType") == "PERPETUAL"
