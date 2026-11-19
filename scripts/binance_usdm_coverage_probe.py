@@ -155,7 +155,7 @@ def run_probe(symbols, start_ms, end_ms, output):
                 output_path = Path(output)
                 output_path.parent.mkdir(parents=True, exist_ok=True)
                 output_path.write_text(
-                    json.dumps(report, indent=2, sort_keys=True) + "\\n",
+                    json.dumps(report, indent=2, sort_keys=True) + "\n",
                     encoding="utf-8",
                 )
                 print(json.dumps(report["summary"], sort_keys=True))
@@ -213,6 +213,7 @@ def run_probe(symbols, start_ms, end_ms, output):
     finally:
         session.close()
 
+    report["status"] = "COMPLETED"
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
