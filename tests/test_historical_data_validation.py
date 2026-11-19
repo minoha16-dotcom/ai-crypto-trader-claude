@@ -51,7 +51,7 @@ def test_series_detects_duplicate_and_out_of_order_rows():
     result = inspect_timestamp_series(
         [start, start, start - 60_000], now_ms=NOW
     )
-    assert result["duplicate_adjacent_count"] == 1
+    assert result["duplicate_count"] == 1
     assert result["out_of_order_adjacent_count"] == 1
     assert result["strictly_increasing"] is False
 
@@ -61,6 +61,6 @@ def test_series_detects_non_adjacent_duplicate_timestamp():
     result = inspect_timestamp_series(
         [start, start + 60_000, start], now_ms=NOW
     )
-    assert result["duplicate_adjacent_count"] == 1
+    assert result["duplicate_count"] == 1
     assert result["out_of_order_adjacent_count"] == 1
     assert result["strictly_increasing"] is False
