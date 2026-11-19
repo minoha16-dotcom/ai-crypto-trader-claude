@@ -60,10 +60,12 @@ def inspect_timestamp_series(
         normalize_epoch_ms(value, now_ms=now_ms, field=f"{field}[{index}]")
         for index, value in enumerate(values)
     ]
-    duplicates = sum(
-        1 for index in range(1, len(normalized))
-        if normalized[index] == normalized[index - 1]
-    )
+    seen = set()
+    duplicates = 0
+    for timestamp in normalized:
+        if timestamp in seen:
+            duplicates += 1
+        seen.add(timestamp)
     out_of_order = sum(
         1 for index in range(1, len(normalized))
         if normalized[index] < normalized[index - 1]
@@ -80,6 +82,7 @@ def inspect_timestamp_series(
                     "before_index": index,
                     "missing_intervals": max(0, delta // expected_interval_ms - 1),
                     "delta_ms": delta,
+                    "unexpected_interval": delta % expected_interval_ms != 0,
                 })
             elif delta < expected_interval_ms:
                 gaps.append({
