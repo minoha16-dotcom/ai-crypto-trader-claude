@@ -16,13 +16,22 @@ Every ZIP is checked with its official `.CHECKSUM` sidecar and ZIP CRC. The repo
 
 ## Run the preflight
 
+The workflow file currently exists only on the PR #51 feature branch, not on the repository's default `main` branch. GitHub requires a `workflow_dispatch` workflow to exist on the default branch before its **Run workflow** control or API dispatch is available. Therefore, do not expect this workflow to be manually runnable yet.
+
+To make it runnable, one of these repository changes must be explicitly approved:
+- add a minimal, inert workflow-registration file with the same path to `main`, then dispatch the feature-branch version; or
+- merge the relevant PR changes to the default branch.
+
+Neither action has been taken. PR #51 remains Draft and unmerged, and `main` is unchanged.
+
+Once registered on the default branch, the run steps are:
 1. Open the repository's **Actions** tab.
 2. Select **Binance BTCUSDT November 2023 Data Preflight**.
 3. Select branch `feat/vike-v31-acceptance-protocol`.
 4. Click **Run workflow**.
 5. Open the completed run and download artifact `binance-btcusdt-nov2023-preflight`.
 
-The workflow is manual-only. It does not run automatically, create paid workers, access private credentials, place orders, merge a PR, or deploy Render. Raw ZIP files and the funding response are removed from the runner workspace after the report is uploaded. Only the data-quality JSON report is retained as an artifact for 30 days.
+The workflow is manual-only. It does not create paid workers, access private credentials, place orders, merge a PR, or deploy Render. Raw ZIP files and the funding response are removed from the runner workspace after the report is uploaded. Only the data-quality JSON report is retained as an artifact for 30 days.
 
 ## Important: this is not the training workflow
 
