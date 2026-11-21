@@ -23,16 +23,20 @@ from urllib3.util.retry import Retry
 
 BASE_URL = "https://fapi.binance.com"
 BAR_MS = 15 * 60 * 1000
+CHECKPOINT_SCHEMA_VERSION = 2
 STREAMS = {
     "trade_15m": ("/fapi/v1/klines", "bar", 1500),
     "mark_15m": ("/fapi/v1/markPriceKlines", "bar", 1500),
     "funding": ("/fapi/v1/fundingRate", "funding", 1000),
 }
+BAR_HEADERS = [
+    "open_time", "open", "high", "low", "close", "volume",
+    "close_time", "quote_volume", "trade_count",
+    "taker_buy_base", "taker_buy_quote", "ignore",
+]
 HEADERS = {
-    "trade_15m": ["open_time", "open", "high", "low", "close", "volume",
-                  "close_time", "quote_volume", "trade_count", "taker_buy_base",
-                  "taker_buy_quote", "ignore"],
-    "mark_15m": ["open_time", "open", "high", "low", "close", "volume",\n                  "close_time", "quote_volume", "trade_count", "taker_buy_base",\n                  "taker_buy_quote", "ignore"],
+    "trade_15m": BAR_HEADERS,
+    "mark_15m": BAR_HEADERS,
     "funding": ["funding_time", "funding_rate", "mark_price"],
 }
 
@@ -50,20 +54,29 @@ def sha256_file(path: Path) -> str:
 
 
 def make_session() -> requests.Session:
-    retry = Retry(total=5, connect=5, read=5, backoff_factor=1,
-                  status_forcelist=(429, 500, 502, 503, 504),
-                  allowed_methods=frozenset(("GET",)),
-                  respect_retry_after_header=True)
+    retry = Retry(
+        total=5,
+        connect=5,
+        read=5,
+        backoff_factor=1,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(("GET",)),
+        respect_retry_after_header=True,
+    )
     session = requests.Session()
     session.mount("https://", HTTPAdapter(max_retries=retry))
     session.headers["User-Agent"] = "vike-v31-resumable-research-collector/1.0"
     return session
 
 
-def request_rows(session: requests.Session, endpoint: str, params: dict[str, Any]) -> list:
+def request_rows(
+    session: requests.Session, endpoint: str, params: dict[str, Any]
+) -> list:
     response = session.get(BASE_URL + endpoint, params=params, timeout=(10, 45))
     if response.status_code in (418, 429):
-        raise RuntimeError(f"Binance rate-limit/ban HTTP {response.status_code}; stop and resume later")
+        raise RuntimeError(
+            f"Binance rate-limit/ban HTTP {response.status_code}; stop and resume later"
+        )
     response.raise_for_status()
     payload = response.json()
     if not isinstance(payload, list):
@@ -73,21 +86,41 @@ def request_rows(session: requests.Session, endpoint: str, params: dict[str, Any
 
 def load_checkpoint(path: Path, symbol: str, start_ms: int, end_ms: int) -> dict:
     if not path.exists():
-        return {"schema_version": 1, "symbol": symbol, "start_ms": start_ms,
-                "end_ms_exclusive": end_ms, "streams": {}, "updated_at": utc_now()}
+        return {
+            "schema_version": CHECKPOINT_SCHEMA_VERSION,
+            "symbol": symbol,
+            "start_ms": start_ms,
+            "end_ms_exclusive": end_ms,
+            "streams": {},
+            "updated_at": utc_now(),
+        }
     state = json.loads(path.read_text(encoding="utf-8"))
     expected = (symbol, start_ms, end_ms)
-    actual = (state.get("symbol"), state.get("start_ms"), state.get("end_ms_exclusive"))
+    actual = (
+        state.get("symbol"),
+        state.get("start_ms"),
+        state.get("end_ms_exclusive"),
+    )
     if actual != expected:
-        raise ValueError(f"Checkpoint scope mismatch: expected {expected}, found {actual}")
-    if state.get("schema_version") != 1:
-        raise ValueError("Unsupported checkpoint schema_version")
+        raise ValueError(
+            f"Checkpoint scope mismatch: expected {expected}, found {actual}"
+        )
+    if state.get("schema_version") != CHECKPOINT_SCHEMA_VERSION:
+        raise ValueError(
+            "Unsupported checkpoint schema_version; use a new output directory "
+            "or explicitly migrate and audit the old dataset"
+        )
+    if not isinstance(state.get("streams"), dict):
+        raise ValueError("Checkpoint streams must be an object")
     return state
 
 
 def atomic_json(path: Path, value: dict) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(value, indent=2, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
     os.replace(temporary, path)
 
 
@@ -103,68 +136,195 @@ def _row_timestamp(row: Any, kind: str) -> int:
 
 def _csv_values(row: Any, kind: str) -> list:
     if kind == "funding":
-        return [row.get("fundingTime"), row.get("fundingRate"), row.get("markPrice")]
-    if kind == "bar" and len(row) >= 6:
-        if kind == "bar" and len(row) == 6:
-            return row[:6]
-        return row[:12]
-    raise ValueError("Unexpected kline row width")
+        if not isinstance(row, dict):
+            raise ValueError("Funding response row must be an object")
+        required = ("fundingTime", "fundingRate", "markPrice")
+        missing = [field for field in required if field not in row]
+        if missing:
+            raise ValueError(f"Funding response lacks fields: {', '.join(missing)}")
+        return [row[field] for field in required]
+    if kind == "bar":
+        if not isinstance(row, list) or len(row) != len(BAR_HEADERS):
+            width = len(row) if isinstance(row, list) else "non-list"
+            raise ValueError(
+                f"Kline response must contain exactly {len(BAR_HEADERS)} fields; got {width}"
+            )
+        return row
+    raise ValueError(f"Unsupported row kind: {kind}")
 
 
 def _next_cursor(last_timestamp: int, kind: str) -> int:
     # Funding timestamps can carry a +1ms offset; advance by one ms, never
     # assume exact 8-hour multiples. Klines advance by one full bar.
-    return last_timestamp + (1 if kind == "funding" else BAR_MS)
+    if kind == "funding":
+        return last_timestamp + 1
+    if kind == "bar":
+        return last_timestamp + BAR_MS
+    raise ValueError(f"Unsupported stream kind: {kind}")
 
 
-def collect_stream(session: requests.Session, out_dir: Path, symbol: str,
-                   stream: str, start_ms: int, end_ms: int,
-                   state: dict, delay: float = 0.15) -> dict:
+def _recover_csv(path: Path, stream: str, stream_state: dict) -> None:
+    """Reconcile the CSV to the last atomically committed checkpoint.
+
+    A crash after fsync(CSV) but before checkpoint replacement leaves extra
+    bytes. Those bytes are discarded and fetched again. A CSV shorter than the
+    checkpoint, or one whose committed content disagrees with it, fails closed.
+    """
+    if not path.exists():
+        raise ValueError(f"Checkpoint exists but CSV is missing: {path}")
+    committed_bytes = stream_state.get("committed_bytes")
+    expected_rows = stream_state.get("rows_written")
+    if not isinstance(committed_bytes, int) or committed_bytes <= 0:
+        raise ValueError(f"{stream}: checkpoint lacks a valid committed_bytes")
+    if not isinstance(expected_rows, int) or expected_rows < 0:
+        raise ValueError(f"{stream}: checkpoint lacks a valid rows_written")
+    actual_bytes = path.stat().st_size
+    if actual_bytes < committed_bytes:
+        raise ValueError(
+            f"{stream}: CSV is shorter than its checkpoint "
+            f"({actual_bytes} < {committed_bytes} bytes)"
+        )
+    if actual_bytes > committed_bytes:
+        with path.open("r+b") as handle:
+            handle.truncate(committed_bytes)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    expected_header = HEADERS[stream]
+    timestamp_field = expected_header[0]
+    previous_timestamp = None
+    count = 0
+    with path.open("r", newline="", encoding="utf-8") as handle:
+        reader = csv.reader(handle)
+        try:
+            header = next(reader)
+        except StopIteration as exc:
+            raise ValueError(f"{stream}: CSV is empty") from exc
+        if header != expected_header:
+            raise ValueError(f"{stream}: CSV header does not match the expected schema")
+        for row in reader:
+            if len(row) != len(expected_header):
+                raise ValueError(
+                    f"{stream}: committed CSV row {count + 2} has {len(row)} "
+                    f"columns; expected {len(expected_header)}"
+                )
+            timestamp = int(row[0])
+            if previous_timestamp is not None and timestamp <= previous_timestamp:
+                raise ValueError(f"{stream}: committed CSV timestamps are not unique/increasing")
+            previous_timestamp = timestamp
+            count += 1
+
+    if count != expected_rows:
+        raise ValueError(
+            f"{stream}: CSV row count {count} disagrees with checkpoint {expected_rows}"
+        )
+    last_timestamp = stream_state.get("last_timestamp_ms")
+    if count == 0 and last_timestamp is not None:
+        raise ValueError(f"{stream}: empty CSV has a checkpoint last timestamp")
+    if count > 0 and previous_timestamp != last_timestamp:
+        raise ValueError(f"{stream}: CSV last timestamp disagrees with checkpoint")
+
+
+def _initialize_stream(path: Path, stream: str, start_ms: int) -> dict:
+    if path.exists():
+        raise ValueError(
+            f"CSV exists without a matching checkpoint: {path}. "
+            "Refusing to append to an unverified file; use a clean output directory."
+        )
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(HEADERS[stream])
+        handle.flush()
+        os.fsync(handle.fileno())
+    return {
+        "next_start_ms": start_ms,
+        "rows_written": 0,
+        "last_timestamp_ms": None,
+        "committed_bytes": path.stat().st_size,
+        "complete": False,
+    }
+
+
+def collect_stream(
+    session: requests.Session,
+    out_dir: Path,
+    symbol: str,
+    stream: str,
+    start_ms: int,
+    end_ms: int,
+    state: dict,
+    delay: float = 0.15,
+) -> dict:
+    if stream not in STREAMS:
+        raise ValueError(f"Unknown stream: {stream}")
     endpoint, kind, limit = STREAMS[stream]
-    stream_state = state.setdefault("streams", {}).setdefault(
-        stream, {"next_start_ms": start_ms, "rows_written": 0, "complete": False})
+    streams_state = state.setdefault("streams", {})
+    path = out_dir / f"{symbol}-{stream}.csv"
+
+    if stream not in streams_state:
+        stream_state = _initialize_stream(path, stream, start_ms)
+        streams_state[stream] = stream_state
+        state["updated_at"] = utc_now()
+        atomic_json(out_dir / f"{symbol}-checkpoint.json", state)
+    else:
+        stream_state = streams_state[stream]
+        _recover_csv(path, stream, stream_state)
+
     if stream_state.get("complete"):
         return stream_state
 
-    path = out_dir / f"{symbol}-{stream}.csv"
-    exists = path.exists() and path.stat().st_size > 0
-    mode = "a" if exists else "w"
     cursor = int(stream_state["next_start_ms"])
-    with path.open(mode, newline="", encoding="utf-8") as handle:
+    if cursor < start_ms or cursor > end_ms:
+        raise ValueError(f"{symbol} {stream}: checkpoint cursor is outside requested window")
+
+    with path.open("a", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        if not exists:
-            writer.writerow(HEADERS[stream])
         while cursor < end_ms:
-            params = {"symbol": symbol, "startTime": cursor,
-                      "endTime": end_ms - 1, "limit": limit}
+            params = {
+                "symbol": symbol,
+                "startTime": cursor,
+                "endTime": end_ms - 1,
+                "limit": limit,
+            }
             rows = request_rows(session, endpoint, params)
             if not rows:
-                # An empty page is not proof of complete coverage. Record the
-                # unresolved tail and stop rather than silently skipping it.
+                # Empty pages remain unresolved. In particular, do not infer
+                # continuous bar coverage or invent missing funding events.
                 stream_state["empty_page_at_ms"] = cursor
+                state["updated_at"] = utc_now()
+                atomic_json(out_dir / f"{symbol}-checkpoint.json", state)
                 break
+            if len(rows) > limit:
+                raise ValueError(f"{symbol} {stream}: API page exceeds requested limit")
+
             timestamps = [_row_timestamp(row, kind) for row in rows]
             if timestamps != sorted(timestamps) or len(timestamps) != len(set(timestamps)):
                 raise ValueError(f"{symbol} {stream}: API page is not strictly ordered/unique")
             if timestamps[0] < cursor or timestamps[-1] >= end_ms:
                 raise ValueError(f"{symbol} {stream}: API returned rows outside requested window")
-            for row in rows:
-                writer.writerow(_csv_values(row, kind))
+            if stream_state["last_timestamp_ms"] is not None:
+                if timestamps[0] <= int(stream_state["last_timestamp_ms"]):
+                    raise ValueError(f"{symbol} {stream}: API page overlaps committed CSV rows")
+
+            csv_rows = [_csv_values(row, kind) for row in rows]
+            for values in csv_rows:
+                writer.writerow(values)
             handle.flush()
             os.fsync(handle.fileno())
-            stream_state["rows_written"] += len(rows)
-            next_cursor = _next_cursor(timestamps[-1], kind)
-            if next_cursor <= cursor:
+
+            # Commit metadata only after the CSV page is durable. If this
+            # checkpoint write fails or the process dies, recovery truncates
+            # the uncommitted CSV tail to the previous committed byte offset.
+            stream_state["rows_written"] += len(csv_rows)
+            stream_state["last_timestamp_ms"] = timestamps[-1]
+            stream_state["committed_bytes"] = path.stat().st_size
+            cursor = _next_cursor(timestamps[-1], kind)
+            if cursor <= int(stream_state["next_start_ms"]):
                 raise RuntimeError(f"{symbol} {stream}: pagination made no progress")
-            cursor = next_cursor
             stream_state["next_start_ms"] = cursor
             stream_state.pop("empty_page_at_ms", None)
             state["updated_at"] = utc_now()
             atomic_json(out_dir / f"{symbol}-checkpoint.json", state)
-            if len(rows) < limit:
-                # Do not infer there can be no later records from a short page:
-                # continue until the endpoint returns an empty page or end.
-                pass
             time.sleep(delay)
 
     stream_state["complete"] = cursor >= end_ms
@@ -199,6 +359,8 @@ def main() -> int:
     symbols = [item.strip().upper() for item in args.symbols.split(",") if item.strip()]
     if not symbols or any(not item.isalnum() for item in symbols):
         parser.error("--symbols must be comma-separated alphanumeric symbols")
+    if len(symbols) != len(set(symbols)):
+        parser.error("--symbols contains duplicates")
     args.out_dir.mkdir(parents=True, exist_ok=True)
     session = make_session()
     summary = {}
@@ -208,10 +370,15 @@ def main() -> int:
         summary[symbol] = {}
         for stream in STREAMS:
             summary[symbol][stream] = collect_stream(
-                session, args.out_dir, symbol, stream, start_ms, end_ms, state, args.delay)
+                session, args.out_dir, symbol, stream, start_ms, end_ms, state, args.delay
+            )
         atomic_json(checkpoint, state)
-    print(json.dumps({"generated_at": utc_now(), "output_dir": str(args.out_dir),
-                      "summary": summary}, indent=2))
+    print(
+        json.dumps(
+            {"generated_at": utc_now(), "output_dir": str(args.out_dir), "summary": summary},
+            indent=2,
+        )
+    )
     return 0
 
 
