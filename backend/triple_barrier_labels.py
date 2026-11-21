@@ -67,6 +67,8 @@ class LabelConfig:
 
 
 def _finite_positive(value: float, field: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field} must be a numeric finite positive value")
     result = float(value)
     if not math.isfinite(result) or result <= 0:
         raise ValueError(f"{field} must be finite and positive")
@@ -86,12 +88,17 @@ def _validate_bars(bars: Iterable[Bar]) -> list[Bar]:
             or not isinstance(bar.close_time_ms, int)
         ):
             raise ValueError(f"bar[{index}] timestamps must be integer milliseconds")
+        if bar.open_time_ms % BAR_INTERVAL_MS != 0:
+            raise ValueError(f"bar[{index}] open timestamp must align to a UTC 15-minute boundary")
         if bar.close_time_ms != bar.open_time_ms + BAR_CLOSE_OFFSET_MS:
             raise ValueError(f"bar[{index}] must be a complete 15-minute bar")
         if previous is not None and bar.open_time_ms <= previous:
             raise ValueError("bars must be strictly ordered and unique")
         previous = bar.open_time_ms
-        values = [float(bar.open), float(bar.high), float(bar.low), float(bar.close)]
+        raw_values = [bar.open, bar.high, bar.low, bar.close]
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in raw_values):
+            raise ValueError(f"bar[{index}] OHLC values must be numeric")
+        values = [float(value) for value in raw_values]
         if not all(math.isfinite(value) for value in values):
             raise ValueError(f"bar[{index}] contains non-finite OHLC")
         if min(values) <= 0 or bar.high < max(bar.open, bar.close, bar.low):
@@ -102,17 +109,21 @@ def _validate_bars(bars: Iterable[Bar]) -> list[Bar]:
 
 
 def _validate_funding(events: Iterable[FundingEvent]) -> list[FundingEvent]:
-    rows = sorted(list(events), key=lambda item: item.funding_time_ms)
-    previous = None
+    rows = list(events)
     for index, event in enumerate(rows):
         if isinstance(event.funding_time_ms, bool) or not isinstance(event.funding_time_ms, int):
             raise ValueError(f"funding[{index}] timestamp must be integer milliseconds")
-        if previous is not None and event.funding_time_ms <= previous:
-            raise ValueError("funding timestamps must be unique")
-        previous = event.funding_time_ms
-        if not math.isfinite(float(event.funding_rate)):
-            raise ValueError(f"funding[{index}] rate is non-finite")
+        if (
+            isinstance(event.funding_rate, bool)
+            or not isinstance(event.funding_rate, (int, float))
+            or not math.isfinite(float(event.funding_rate))
+        ):
+            raise ValueError(f"funding[{index}] rate must be numeric and finite")
         _finite_positive(event.mark_price, f"funding[{index}].mark_price")
+    rows.sort(key=lambda item: item.funding_time_ms)
+    timestamps = [event.funding_time_ms for event in rows]
+    if len(timestamps) != len(set(timestamps)):
+        raise ValueError("funding timestamps must be unique")
     return rows
 
 
@@ -144,6 +155,8 @@ def label_event(
         raise ValueError("side must be LONG or SHORT")
     if isinstance(event_time_ms, bool) or not isinstance(event_time_ms, int):
         raise ValueError("event_time_ms must be integer milliseconds")
+    if event_time_ms % BAR_INTERVAL_MS != BAR_CLOSE_OFFSET_MS:
+        raise ValueError("event_time_ms must align to a UTC 15-minute candle close")
     atr_value = _finite_positive(atr, "atr")
     rows = _validate_bars(bars)
     funding = _validate_funding(funding_events)
