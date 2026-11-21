@@ -25,16 +25,17 @@ exact 8-hour multiples.
 ## Crash recovery and file integrity
 
 Checkpoint schema version 2 records each stream's next cursor, committed row
-count, last committed timestamp, and committed CSV byte offset. CSV pages are
-flushed and fsynced before the checkpoint is atomically replaced.
+count, last committed timestamp, committed CSV byte offset, and SHA-256 of
+the committed CSV. CSV pages are flushed and fsynced before the checkpoint is
+atomically replaced.
 
 If the process stops after a CSV page is durable but before its checkpoint is
 replaced, the next run truncates the uncommitted CSV tail back to the last
 checkpointed byte offset and requests that page again. This prevents duplicate
 rows from that crash window. If the CSV is shorter than the checkpoint, its
 header or row widths are wrong, timestamps are not strictly increasing, or
-its row count/last timestamp disagrees with the checkpoint, the collector
-fails closed rather than guessing.
+its row count/last timestamp or SHA-256 disagrees with the checkpoint, the
+collector fails closed rather than guessing.
 
 Kline rows must have exactly 12 fields and funding rows must contain
 fundingTime, fundingRate, and markPrice. A header-only CSV left by a crash
