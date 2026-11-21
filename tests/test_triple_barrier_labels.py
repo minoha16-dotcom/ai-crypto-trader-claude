@@ -23,6 +23,8 @@ def run(side, rows, funding=(), **kwargs):
         bars=rows,
         funding_events=funding,
         funding_coverage_verified=True,
+        mark_price_bars=rows,
+        liquidation_price=1.0 if side == "LONG" else 1000.0,
         config=cfg(**kwargs),
     )
 
@@ -80,7 +82,8 @@ def test_missing_funding_coverage_fails_closed():
         label_event(
             event_time_ms=899_999, side="LONG", atr=1,
             bars=[bar(900_000)], funding_events=[],
-            funding_coverage_verified=False, config=cfg(),
+            funding_coverage_verified=False, mark_price_bars=[bar(900_000)],
+            liquidation_price=1.0, config=cfg(),
         )
 
 
@@ -159,7 +162,8 @@ def test_entry_requires_immediate_next_bar_after_signal_close():
     result = label_event(
         event_time_ms=899_999, side="LONG", atr=1,
         bars=[bar(1_800_000)], funding_events=[],
-        funding_coverage_verified=True, config=cfg(),
+        funding_coverage_verified=True, mark_price_bars=[bar(1_800_000)],
+        liquidation_price=1.0, config=cfg(),
     )
     assert result == {"status": "excluded", "reason": "missing_immediate_next_bar"}
 
@@ -263,3 +267,25 @@ def test_negative_funding_rate_reverses_long_and_short_cashflow():
     short = run("SHORT", rows, [settlement])
     assert long["funding_cashflow_per_unit"] == pytest.approx(0.1)
     assert short["funding_cashflow_per_unit"] == pytest.approx(-0.1)
+
+
+def test_labeler_fails_closed_without_mark_price_or_liquidation_inputs():
+    common = dict(
+        event_time_ms=899_999, side="LONG", atr=1, bars=[bar(900_000)],
+        funding_events=[], funding_coverage_verified=True, config=cfg(),
+    )
+    assert label_event(**common) == {"status": "excluded", "reason": "mark_price_bars_missing"}
+    with_mark = dict(common, mark_price_bars=[bar(900_000)])
+    assert label_event(**with_mark) == {"status": "excluded", "reason": "liquidation_price_missing"}
+
+
+def test_labeler_excludes_mark_price_liquidation_breach():
+    trade = [bar(900_000), bar(1_800_000, 100, 100, 98, 99)]
+    mark = [bar(900_000), bar(1_800_000, 100, 100, 90, 99)]
+    result = label_event(
+        event_time_ms=899_999, side="LONG", atr=1, bars=trade,
+        funding_events=[], funding_coverage_verified=True,
+        mark_price_bars=mark, liquidation_price=95, config=cfg(),
+    )
+    assert result["status"] == "excluded"
+    assert result["reason"] == "mark_price_liquidation_breach"
