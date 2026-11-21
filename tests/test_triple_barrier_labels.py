@@ -229,14 +229,13 @@ def test_event_time_must_be_aligned_to_15m_close():
 
 
 def test_funding_cashflow_is_added_to_net_pnl_with_correct_sign():
-    rows = [
-        bar(900_000, 100, 100, 100, 100),
-        bar(1_800_000, 100, 104, 100, 103.5),
-    ]
+    rows = [bar((i + 1) * 900_000) for i in range(48)]
     settlement = FundingEvent(1_900_000, 0.001, 100)
+    long_without_funding = run("LONG", rows)
+    short_without_funding = run("SHORT", rows)
     long = run("LONG", rows, [settlement])
     short = run("SHORT", rows, [settlement])
     assert long["funding_cashflow_per_unit"] == pytest.approx(-0.1)
     assert short["funding_cashflow_per_unit"] == pytest.approx(0.1)
-    assert long["net_r"] < long["net_r"] + (0.1 / 1.5)
-    assert short["net_r"] > short["net_r"] - (0.1 / 1.5)
+    assert long["net_r"] == pytest.approx(long_without_funding["net_r"] - 0.1 / 1.5)
+    assert short["net_r"] == pytest.approx(short_without_funding["net_r"] + 0.1 / 1.5)
