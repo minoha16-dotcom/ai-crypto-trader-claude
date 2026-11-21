@@ -271,11 +271,12 @@ def test_negative_funding_rate_reverses_long_and_short_cashflow():
 
 def test_labeler_fails_closed_without_mark_price_or_liquidation_inputs():
     common = dict(
-        event_time_ms=899_999, side="LONG", atr=1, bars=[bar(900_000)],
+        event_time_ms=899_999, side="LONG", atr=1,
+        bars=[bar((i + 1) * 900_000) for i in range(48)],
         funding_events=[], funding_coverage_verified=True, config=cfg(),
     )
     assert label_event(**common) == {"status": "excluded", "reason": "mark_price_bars_missing"}
-    with_mark = dict(common, mark_price_bars=[bar(900_000)])
+    with_mark = dict(common, mark_price_bars=common["bars"])
     assert label_event(**with_mark) == {"status": "excluded", "reason": "liquidation_price_missing"}
 
 
