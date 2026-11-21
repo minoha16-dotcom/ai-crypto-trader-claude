@@ -222,6 +222,9 @@ def _recover_csv(path: Path, stream: str, stream_state: dict) -> None:
         raise ValueError(f"{stream}: empty CSV has a checkpoint last timestamp")
     if count > 0 and previous_timestamp != last_timestamp:
         raise ValueError(f"{stream}: CSV last timestamp disagrees with checkpoint")
+    expected_sha256 = stream_state.get("sha256")
+    if not expected_sha256 or sha256_file(path) != expected_sha256:
+        raise ValueError(f"{stream}: CSV checksum disagrees with checkpoint")
 
 
 def _initialize_stream(path: Path, stream: str, start_ms: int) -> dict:
@@ -254,6 +257,7 @@ def _initialize_stream(path: Path, stream: str, start_ms: int) -> dict:
         "rows_written": 0,
         "last_timestamp_ms": None,
         "committed_bytes": committed_bytes,
+        "sha256": sha256_file(path),
         "complete": False,
     }
 
@@ -331,6 +335,7 @@ def collect_stream(
             stream_state["rows_written"] += len(csv_rows)
             stream_state["last_timestamp_ms"] = timestamps[-1]
             stream_state["committed_bytes"] = path.stat().st_size
+            stream_state["sha256"] = sha256_file(path)
             cursor = _next_cursor(timestamps[-1], kind)
             if cursor <= int(stream_state["next_start_ms"]):
                 raise RuntimeError(f"{symbol} {stream}: pagination made no progress")
