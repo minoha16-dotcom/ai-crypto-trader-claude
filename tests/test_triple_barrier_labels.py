@@ -133,7 +133,7 @@ def test_short_stop_gap_fills_at_open_not_stale_stop():
 
 def test_funding_inside_time_exit_bar_is_applied():
     rows = [bar((i + 1) * 900_000) for i in range(48)]
-    settlement = FundingEvent(48 * 900_000 - 100_000, 0.001, 100)
+    settlement = FundingEvent(48 * 900_000 + 100_000, 0.001, 100)
     result = run("LONG", rows, [settlement])
     assert result["status"] == "labeled"
     assert result["funding_events_applied"] == 1
