@@ -112,8 +112,8 @@ def test_funding_duplicates_are_rejected():
 
 
 def test_long_stop_gap_fills_at_open_not_stale_stop():
-    rows = [bar(900_000, 97, 98, 96, 97)] + [
-        bar((i + 2) * 900_000) for i in range(47)
+    rows = [bar(900_000)] + [bar(1_800_000, 97, 98, 96, 97)] + [
+        bar((i + 3) * 900_000) for i in range(46)
     ]
     result = run("LONG", rows)
     assert result["exit_reason"] == "stop_loss"
@@ -122,8 +122,8 @@ def test_long_stop_gap_fills_at_open_not_stale_stop():
 
 
 def test_short_stop_gap_fills_at_open_not_stale_stop():
-    rows = [bar(900_000, 103, 104, 102, 103)] + [
-        bar((i + 2) * 900_000) for i in range(47)
+    rows = [bar(900_000)] + [bar(1_800_000, 103, 104, 102, 103)] + [
+        bar((i + 3) * 900_000) for i in range(46)
     ]
     result = run("SHORT", rows)
     assert result["exit_reason"] == "stop_loss"
