@@ -79,3 +79,19 @@ fee/slippage accounting, historical funding cashflows, synchronized mark-price
 liquidation checks, overlap control, immutable dataset manifest and hash, and
 the Vike V3.1 chronological validation/acceptance protocol. Do not invoke the
 legacy external-wallet Advisor approval path for Binance market events.
+
+## Offline Funding structural audit
+
+Run the independent CSV audit after collecting a bounded window:
+
+~~~powershell
+python scripts/audit_binance_usdm_funding.py --csv C:\\Vike_Data\\binance-v31\\BTCUSDT-funding.csv --start 2025-01-01T00:00:00Z --end 2025-02-01T00:00:00Z
+~~~
+
+The audit validates the exact Funding CSV schema, numeric rate and positive
+mark price, duplicate and ordering checks, requested-window bounds, and
+approximately 8-hour event cadence (60-second default tolerance). It emits
+structural_status separately from coverage_status. Coverage always remains
+NOT_VERIFIED: structural regularity, including first/last observed events,
+cannot prove that the exchange returned every expected historical event.
+A separate source/contract-history coverage verification is still required.
