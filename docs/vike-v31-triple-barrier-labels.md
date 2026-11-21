@@ -15,7 +15,15 @@ Module: `backend/triple_barrier_labels.py`
 - Primary barriers: stop 1.5 × ATR, target 3.0 × ATR, maximum 48 complete
   15-minute bars.
 - Trade OHLC is used for barrier touches. If SL and TP both touch in one bar,
-  SL is selected first.
+  SL is selected first. Mark Price OHLC must exist for every trade candle from
+  entry through exit, with exact matching timestamps; incomplete or mismatched
+  Mark Price coverage excludes the event.
+- The labeler requires an exchange-computed liquidation price for the exact
+  position configuration. LONG is excluded if Mark Price low touches/breaches
+  it; SHORT is excluded if Mark Price high touches/breaches it. This code does
+  not estimate liquidation price: contract type, quantity, leverage, margin
+  mode, maintenance tier, collateral, funding and liquidation fees must be
+  accounted for upstream.
 - A time exit uses the close of the 48th complete bar. A shorter horizon is
   excluded as immature.
 - Taker fees are charged on entry and exit notional per unit. Adverse slippage
@@ -43,14 +51,25 @@ This first slice does not yet:
   is per underlying unit and must not be generalized to inverse contracts;
 - download or validate the full market dataset;
 - independently prove Funding archive semantic equivalence/completeness;
-- calculate Wilder ATR or causal features;
-- validate Mark Price bar coverage or model liquidation/maintenance margin;
+- model exchange-specific liquidation-price calculation, maintenance-margin
+  tiers, cross-margin collateral or liquidation fees; those must be supplied
+  and independently verified upstream;
 - model order-book spread/depth, partial fills, or contract quantity precision;
 - construct overlap-controlled datasets or train any model.
 
 Therefore the function must only be used with test fixtures until the upstream
 coverage, cost assumptions, and Mark Price/liquidation policy are separately
 verified. Its output is not an accepted production label set.
+
+## Causal ATR and Mark Price guard
+
+`backend/causal_market_features.py` implements causal Wilder ATR: first TR is
+high-low, the initial ATR is the arithmetic mean of the first 14 TR values,
+and later values use the Wilder recursive update. Earlier rows are `None`;
+future candles cannot affect earlier ATR values. The module also validates
+exact trade/Mark Price candle alignment and checks liquidation breaches using
+Mark Price lows for LONG and highs for SHORT. The actual liquidation price is
+never estimated by this module.
 
 ## Tests
 
