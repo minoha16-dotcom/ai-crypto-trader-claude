@@ -24,7 +24,7 @@ exact 8-hour multiples.
 
 ## Crash recovery and file integrity
 
-Checkpoint schema version 2 records each stream's next cursor, committed row
+Checkpoint schema version 3 records each stream's next cursor, committed row
 count, last committed timestamp, committed CSV byte offset, and SHA-256 of
 the committed CSV. CSV pages are flushed and fsynced before the checkpoint is
 atomically replaced.
@@ -37,8 +37,17 @@ header or row widths are wrong, timestamps are not strictly increasing, or
 its row count/last timestamp or SHA-256 disagrees with the checkpoint, the
 collector fails closed rather than guessing.
 
-Kline rows must have exactly 12 fields and funding rows must contain
-fundingTime, fundingRate, and markPrice. A header-only CSV left by a crash
+Trade and Mark Price kline rows must each have exactly 12 fields, but they
+use separate CSV schemas. Trade rows retain Binance trade-volume and trade
+count column names. Mark Price rows use mark_open, mark_high, mark_low, and
+mark_close; tuple positions 5 and 7-11 are preserved as ignored_5 and
+ignored_7 through ignored_11, not mislabeled as trade volume or trade
+statistics. Funding rows must contain fundingTime, fundingRate, and markPrice.
+
+The schema change requires checkpoint version 3. Existing version 2
+checkpoints are intentionally rejected rather than silently reinterpreted.
+Use a new output directory when collecting with this version; keep prior CSVs
+for audit and comparison. A header-only CSV left by a crash
 during initial setup can be safely adopted. A CSV containing data but no
 matching checkpoint is rejected. Checkpoints from schema version 1 are not
 silently migrated; use a new output directory and independently audit any
