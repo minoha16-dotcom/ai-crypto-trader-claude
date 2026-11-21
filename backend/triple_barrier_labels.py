@@ -155,6 +155,8 @@ def label_event(
     if entry_index is None:
         return {"status": "excluded", "reason": "no_next_bar"}
     entry_bar = rows[entry_index]
+    if entry_bar.open_time_ms != event_time_ms + 1:
+        return {"status": "excluded", "reason": "missing_immediate_next_bar"}
     slip = float(config.adverse_slippage_rate)
     fee = float(config.taker_fee_rate)
     direction = 1.0 if side == "LONG" else -1.0
