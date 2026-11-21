@@ -255,11 +255,13 @@ def label_event(
     gross_pnl = direction * (exit_fill - entry_fill)
     entry_fee = entry_fill * fee
     exit_fee = exit_fill * fee
+    # Positive cashflow means funds received by the position; negative means paid.
+    # On positive funding, LONG pays and SHORT receives.
     funding_cashflow = sum(
-        direction * item.funding_rate * item.mark_price
+        -direction * item.funding_rate * item.mark_price
         for item in applicable_funding
     )
-    net_pnl = gross_pnl - entry_fee - exit_fee - funding_cashflow
+    net_pnl = gross_pnl - entry_fee - exit_fee + funding_cashflow
     risk_per_unit = stop_distance
     net_r = net_pnl / risk_per_unit
     return {
