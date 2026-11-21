@@ -119,3 +119,35 @@ Run the audit with `--start` and `--end` aligned to UTC 15-minute
 boundaries. A PASS means exact candle coverage for the supplied files/window;
 it does not prove that Binance's historical archive is complete beyond those
 files or validate the provenance of the bracket schedule.
+
+
+## Cross Margin and Hedge Mode calculation — research-only extension
+
+`backend/binance_usdm_cross_hedge_liquidation.py` adds a deterministic
+calculator for USDT-linear USD-M positions in ISOLATED or CROSSED margin and
+ONE_WAY or HEDGE position mode. It applies Binance's published cross/hedge
+algebra and requires separately supplied long/short maintenance brackets.
+For CROSSED mode, wallet balance, maintenance margin of other positions and
+unrealized PnL of other positions must all come from the same account snapshot.
+For ISOLATED mode, the wallet input must be the isolated wallet and other
+position offsets must be zero.
+
+This calculator does not fetch or reconstruct historical account state.
+Historical brackets must be captured with an effective timestamp for each
+symbol and checked against the position's liquidation time. Binance's current
+leverage-bracket endpoint is not evidence of what the bracket schedule was
+historically. Missing historical bracket snapshots or missing cross-account
+TMM/UPNL snapshots must result in NOT_VERIFIED, not a guessed value.
+
+A calculated threshold and a liquidation order's average execution price are
+different measurements. A force-order record can evidence the liquidation
+execution, but it does not by itself prove the theoretical trigger threshold.
+Comparison should separately report (1) predicted threshold versus a
+time-matched Binance position-risk `liquidationPrice` snapshot, and (2)
+Mark Price at the liquidation event and executed average fill price from the
+liquidation order. Do not treat execution slippage as formula error.
+
+The calculator remains a research verifier, not a substitute for Binance's
+risk engine. Portfolio margin, multi-assets collateral haircuts, ADL, insurance
+fund effects, liquidation fees, dynamic bracket changes, and unrecorded
+account transfers/position changes are outside its scope.
