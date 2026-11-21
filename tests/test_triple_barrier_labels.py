@@ -175,3 +175,54 @@ def test_fee_and_slippage_rates_must_be_below_one():
         run("LONG", [bar(900_000)], taker_fee_rate=1.0)
     with pytest.raises(ValueError, match=r"\[0, 1\)"):
         run("LONG", [bar(900_000)], adverse_slippage_rate=1.0)
+
+
+def test_stop_loss_pnl_and_r_match_independent_arithmetic():
+    rows = [
+        bar(900_000, 100, 100, 100, 100),
+        bar(1_800_000, 100, 100, 98, 99),
+    ]
+    result = run("LONG", rows)
+    expected_entry = 100 * 1.0005
+    expected_exit = 98.5 * 0.9995
+    expected_gross = expected_exit - expected_entry
+    expected_fees = expected_entry * 0.001 + expected_exit * 0.001
+    expected_net = expected_gross - expected_fees
+    assert result["entry_fill"] == pytest.approx(expected_entry)
+    assert result["exit_fill"] == pytest.approx(expected_exit)
+    assert result["gross_pnl_per_unit"] == pytest.approx(expected_gross)
+    assert result["entry_fee_per_unit"] + result["exit_fee_per_unit"] == pytest.approx(expected_fees)
+    assert result["net_r"] == pytest.approx(expected_net / 1.5)
+
+
+def test_take_profit_pnl_and_r_match_independent_arithmetic():
+    rows = [
+        bar(900_000, 100, 100, 100, 100),
+        bar(1_800_000, 100, 104, 100, 103.5),
+    ]
+    result = run("LONG", rows)
+    expected_entry = 100 * 1.0005
+    expected_exit = (expected_entry + 3.0) * 0.9995
+    expected_gross = expected_exit - expected_entry
+    expected_fees = expected_entry * 0.001 + expected_exit * 0.001
+    expected_net = expected_gross - expected_fees
+    assert result["exit_reason"] == "take_profit"
+    assert result["net_r"] == pytest.approx(expected_net / 1.5)
+
+
+def test_boolean_ohlc_and_funding_values_are_rejected():
+    with pytest.raises(ValueError, match="OHLC values must be numeric"):
+        run("LONG", [Bar(900_000, 1_799_999, True, 100, 99, 100)])
+    with pytest.raises(ValueError, match="rate must be numeric"):
+        run("LONG", [bar(900_000)], [FundingEvent(900_001, True, 100)])
+    with pytest.raises(ValueError, match="numeric finite positive"):
+        run("LONG", [bar(900_000)], [FundingEvent(900_001, 0.001, True)])
+
+
+def test_event_time_must_be_aligned_to_15m_close():
+    with pytest.raises(ValueError, match="align to a UTC 15-minute"):
+        label_event(
+            event_time_ms=900_000, side="LONG", atr=1,
+            bars=[bar(900_001)], funding_events=[],
+            funding_coverage_verified=True, config=cfg(),
+        )
