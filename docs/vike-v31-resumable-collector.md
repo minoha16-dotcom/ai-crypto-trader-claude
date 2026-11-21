@@ -46,13 +46,21 @@ older data before reuse.
 
 ## Important limitation
 
-An empty API page is recorded as an unresolved tail and is not treated as
-proof of continuous coverage. The stream remains incomplete and can be
-retried by running the same command again. In particular, do not infer that
-bars or funding events were continuous merely because the request returned
-an empty page.
+An empty API page for Trade or Mark is recorded as an unresolved tail; the
+stream remains incomplete and can be retried by running the same command.
+Kline requests explicitly send interval=15m.
 
-The CSV must still pass a separate independent audit for chronology,
+For Funding, an empty page terminates pagination for the requested bounded
+query and records termination_reason=api_empty_page. This sets the download
+pagination state to complete, but coverage_verified remains false. It does
+not prove that every expected historical funding event was returned. A
+separate funding-coverage audit must compare the downloaded event timestamps
+against the authoritative source and expected contract history before any
+training use. Never synthesize missing funding events or rates.
+
+Resume/crash-recovery tests cover Trade, Mark, and Funding, including the
+CSV-fsync-before-checkpoint failure window. The CSV must still pass a separate
+independent audit for chronology,
 duplicates, gaps, expected interval, funding event coverage, and cross-feed
 timestamp alignment. A completed download is not a training-ready dataset.
 
