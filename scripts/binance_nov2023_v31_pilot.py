@@ -176,10 +176,11 @@ def generate_events(bars: list[dict]) -> list[dict]:
         prior = bars[i - 20:i]
         upper, lower = max(x["h"] for x in prior), min(x["l"] for x in prior)
         close = bars[i]["c"]
-        # Fresh re-entry inside the prior channel re-arms that direction.
-        if close <= upper:
+        # Both directions re-arm only after a close back inside the prior
+        # Donchian channel; touching only one boundary is not sufficient.
+        inside_channel = lower <= close <= upper
+        if inside_channel:
             armed["LONG"] = True
-        if close >= lower:
             armed["SHORT"] = True
         side = "LONG" if close > upper else "SHORT" if close < lower else None
         if side and armed[side]:
@@ -346,7 +347,14 @@ def main() -> int:
     # three-year/30-month WFO plus locked six-month holdout.
     eligible.sort(key=lambda r: r["signal_time_ms"])
     cut = int(len(eligible) * 0.70)
-    train, test = eligible[:cut], eligible[cut:]
+    candidate_train, test = eligible[:cut], eligible[cut:]
+    test_start_ms = test[0]["signal_time_ms"] if test else END_MS
+    train = [
+        row for row in candidate_train
+        if datetime.fromisoformat(row["exit_time_utc"].replace("Z", "+00:00")).timestamp() * 1000
+        < test_start_ms
+    ]
+    purged_train_rows = len(candidate_train) - len(train)
     model, fit_report = fit_logistic(train)
     predictions = []
     if model and test:
@@ -387,7 +395,8 @@ def main() -> int:
                          "mark_extra_count": sum(1 for t in mark if not START_MS <= t < END_MS),
                          "funding_rows": len(funding)},
         "counts": {"events": len(events), "eligible_labels": len(eligible),
-                   "train_rows": len(train), "chronological_test_rows": len(test),
+                   "train_rows": len(train), "purged_unmatured_train_rows": purged_train_rows,
+                   "chronological_test_rows": len(test),
                    "test_predictions": len(predictions), "positive_labels": sum(r["label"] for r in eligible)},
         "exclusions_by_reason": reasons,
         "metrics": {"median_cost_to_r": statistics.median(costs) if costs else None,
