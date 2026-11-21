@@ -25,6 +25,8 @@ def run(side, rows, funding=(), **kwargs):
         funding_coverage_verified=True,
         mark_price_bars=rows,
         liquidation_price=1.0 if side == "LONG" else 1000.0,
+        mark_price_coverage_verified=True,
+        liquidation_verification={"status":"PASS","liquidation_price":1.0 if side == "LONG" else 1000.0},
         config=cfg(**kwargs),
     )
 
@@ -83,7 +85,8 @@ def test_missing_funding_coverage_fails_closed():
             event_time_ms=899_999, side="LONG", atr=1,
             bars=[bar(900_000)], funding_events=[],
             funding_coverage_verified=False, mark_price_bars=[bar(900_000)],
-            liquidation_price=1.0, config=cfg(),
+            liquidation_price=1.0, mark_price_coverage_verified=True,
+            liquidation_verification={"status":"PASS","liquidation_price":1.0}, config=cfg(),
         )
 
 
@@ -163,7 +166,8 @@ def test_entry_requires_immediate_next_bar_after_signal_close():
         event_time_ms=899_999, side="LONG", atr=1,
         bars=[bar(1_800_000)], funding_events=[],
         funding_coverage_verified=True, mark_price_bars=[bar(1_800_000)],
-        liquidation_price=1.0, config=cfg(),
+        liquidation_price=1.0, mark_price_coverage_verified=True,
+        liquidation_verification={"status":"PASS","liquidation_price":1.0}, config=cfg(),
     )
     assert result == {"status": "excluded", "reason": "missing_immediate_next_bar"}
 
@@ -275,9 +279,10 @@ def test_labeler_fails_closed_without_mark_price_or_liquidation_inputs():
         bars=[bar((i + 1) * 900_000) for i in range(48)],
         funding_events=[], funding_coverage_verified=True, config=cfg(),
     )
-    assert label_event(**common) == {"status": "excluded", "reason": "mark_price_bars_missing"}
-    with_mark = dict(common, mark_price_bars=common["bars"])
-    assert label_event(**with_mark) == {"status": "excluded", "reason": "liquidation_price_missing"}
+    covered = dict(common, mark_price_coverage_verified=True)
+    assert label_event(**covered) == {"status": "excluded", "reason": "mark_price_bars_missing"}
+    with_mark = dict(covered, mark_price_bars=common["bars"])
+    assert label_event(**with_mark) == {"status": "excluded", "reason": "liquidation_verification_not_passed"}
 
 
 def test_labeler_excludes_mark_price_liquidation_breach():
@@ -286,7 +291,9 @@ def test_labeler_excludes_mark_price_liquidation_breach():
     result = label_event(
         event_time_ms=899_999, side="LONG", atr=1, bars=trade,
         funding_events=[], funding_coverage_verified=True,
-        mark_price_bars=mark, liquidation_price=95, config=cfg(),
+        mark_price_bars=mark, liquidation_price=95,
+        mark_price_coverage_verified=True,
+        liquidation_verification={"status":"PASS","liquidation_price":95}, config=cfg(),
     )
     assert result["status"] == "excluded"
     assert result["reason"] == "mark_price_liquidation_breach"
