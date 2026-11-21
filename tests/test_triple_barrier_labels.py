@@ -239,3 +239,27 @@ def test_funding_cashflow_is_added_to_net_pnl_with_correct_sign():
     assert short["funding_cashflow_per_unit"] == pytest.approx(0.1)
     assert long["net_r"] == pytest.approx(long_without_funding["net_r"] - 0.1 / 1.5)
     assert short["net_r"] == pytest.approx(short_without_funding["net_r"] + 0.1 / 1.5)
+
+
+def test_short_take_profit_pnl_and_r_match_independent_arithmetic():
+    rows = [
+        bar(900_000, 100, 100, 100, 100),
+        bar(1_800_000, 100, 96, 99, 97),
+    ]
+    result = run("SHORT", rows)
+    expected_entry = 100 * (1 - 0.0005)
+    expected_exit = (expected_entry - 3.0) * (1 + 0.0005)
+    expected_gross = expected_entry - expected_exit
+    expected_fees = expected_entry * 0.001 + expected_exit * 0.001
+    expected_net = expected_gross - expected_fees
+    assert result["exit_reason"] == "take_profit"
+    assert result["net_r"] == pytest.approx(expected_net / 1.5)
+
+
+def test_negative_funding_rate_reverses_long_and_short_cashflow():
+    rows = [bar((i + 1) * 900_000) for i in range(48)]
+    settlement = FundingEvent(1_900_000, -0.001, 100)
+    long = run("LONG", rows, [settlement])
+    short = run("SHORT", rows, [settlement])
+    assert long["funding_cashflow_per_unit"] == pytest.approx(0.1)
+    assert short["funding_cashflow_per_unit"] == pytest.approx(-0.1)
