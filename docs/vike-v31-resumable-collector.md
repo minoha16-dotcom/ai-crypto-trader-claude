@@ -95,3 +95,56 @@ structural_status separately from coverage_status. Coverage always remains
 NOT_VERIFIED: structural regularity, including first/last observed events,
 cannot prove that the exchange returned every expected historical event.
 A separate source/contract-history coverage verification is still required.
+
+
+## Independent Funding archive reconciliation (new)
+
+The Binance Vision USD-M monthly Funding archive is a second distribution path
+for reconciliation. For a monthly partition, download both the ZIP and its
+publisher checksum. Example for BTCUSDT January 2025:
+
+~~~powershell
+$base = "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT"
+curl.exe -fL "$base/BTCUSDT-fundingRate-2025-01.zip" -o C:\\Vike_Data\\BTCUSDT-fundingRate-2025-01.zip
+curl.exe -fL "$base/BTCUSDT-fundingRate-2025-01.zip.CHECKSUM" -o C:\\Vike_Data\\BTCUSDT-fundingRate-2025-01.zip.CHECKSUM
+~~~
+
+The archive CSV schema used by this reconciliation is
+`calc_time,funding_interval_hours,last_funding_rate`. The REST collector schema
+is `funding_time,funding_rate,mark_price`. The tool verifies the downloaded ZIP
+against the publisher SHA-256, validates both schemas and numeric fields, then
+performs one-to-one timestamp matching (60-second default tolerance) and rate
+comparison (1e-10 default tolerance). It does not synthesize, interpolate, or
+forward-fill records. REST mark_price is checked for finite positive values;
+the archive does not supply a corresponding mark price in this schema.
+
+Run:
+
+~~~powershell
+python scripts/reconcile_binance_usdm_funding_archive.py `
+  --api-csv C:\\Vike_Data\\vike-v31-btcusdt-jan2025-v3\\BTCUSDT-funding.csv `
+  --archive-zip C:\\Vike_Data\\BTCUSDT-fundingRate-2025-01.zip `
+  --checksum C:\\Vike_Data\\BTCUSDT-fundingRate-2025-01.zip.CHECKSUM `
+  --start 2025-01-01T00:00:00Z `
+  --end 2025-02-01T00:00:00Z
+~~~
+
+Interpretation:
+- `archive_checksum_verified=true` proves the local ZIP bytes match the
+  publisher's checksum file.
+- `archive_reconciliation_status=MATCH` means every API row and archive row
+  matched one-to-one within the declared timestamp/rate tolerances.
+- `MISMATCH` requires investigation; do not patch or fill the difference.
+- `coverage_status` deliberately remains `NOT_VERIFIED` even on MATCH.
+  Binance's public documentation currently describes the REST endpoint and
+  its inclusive time bounds, ascending results and 1,000-row maximum, but the
+  exact semantic mapping of archive `calc_time` to REST `fundingTime`, and
+  archive `last_funding_rate` to REST `fundingRate`, plus archive
+  completeness/finality and historical interval-change policy, still need
+  authoritative confirmation. A checksum proves file integrity, not semantic
+  equivalence or that an archive contains every expected event.
+
+For a multi-month request, reconcile every month independently, including
+missing archive months. A 404 or absent monthly file is a coverage gap, not a
+zero-event month. Preserve each ZIP, checksum, and JSON report with the
+dataset manifest.
