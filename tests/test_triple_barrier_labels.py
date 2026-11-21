@@ -71,8 +71,8 @@ def test_funding_positive_rate_costs_long_and_benefits_short():
     short = run("SHORT", [bar(900_000, 100, 100, 100, 100)] + [
         bar((i + 2) * 900_000) for i in range(47)
     ], [settlement])
-    assert long["funding_cashflow_per_unit"] == pytest.approx(0.1)
-    assert short["funding_cashflow_per_unit"] == pytest.approx(-0.1)
+    assert long["funding_cashflow_per_unit"] == pytest.approx(-0.1)
+    assert short["funding_cashflow_per_unit"] == pytest.approx(0.1)
 
 
 def test_missing_funding_coverage_fails_closed():
@@ -137,7 +137,7 @@ def test_funding_inside_time_exit_bar_is_applied():
     result = run("LONG", rows, [settlement])
     assert result["status"] == "labeled"
     assert result["funding_events_applied"] == 1
-    assert result["funding_cashflow_per_unit"] == pytest.approx(0.1)
+    assert result["funding_cashflow_per_unit"] == pytest.approx(-0.1)
 
 
 def test_funding_exactly_at_entry_timestamp_is_excluded():
@@ -226,3 +226,17 @@ def test_event_time_must_be_aligned_to_15m_close():
             bars=[bar(900_001)], funding_events=[],
             funding_coverage_verified=True, config=cfg(),
         )
+
+
+def test_funding_cashflow_is_added_to_net_pnl_with_correct_sign():
+    rows = [
+        bar(900_000, 100, 100, 100, 100),
+        bar(1_800_000, 100, 104, 100, 103.5),
+    ]
+    settlement = FundingEvent(1_900_000, 0.001, 100)
+    long = run("LONG", rows, [settlement])
+    short = run("SHORT", rows, [settlement])
+    assert long["funding_cashflow_per_unit"] == pytest.approx(-0.1)
+    assert short["funding_cashflow_per_unit"] == pytest.approx(0.1)
+    assert long["net_r"] < long["net_r"] + (0.1 / 1.5)
+    assert short["net_r"] > short["net_r"] - (0.1 / 1.5)
