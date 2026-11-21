@@ -94,7 +94,7 @@ def test_funding_settlement_inside_intrabar_exit_is_excluded_as_ambiguous():
     settlement = FundingEvent(1_000_000, 0.001, 100)
     result = run("LONG", rows, [settlement])
     assert result["status"] == "excluded"
-    assert result["reason"] == "funding_timing_ambiguous_inside_intrabar_exit"
+    assert result["reason"] == "funding_timing_ambiguous_inside_exit_bar"
 
 
 def test_invalid_ohlc_and_duplicate_timestamps_are_rejected():
