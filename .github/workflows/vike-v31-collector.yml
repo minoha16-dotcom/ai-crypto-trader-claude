@@ -2,16 +2,18 @@ name: Vike V3.1 Resumable Collector Tests
 
 on:
   pull_request:
-    branches: [main]
+    branches: [feat/vike-hyperliquid-historical-cohort]
     paths:
       - "scripts/binance_usdm_resumable_collector.py"
+      - "scripts/audit_binance_usdm_mark_price.py"
+      - "tests/test_audit_binance_usdm_mark_price.py"
       - "tests/test_binance_usdm_resumable_collector.py"
       - "tests/test_audit_binance_usdm_funding.py"
       - "tests/test_reconcile_binance_usdm_funding_archive.py"
       - "docs/vike-v31-resumable-collector.md"
       - ".github/workflows/vike-v31-collector.yml"
   push:
-    branches: [feat/vike-v31-acceptance-protocol]
+    branches: [feat/vike-v31-triple-barrier-label-engine]
     paths:
       - "scripts/binance_usdm_resumable_collector.py"
       - "tests/test_binance_usdm_resumable_collector.py"
