@@ -244,7 +244,7 @@ def test_funding_cashflow_is_added_to_net_pnl_with_correct_sign():
 def test_short_take_profit_pnl_and_r_match_independent_arithmetic():
     rows = [
         bar(900_000, 100, 100, 100, 100),
-        bar(1_800_000, 100, 96, 99, 97),
+        bar(1_800_000, 100, 100, 96, 97),
     ]
     result = run("SHORT", rows)
     expected_entry = 100 * (1 - 0.0005)
