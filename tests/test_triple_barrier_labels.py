@@ -78,7 +78,7 @@ def test_funding_positive_rate_costs_long_and_benefits_short():
 def test_missing_funding_coverage_fails_closed():
     with pytest.raises(ValueError, match="coverage"):
         label_event(
-            event_time_ms=0, side="LONG", atr=1,
+            event_time_ms=899_999, side="LONG", atr=1,
             bars=[bar(900_000)], funding_events=[],
             funding_coverage_verified=False, config=cfg(),
         )
