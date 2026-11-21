@@ -56,3 +56,48 @@ A single month and one symbol may not produce enough independent samples to sati
 - Keep the original raw archives unchanged.
 - Do not treat a current exchange instrument limit as a historical November 2023 limit.
 - A successful download or boundary probe is not evidence of a profitable strategy or an approved model.
+
+## Local Vike V3.1 engineering pilot (not approval)
+
+A separate research-only pilot runner is available at
+`scripts/binance_nov2023_v31_pilot.py`. Unlike the preflight workflow above,
+it reads the local raw archives, generates Donchian-20 events, calculates
+causal features, applies the primary 1.5 ATR / 3 ATR / 48-bar Triple Barrier,
+subtracts explicit fee/slippage assumptions and actual funding settlements,
+and writes a chronological diagnostic Logistic Regression experiment.
+
+Run from the repository root in PowerShell (Python 3.11 is supported):
+
+```powershell
+python -m pytest tests/test_binance_nov2023_v31_pilot.py -q
+
+python scripts/binance_nov2023_v31_pilot.py `
+  --trade-zip "C:\Vike_Data\binance-nov2023-preflight\BTCUSDT-15m-2023-11.zip" `
+  --mark-dir "C:\Vike_Data\binance-nov2023-preflight" `
+  --funding-json "C:\Vike_Data\binance-nov2023-preflight\funding-rates.json" `
+  --out-dir "C:\Vike_Data\binance-nov2023-v31-experiment" `
+  --fee-bps-per-side 5 `
+  --slippage-bps-per-side 2
+```
+
+The 5 bps taker fee and 2 bps adverse slippage per side are explicit pilot
+assumptions, not assertions about the user's historical fee tier or measured
+historical spread. Change them only before interpreting the pilot.
+
+Outputs:
+- `dataset_manifest.json`: source hashes, window, event, label, feature and cost configuration.
+- `events.json`: generated events, features, label outcomes and exclusion reasons.
+- `pilot_report.json`: data quality, counts, exclusions, cost-to-R, net-R diagnostics,
+  training status and explicit protocol-gate failures.
+
+The runner accepts the known missing mark-price candle as a data-quality gap
+rather than silently filling it. Any event whose holding interval crosses a
+missing mark-price bar is excluded with `MISSING_MARK_PRICE_DURING_HOLD`.
+Trade-price candles must cover the full registered November window without gaps.
+
+The model fit uses a deterministic chronological 70/30 diagnostic split.
+This is only to test end-to-end mechanics on one month and one symbol. It is
+not the protocol's expanding walk-forward evaluation, locked six-month holdout,
+synchronized block bootstrap, or model-approval process. The report always
+marks `runtime_eligible=false`; no model is exported for runtime use.
+One-month results must not be described as evidence of edge or Vike V3.1 acceptance.
