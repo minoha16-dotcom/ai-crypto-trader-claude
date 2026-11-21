@@ -303,11 +303,18 @@ def collect_stream(
                 "endTime": end_ms - 1,
                 "limit": limit,
             }
+            if kind == "bar":
+                params["interval"] = "15m"
             rows = request_rows(session, endpoint, params)
             if not rows:
-                # Empty pages remain unresolved. In particular, do not infer
-                # continuous bar coverage or invent missing funding events.
                 stream_state["empty_page_at_ms"] = cursor
+                if kind == "funding":
+                    # The bounded funding query has no later rows. This marks
+                    # pagination exhaustion only; a separate audit must verify
+                    # historical funding coverage before training.
+                    stream_state["complete"] = True
+                    stream_state["termination_reason"] = "api_empty_page"
+                    stream_state["coverage_verified"] = False
                 state["updated_at"] = utc_now()
                 atomic_json(out_dir / f"{symbol}-checkpoint.json", state)
                 break
@@ -345,7 +352,13 @@ def collect_stream(
             atomic_json(out_dir / f"{symbol}-checkpoint.json", state)
             time.sleep(delay)
 
-    stream_state["complete"] = cursor >= end_ms
+    if cursor >= end_ms:
+        stream_state["complete"] = True
+        stream_state["termination_reason"] = "requested_window_end"
+        if kind == "funding":
+            stream_state["coverage_verified"] = False
+    elif kind != "funding":
+        stream_state["complete"] = False
     stream_state["next_start_ms"] = cursor
     stream_state["file"] = path.name
     stream_state["sha256"] = sha256_file(path)
