@@ -11,6 +11,8 @@ import math
 from typing import Iterable, Literal
 
 Side = Literal["LONG", "SHORT"]
+BAR_INTERVAL_MS = 15 * 60 * 1000
+BAR_CLOSE_OFFSET_MS = BAR_INTERVAL_MS - 1
 
 
 @dataclass(frozen=True)
@@ -41,7 +43,7 @@ class LabelConfig:
     def validate(self) -> None:
         for name in ("atr_multiple_stop", "atr_multiple_target"):
             value = getattr(self, name)
-            if not math.isfinite(value) or value <= 0:
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
                 raise ValueError(f"{name} must be finite and positive")
         if self.atr_multiple_target <= self.atr_multiple_stop:
             raise ValueError("target multiple must exceed stop multiple")
@@ -53,8 +55,15 @@ class LabelConfig:
             raise ValueError("max_holding_bars must be a positive integer")
         for name in ("taker_fee_rate", "adverse_slippage_rate"):
             value = getattr(self, name)
-            if value is None or not math.isfinite(value) or value < 0:
-                raise ValueError(f"{name} must be explicitly set to a finite non-negative rate")
+            if (
+                value is None
+                or isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value < 0
+                or value >= 1
+            ):
+                raise ValueError(f"{name} must be explicitly set to a finite rate in [0, 1)")
 
 
 def _finite_positive(value: float, field: str) -> float:
@@ -70,13 +79,20 @@ def _validate_bars(bars: Iterable[Bar]) -> list[Bar]:
         raise ValueError("bars are required")
     previous = None
     for index, bar in enumerate(rows):
-        if bar.close_time_ms <= bar.open_time_ms:
-            raise ValueError(f"bar[{index}] has invalid time bounds")
+        if (
+            isinstance(bar.open_time_ms, bool)
+            or isinstance(bar.close_time_ms, bool)
+            or not isinstance(bar.open_time_ms, int)
+            or not isinstance(bar.close_time_ms, int)
+        ):
+            raise ValueError(f"bar[{index}] timestamps must be integer milliseconds")
+        if bar.close_time_ms != bar.open_time_ms + BAR_CLOSE_OFFSET_MS:
+            raise ValueError(f"bar[{index}] must be a complete 15-minute bar")
         if previous is not None and bar.open_time_ms <= previous:
             raise ValueError("bars must be strictly ordered and unique")
         previous = bar.open_time_ms
-        values = [bar.open, bar.high, bar.low, bar.close]
-        if not all(math.isfinite(float(value)) for value in values):
+        values = [float(bar.open), float(bar.high), float(bar.low), float(bar.close)]
+        if not all(math.isfinite(value) for value in values):
             raise ValueError(f"bar[{index}] contains non-finite OHLC")
         if min(values) <= 0 or bar.high < max(bar.open, bar.close, bar.low):
             raise ValueError(f"bar[{index}] has inconsistent OHLC")
@@ -89,6 +105,8 @@ def _validate_funding(events: Iterable[FundingEvent]) -> list[FundingEvent]:
     rows = sorted(list(events), key=lambda item: item.funding_time_ms)
     previous = None
     for index, event in enumerate(rows):
+        if isinstance(event.funding_time_ms, bool) or not isinstance(event.funding_time_ms, int):
+            raise ValueError(f"funding[{index}] timestamp must be integer milliseconds")
         if previous is not None and event.funding_time_ms <= previous:
             raise ValueError("funding timestamps must be unique")
         previous = event.funding_time_ms
@@ -110,17 +128,22 @@ def label_event(
 ) -> dict:
     """Label one event; incomplete/ambiguous evidence fails closed.
 
-    Entry is the next bar open. Barriers are evaluated on trade OHLC; if both
-    barriers touch in one bar, SL wins. Funding settlements are included only
-    when their timestamp is inside the position interval. If a settlement falls
-    inside the exit bar and a barrier exits intrabar, ordering is unknowable
-    from OHLC and the event is excluded rather than guessed.
+    Event time is the signal candle close. Entry is the next 15-minute bar open.
+    Stop gaps are filled at the bar open (then adverse slippage), not at the
+    stale stop price. If both barriers touch in one bar, SL wins.
+
+    Funding at the exact entry timestamp is ambiguous and excluded. For an
+    intrabar barrier exit, any settlement in the exit bar is ambiguous. For a
+    time exit at bar close, settlements earlier in that bar are applied, while
+    a settlement exactly at the close timestamp is excluded as ambiguous.
     """
     config.validate()
     if not funding_coverage_verified:
         raise ValueError("funding coverage must be independently verified before labeling")
     if side not in ("LONG", "SHORT"):
         raise ValueError("side must be LONG or SHORT")
+    if isinstance(event_time_ms, bool) or not isinstance(event_time_ms, int):
+        raise ValueError("event_time_ms must be integer milliseconds")
     atr_value = _finite_positive(atr, "atr")
     rows = _validate_bars(bars)
     funding = _validate_funding(funding_events)
@@ -136,6 +159,8 @@ def label_event(
     fee = float(config.taker_fee_rate)
     direction = 1.0 if side == "LONG" else -1.0
     entry_fill = entry_bar.open * (1.0 + direction * slip)
+    if entry_fill <= 0:
+        return {"status": "excluded", "reason": "invalid_entry_fill"}
     stop_distance = config.atr_multiple_stop * atr_value
     stop = entry_fill - direction * stop_distance
     target = entry_fill + direction * config.atr_multiple_target * atr_value
@@ -146,20 +171,36 @@ def label_event(
     exit_raw = None
     exit_reason = None
     bars_scanned = 0
+    previous_open = None
     for bar in rows[entry_index:entry_index + config.max_holding_bars]:
+        if previous_open is not None and bar.open_time_ms != previous_open + BAR_INTERVAL_MS:
+            return {
+                "status": "excluded",
+                "reason": "missing_bar_in_holding_horizon",
+                "bars_scanned": bars_scanned,
+            }
+        previous_open = bar.open_time_ms
         bars_scanned += 1
+
         if side == "LONG":
             stop_hit = bar.low <= stop
             target_hit = bar.high >= target
+            stop_gap = bar.open <= stop
         else:
             stop_hit = bar.high >= stop
             target_hit = bar.low <= target
+            stop_gap = bar.open >= stop
         if stop_hit:
-            exit_bar, exit_raw, exit_reason = bar, stop, "stop_loss"
+            # A stop-market order cannot be assumed to fill at the stop after
+            # the market has already gapped through it.
+            exit_bar = bar
+            exit_raw = bar.open if stop_gap else stop
+            exit_reason = "stop_loss"
             break
         if target_hit:
             exit_bar, exit_raw, exit_reason = bar, target, "take_profit"
             break
+
     if exit_bar is None:
         last_index = min(entry_index + config.max_holding_bars - 1, len(rows) - 1)
         if last_index < entry_index or bars_scanned < config.max_holding_bars:
@@ -172,14 +213,23 @@ def label_event(
     if exit_fill <= 0:
         return {"status": "excluded", "reason": "invalid_exit_fill"}
 
+    if any(item.funding_time_ms == entry_bar.open_time_ms for item in funding):
+        return {"status": "excluded", "reason": "funding_timing_ambiguous_at_entry"}
+
     applicable_funding = [
         item for item in funding
-        if entry_bar.open_time_ms <= item.funding_time_ms <= exit_bar.close_time_ms
+        if entry_bar.open_time_ms < item.funding_time_ms <= exit_bar.close_time_ms
     ]
-    ambiguous = [
-        item for item in applicable_funding
-        if exit_bar.open_time_ms < item.funding_time_ms <= exit_bar.close_time_ms
-    ]
+    if exit_reason in ("stop_loss", "take_profit"):
+        ambiguous = [
+            item for item in applicable_funding
+            if exit_bar.open_time_ms <= item.funding_time_ms <= exit_bar.close_time_ms
+        ]
+    else:
+        ambiguous = [
+            item for item in applicable_funding
+            if item.funding_time_ms == exit_bar.close_time_ms
+        ]
     if ambiguous:
         return {
             "status": "excluded",
