@@ -42,6 +42,7 @@ def audit_funding_csv(
     timestamps: list[int] = []
     invalid_rows: list[dict] = []
     out_of_window: list[int] = []
+    in_window_timestamps: list[int] = []
     invalid_numeric = 0
 
     with path.open("r", newline="", encoding="utf-8-sig") as handle:
@@ -65,11 +66,16 @@ def audit_funding_csv(
             timestamps.append(timestamp)
             if timestamp < start_ms or timestamp >= end_ms:
                 out_of_window.append(timestamp)
+            else:
+                in_window_timestamps.append(timestamp)
 
     counts = Counter(timestamps)
     duplicates = sorted(ts for ts, count in counts.items() if count > 1)
     ordered = all(a < b for a, b in zip(timestamps, timestamps[1:]))
-    unique_sorted = sorted(set(timestamps))
+    # Cadence is evaluated only inside the requested half-open window.
+    # Out-of-window rows remain a structural failure, but must not create
+    # artificial cadence deviations at the window boundary.
+    unique_sorted = sorted(set(in_window_timestamps))
     intervals = [b - a for a, b in zip(unique_sorted, unique_sorted[1:])]
     cadence_deviations = [
         {"from_ms": a, "to_ms": b, "interval_ms": b - a}
