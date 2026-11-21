@@ -252,3 +252,23 @@ def test_parse_ms_requires_timezone():
 
 def test_parse_ms_normalizes_utc():
     assert parse_ms("2023-11-01T00:00:00Z") == 1698796800000
+
+
+def test_same_size_csv_tampering_fails_checksum_validation(tmp_path: Path):
+    checkpoint = tmp_path / "BTCUSDT-checkpoint.json"
+    state = load_checkpoint(checkpoint, "BTCUSDT", 1000, 901000)
+    collect_stream(
+        FakeSession([bar(1000)]), tmp_path, "BTCUSDT", "trade_15m",
+        1000, 901000, state, delay=0,
+    )
+    path = tmp_path / "BTCUSDT-trade_15m.csv"
+    original = path.read_text(encoding="utf-8")
+    tampered = original.replace(",1.5,", ",9.5,")
+    assert len(tampered) == len(original)
+    path.write_text(tampered, encoding="utf-8")
+    durable_state = load_checkpoint(checkpoint, "BTCUSDT", 1000, 901000)
+    with pytest.raises(ValueError, match="checksum disagrees"):
+        collect_stream(
+            FakeSession(), tmp_path, "BTCUSDT", "trade_15m",
+            1000, 901000, durable_state, delay=0,
+        )
