@@ -9,6 +9,7 @@ import pytest
 import scripts.binance_usdm_resumable_collector as collector
 from scripts.binance_usdm_resumable_collector import (
     BAR_HEADERS,
+    MARK_HEADERS,
     HEADERS,
     _csv_values,
     _next_cursor,
@@ -54,11 +55,36 @@ def bar(timestamp: int, width: int = 12) -> list:
     return values[:width]
 
 
-def test_headers_match_binance_kline_csv_width():
+def test_trade_and_mark_headers_are_distinct_and_match_api_tuple_width():
     assert len(HEADERS["trade_15m"]) == 12
     assert len(HEADERS["mark_15m"]) == 12
     assert HEADERS["trade_15m"] == BAR_HEADERS
-    assert HEADERS["mark_15m"] == BAR_HEADERS
+    assert HEADERS["mark_15m"] == MARK_HEADERS
+    assert "volume" in HEADERS["trade_15m"]
+    assert "quote_volume" in HEADERS["trade_15m"]
+    assert "trade_count" in HEADERS["trade_15m"]
+    assert "volume" not in HEADERS["mark_15m"]
+    assert "quote_volume" not in HEADERS["mark_15m"]
+    assert "trade_count" not in HEADERS["mark_15m"]
+    assert MARK_HEADERS[1:5] == [
+        "mark_open", "mark_high", "mark_low", "mark_close"
+    ]
+    assert MARK_HEADERS[5:] == [
+        "ignored_5", "close_time", "ignored_7", "ignored_8",
+        "ignored_9", "ignored_10", "ignored_11",
+    ]
+
+
+def test_mark_price_rows_keep_ohlc_and_name_unused_fields_neutrally():
+    raw = [
+        1000, "100", "102", "99", "101", "0",
+        899999, "0", 60, "0", "0", "0",
+    ]
+    values = _csv_values(raw, "bar")
+    assert values == raw
+    assert len(values) == len(MARK_HEADERS)
+    assert values[1:5] == ["100", "102", "99", "101"]
+    assert values[5] == "0"
 
 
 def test_csv_values_rejects_short_or_long_kline_rows():
