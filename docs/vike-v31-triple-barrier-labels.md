@@ -76,3 +76,46 @@ never estimated by this module.
 ```powershell
 python -m pytest -q tests/test_triple_barrier_labels.py
 ```
+
+
+## Binance USD-M liquidation verification and historical Mark Price coverage
+
+The independent verifier in `backend/binance_usdm_liquidation.py` implements
+Binance's published isolated one-way USDⓈ-M liquidation-price equation using
+an explicit maintenance-bracket schedule (MMR and cumulative maintenance
+amount). It solves each bracket and accepts exactly one self-consistent
+solution. Cross margin, hedge mode, portfolio offsets, multi-assets collateral,
+and dynamic maintenance-bracket changes during a position are unsupported and
+fail closed. This is a research calculation, not a replacement for Binance's
+risk engine; bracket schedules must be sourced and versioned for the symbol
+and effective date.
+
+The script `scripts/audit_binance_usdm_mark_price.py` audits each symbol over
+an exact half-open UTC window. Both trade and Mark Price CSVs must contain
+every expected 15-minute candle, with exact open and close timestamps, valid
+OHLC, no duplicates, no missing bars and no extras. It emits a per-symbol
+report and an aggregate manifest; any failed symbol fails the entire window.
+
+Label generation now requires both `mark_price_coverage_verified=True` and a
+PASS result from the independent liquidation verifier whose calculated price
+matches the supplied liquidation threshold. A caller cannot enable labeling
+merely by supplying a Mark Price CSV or a guessed liquidation price.
+
+Example coverage manifest:
+
+```json
+{
+  "symbols": [
+    {
+      "symbol": "BTCUSDT",
+      "trade_csv": "data/BTCUSDT-trade_15m.csv",
+      "mark_csv": "data/BTCUSDT-mark_15m.csv"
+    }
+  ]
+}
+```
+
+Run the audit with `--start` and `--end` aligned to UTC 15-minute
+boundaries. A PASS means exact candle coverage for the supplied files/window;
+it does not prove that Binance's historical archive is complete beyond those
+files or validate the provenance of the bracket schedule.
