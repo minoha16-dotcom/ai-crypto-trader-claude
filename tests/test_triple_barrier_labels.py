@@ -184,7 +184,7 @@ def test_stop_loss_pnl_and_r_match_independent_arithmetic():
     ]
     result = run("LONG", rows)
     expected_entry = 100 * 1.0005
-    expected_exit = 98.5 * 0.9995
+    expected_exit = (expected_entry - 1.5) * 0.9995
     expected_gross = expected_exit - expected_entry
     expected_fees = expected_entry * 0.001 + expected_exit * 0.001
     expected_net = expected_gross - expected_fees
