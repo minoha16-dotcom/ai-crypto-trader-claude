@@ -45,7 +45,11 @@ class LabelConfig:
                 raise ValueError(f"{name} must be finite and positive")
         if self.atr_multiple_target <= self.atr_multiple_stop:
             raise ValueError("target multiple must exceed stop multiple")
-        if isinstance(self.max_holding_bars, bool) or self.max_holding_bars < 1:
+        if (
+            isinstance(self.max_holding_bars, bool)
+            or not isinstance(self.max_holding_bars, int)
+            or self.max_holding_bars < 1
+        ):
             raise ValueError("max_holding_bars must be a positive integer")
         for name in ("taker_fee_rate", "adverse_slippage_rate"):
             value = getattr(self, name)
@@ -172,17 +176,16 @@ def label_event(
         item for item in funding
         if entry_bar.open_time_ms <= item.funding_time_ms <= exit_bar.close_time_ms
     ]
-    if exit_reason in ("stop_loss", "take_profit"):
-        ambiguous = [
-            item for item in applicable_funding
-            if exit_bar.open_time_ms < item.funding_time_ms <= exit_bar.close_time_ms
-        ]
-        if ambiguous:
-            return {
-                "status": "excluded",
-                "reason": "funding_timing_ambiguous_inside_intrabar_exit",
-                "ambiguous_funding_count": len(ambiguous),
-            }
+    ambiguous = [
+        item for item in applicable_funding
+        if exit_bar.open_time_ms < item.funding_time_ms <= exit_bar.close_time_ms
+    ]
+    if ambiguous:
+        return {
+            "status": "excluded",
+            "reason": "funding_timing_ambiguous_inside_exit_bar",
+            "ambiguous_funding_count": len(ambiguous),
+        }
 
     gross_pnl = direction * (exit_fill - entry_fill)
     entry_fee = entry_fill * fee
