@@ -4,7 +4,7 @@ from backend.binance_usdm_cross_hedge_liquidation import (
     MaintenanceBracket, calculate_binance_usdm_liquidation_price,
 )
 
-TIERS = [MaintenanceBracket(0, 50_000, 0.005, 0)]
+TIERS = [MaintenanceBracket(0, 1_000_000_000, 0.005, 0)]
 
 
 def test_cross_one_way_long():
@@ -28,11 +28,11 @@ def test_cross_one_way_short():
     assert result["liquidation_price"] > 0
 
 
-def test_hedge_mode_both_legs():
+def test_hedge_mode_both_legs_net_short():
     result = calculate_binance_usdm_liquidation_price(
         margin_mode="CROSSED", position_mode="HEDGE",
-        wallet_balance=5000, long_qty=0.1, long_entry_price=50000,
-        short_qty=0.08, short_entry_price=51000,
+        wallet_balance=1000, long_qty=0.05, long_entry_price=50000,
+        short_qty=0.1, short_entry_price=51000,
         long_brackets=TIERS, short_brackets=TIERS,
         other_maintenance_margin=100, other_unrealized_pnl=40,
     )
@@ -41,11 +41,11 @@ def test_hedge_mode_both_legs():
     assert result["short_notional_at_liquidation"] > 0
 
 
-def test_isolated_hedge_legs():
+def test_isolated_hedge_legs_net_short():
     result = calculate_binance_usdm_liquidation_price(
         margin_mode="ISOLATED", position_mode="HEDGE",
-        wallet_balance=3000, long_qty=0.1, long_entry_price=50000,
-        short_qty=0.05, short_entry_price=51000,
+        wallet_balance=3000, long_qty=0.05, long_entry_price=50000,
+        short_qty=0.1, short_entry_price=51000,
         long_brackets=TIERS, short_brackets=TIERS,
     )
     assert result["status"] == "PASS"
