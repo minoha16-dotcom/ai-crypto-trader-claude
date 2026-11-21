@@ -23,7 +23,7 @@ from urllib3.util.retry import Retry
 
 BASE_URL = "https://fapi.binance.com"
 BAR_MS = 15 * 60 * 1000
-CHECKPOINT_SCHEMA_VERSION = 2
+CHECKPOINT_SCHEMA_VERSION = 3
 STREAMS = {
     "trade_15m": ("/fapi/v1/klines", "bar", 1500),
     "mark_15m": ("/fapi/v1/markPriceKlines", "bar", 1500),
@@ -34,9 +34,17 @@ BAR_HEADERS = [
     "close_time", "quote_volume", "trade_count",
     "taker_buy_base", "taker_buy_quote", "ignore",
 ]
+# Binance markPriceKlines returns 12 tuple positions, but positions 5 and
+# 7-11 are explicitly ignored fields (not trade volume or trade statistics).
+# Preserve them losslessly under neutral names rather than mislabeling them.
+MARK_HEADERS = [
+    "open_time", "mark_open", "mark_high", "mark_low", "mark_close",
+    "ignored_5", "close_time", "ignored_7", "ignored_8",
+    "ignored_9", "ignored_10", "ignored_11",
+]
 HEADERS = {
     "trade_15m": BAR_HEADERS,
-    "mark_15m": BAR_HEADERS,
+    "mark_15m": MARK_HEADERS,
     "funding": ["funding_time", "funding_rate", "mark_price"],
 }
 
