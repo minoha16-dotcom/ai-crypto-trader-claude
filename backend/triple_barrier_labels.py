@@ -139,6 +139,8 @@ def label_event(
     funding_coverage_verified: bool,
     mark_price_bars: Iterable[Bar] | None = None,
     liquidation_price: float | None = None,
+    mark_price_coverage_verified: bool = False,
+    liquidation_verification: dict | None = None,
     config: LabelConfig,
 ) -> dict:
     """Label one event; incomplete/ambiguous evidence fails closed.
@@ -234,10 +236,17 @@ def label_event(
 
     # Mark Price is the liquidation trigger reference. Fail closed when either
     # the aligned Mark Price stream or exchange-computed liquidation price is absent.
+    if not mark_price_coverage_verified:
+        return {"status": "excluded", "reason": "mark_price_coverage_not_verified"}
     if mark_price_bars is None:
         return {"status": "excluded", "reason": "mark_price_bars_missing"}
-    if liquidation_price is None:
-        return {"status": "excluded", "reason": "liquidation_price_missing"}
+    if not isinstance(liquidation_verification, dict) or liquidation_verification.get("status") != "PASS":
+        return {"status": "excluded", "reason": "liquidation_verification_not_passed"}
+    verified_price = liquidation_verification.get("liquidation_price")
+    if liquidation_price is None or verified_price is None or not math.isclose(
+        float(liquidation_price), float(verified_price), rel_tol=1e-12, abs_tol=1e-12
+    ):
+        return {"status": "excluded", "reason": "liquidation_price_not_bound_to_verification"}
     mark_rows = list(mark_price_bars)
     relevant_trade_rows = rows[entry_index:entry_index + bars_scanned]
     relevant_mark_rows = [
