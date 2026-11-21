@@ -262,10 +262,10 @@ def test_same_size_csv_tampering_fails_checksum_validation(tmp_path: Path):
         1000, 901000, state, delay=0,
     )
     path = tmp_path / "BTCUSDT-trade_15m.csv"
-    original = path.read_text(encoding="utf-8")
-    tampered = original.replace(",1.5,", ",9.5,")
+    original = path.read_bytes()
+    tampered = original.replace(b",1.5,", b",9.5,")
     assert len(tampered) == len(original)
-    path.write_text(tampered, encoding="utf-8")
+    path.write_bytes(tampered)
     durable_state = load_checkpoint(checkpoint, "BTCUSDT", 1000, 901000)
     with pytest.raises(ValueError, match="checksum disagrees"):
         collect_stream(
