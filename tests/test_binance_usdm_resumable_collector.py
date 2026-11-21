@@ -80,7 +80,7 @@ def test_mark_price_rows_keep_ohlc_and_name_unused_fields_neutrally():
         1000, "100", "102", "99", "101", "0",
         899999, "0", 60, "0", "0", "0",
     ]
-    values = _csv_values(raw, "bar")
+    values = _csv_values(raw, "mark_bar")
     assert values == raw
     assert len(values) == len(MARK_HEADERS)
     assert values[1:5] == ["100", "102", "99", "101"]
@@ -89,9 +89,9 @@ def test_mark_price_rows_keep_ohlc_and_name_unused_fields_neutrally():
 
 def test_csv_values_rejects_short_or_long_kline_rows():
     with pytest.raises(ValueError, match="exactly 12"):
-        _csv_values(bar(1000, width=6), "bar")
+        _csv_values(bar(1000, width=6), "trade_bar")
     with pytest.raises(ValueError, match="exactly 12"):
-        _csv_values(bar(1000) + ["unexpected"], "bar")
+        _csv_values(bar(1000) + ["unexpected"], "trade_bar")
 
 
 def test_csv_values_requires_funding_fields():
@@ -436,3 +436,19 @@ def test_empty_funding_page_marks_query_exhausted_but_not_coverage_verified(
     assert result["termination_reason"] == "api_empty_page"
     assert result["coverage_verified"] is False
     assert result["empty_page_at_ms"] == 1000
+
+
+def test_mark_price_schema_never_uses_trade_volume_fields():
+    raw = [1000, "100", "102", "99", "101", "999999", 899999, "888888", 777, "666", "555", "444"]
+    values = _csv_values(raw, "mark_bar")
+    assert values[5] == "999999"  # retained only as ignored_5
+    assert len(values) == len(MARK_HEADERS)
+    assert "volume" not in MARK_HEADERS
+    assert "quote_volume" not in MARK_HEADERS
+    assert "trade_count" not in MARK_HEADERS
+
+
+def test_trade_and_mark_streams_use_different_row_parsers():
+    assert collector.STREAMS["trade_15m"][1] == "trade_bar"
+    assert collector.STREAMS["mark_15m"][1] == "mark_bar"
+    assert _csv_values(bar(1000), "trade_bar")[5] == "10"
