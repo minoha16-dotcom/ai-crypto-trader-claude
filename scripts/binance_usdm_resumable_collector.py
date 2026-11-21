@@ -191,7 +191,6 @@ def _recover_csv(path: Path, stream: str, stream_state: dict) -> None:
             os.fsync(handle.fileno())
 
     expected_header = HEADERS[stream]
-    timestamp_field = expected_header[0]
     previous_timestamp = None
     count = 0
     with path.open("r", newline="", encoding="utf-8") as handle:
@@ -227,20 +226,34 @@ def _recover_csv(path: Path, stream: str, stream_state: dict) -> None:
 
 def _initialize_stream(path: Path, stream: str, start_ms: int) -> dict:
     if path.exists():
-        raise ValueError(
-            f"CSV exists without a matching checkpoint: {path}. "
-            "Refusing to append to an unverified file; use a clean output directory."
-        )
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(HEADERS[stream])
-        handle.flush()
-        os.fsync(handle.fileno())
+        # Recover the narrow crash window where the header was durably created
+        # but the first checkpoint replacement had not yet happened.
+        with path.open("r", newline="", encoding="utf-8") as handle:
+            reader = csv.reader(handle)
+            try:
+                header = next(reader)
+            except StopIteration as exc:
+                raise ValueError(f"{stream}: orphan CSV is empty: {path}") from exc
+            if header != HEADERS[stream]:
+                raise ValueError(f"{stream}: orphan CSV header does not match expected schema")
+            if next(reader, None) is not None:
+                raise ValueError(
+                    f"CSV contains data without a matching checkpoint: {path}. "
+                    "Refusing to guess which rows are committed; use a clean output directory."
+                )
+        committed_bytes = path.stat().st_size
+    else:
+        with path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(HEADERS[stream])
+            handle.flush()
+            os.fsync(handle.fileno())
+        committed_bytes = path.stat().st_size
     return {
         "next_start_ms": start_ms,
         "rows_written": 0,
         "last_timestamp_ms": None,
-        "committed_bytes": path.stat().st_size,
+        "committed_bytes": committed_bytes,
         "complete": False,
     }
 
