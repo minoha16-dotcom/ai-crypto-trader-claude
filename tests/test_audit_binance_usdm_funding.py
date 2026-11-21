@@ -60,6 +60,8 @@ def test_out_of_window_and_cadence_gap_fail(tmp_path: Path):
 
     assert report["out_of_window_timestamps"] == [900]
     assert len(report["cadence_deviations"]) == 1
+    assert report["cadence_deviations"][0]["from_ms"] == 1000
+    assert report["cadence_deviations"][0]["to_ms"] == 3000
     assert report["structural_status"] == "FAIL"
 
 
