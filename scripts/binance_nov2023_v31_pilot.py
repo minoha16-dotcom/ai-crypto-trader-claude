@@ -76,7 +76,7 @@ def parse_zip(path: Path) -> list[dict]:
     return rows
 
 
-def load_bars(path: Path) -> list[dict]:
+def load_bars(path: Path, *, require_contiguous: bool = True) -> list[dict]:
     out = []
     for i, row in enumerate(parse_zip(path)):
         t = int(row["open_time"])
@@ -89,8 +89,11 @@ def load_bars(path: Path) -> list[dict]:
     out.sort(key=lambda x: x["t"])
     if len({x["t"] for x in out}) != len(out):
         raise ValueError(f"{path.name}: duplicate timestamps")
-    if any(b["t"] - a["t"] != BAR_MS for a, b in zip(out, out[1:])):
-        raise ValueError(f"{path.name}: internal gap or irregular 15m interval")
+    deltas = [b["t"] - a["t"] for a, b in zip(out, out[1:])]
+    if any(delta <= 0 or delta % BAR_MS for delta in deltas):
+        raise ValueError(f"{path.name}: irregular 15m timestamp alignment")
+    if require_contiguous and any(delta != BAR_MS for delta in deltas):
+        raise ValueError(f"{path.name}: internal gap in 15m interval")
     return out
 
 
@@ -102,7 +105,7 @@ def load_mark(directory: Path) -> tuple[dict[int, dict], list[int], list[str]]:
     hashes = []
     for path in files:
         hashes.append(f"{path.name}:{sha256_file(path)}")
-        for row in load_bars(path):
+        for row in load_bars(path, require_contiguous=False):
             if row["t"] in bars:
                 raise ValueError(f"duplicate mark timestamp {iso(row['t'])}")
             bars[row["t"]] = row
