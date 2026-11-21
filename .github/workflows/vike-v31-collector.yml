@@ -6,6 +6,8 @@ on:
     paths:
       - "scripts/binance_usdm_resumable_collector.py"
       - "tests/test_binance_usdm_resumable_collector.py"
+      - "tests/test_audit_binance_usdm_funding.py"
+      - "tests/test_reconcile_binance_usdm_funding_archive.py"
       - "docs/vike-v31-resumable-collector.md"
       - ".github/workflows/vike-v31-collector.yml"
   push:
@@ -32,7 +34,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install pytest requests urllib3
-      - name: Compile collector
-        run: python -m py_compile scripts/binance_usdm_resumable_collector.py
-      - name: Run collector tests
-        run: python -m pytest -q tests/test_binance_usdm_resumable_collector.py
+      - name: Compile data tools
+        run: |
+          python -m py_compile scripts/binance_usdm_resumable_collector.py
+          python -m py_compile scripts/audit_binance_usdm_funding.py
+          python -m py_compile scripts/reconcile_binance_usdm_funding_archive.py
+      - name: Run collector and Funding audit tests
+        run: python -m pytest -q tests/test_binance_usdm_resumable_collector.py tests/test_audit_binance_usdm_funding.py tests/test_reconcile_binance_usdm_funding_archive.py
