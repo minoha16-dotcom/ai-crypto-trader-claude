@@ -272,3 +272,52 @@ def test_same_size_csv_tampering_fails_checksum_validation(tmp_path: Path):
             FakeSession(), tmp_path, "BTCUSDT", "trade_15m",
             1000, 901000, durable_state, delay=0,
         )
+
+
+@pytest.mark.parametrize(
+    ("stream", "pages", "end_ms", "expected_width", "expected_complete"),
+    [
+        ("mark_15m", [[bar(1000)]], 901000, 12, True),
+        (
+            "funding",
+            [[{"fundingTime": 1000, "fundingRate": "0.001", "markPrice": "100"}], []],
+            1002,
+            3,
+            False,
+        ),
+    ],
+)
+def test_each_stream_writes_its_declared_schema(
+    tmp_path: Path,
+    stream: str,
+    pages: list,
+    end_ms: int,
+    expected_width: int,
+    expected_complete: bool,
+):
+    checkpoint = tmp_path / "BTCUSDT-checkpoint.json"
+    state = load_checkpoint(checkpoint, "BTCUSDT", 1000, end_ms)
+    result = collect_stream(
+        FakeSession(*pages), tmp_path, "BTCUSDT", stream,
+        1000, end_ms, state, delay=0,
+    )
+    path = tmp_path / f"BTCUSDT-{stream}.csv"
+    with path.open("r", newline="", encoding="utf-8") as handle:
+        rows = list(csv.reader(handle))
+    assert len(rows[0]) == expected_width
+    assert all(len(row) == expected_width for row in rows[1:])
+    assert len(rows) == 2
+    assert result["complete"] is expected_complete
+
+
+def test_duplicate_timestamp_inside_page_is_rejected(tmp_path: Path):
+    checkpoint = tmp_path / "BTCUSDT-checkpoint.json"
+    state = load_checkpoint(checkpoint, "BTCUSDT", 1000, 901000)
+    with pytest.raises(ValueError, match="strictly ordered/unique"):
+        collect_stream(
+            FakeSession([bar(1000), bar(1000)]), tmp_path, "BTCUSDT",
+            "trade_15m", 1000, 901000, state, delay=0,
+        )
+    path = tmp_path / "BTCUSDT-trade_15m.csv"
+    with path.open("r", newline="", encoding="utf-8") as handle:
+        assert len(list(csv.reader(handle))) == 1
