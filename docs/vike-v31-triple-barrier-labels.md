@@ -6,8 +6,9 @@ Module: `backend/triple_barrier_labels.py`
 
 ## Contract
 
-- Event time is the close timestamp of the signal candle; entry is the first
-  supplied bar whose open timestamp is later than the event time.
+- Event time must be the UTC close timestamp of a 15-minute signal candle
+  (open-boundary + 899,999 ms); entry is the immediately following 15-minute
+  bar open. Bar open timestamps must align to UTC 15-minute boundaries.
 - Entry fill applies adverse slippage. Barriers are measured from that fill:
   Wilder ATR(14) must be supplied by a separately validated causal feature
   pipeline; this module does not calculate ATR.
@@ -23,13 +24,16 @@ Module: `backend/triple_barrier_labels.py`
   assigned the stale stop price. A target is conservatively filled at its
   target price.
 - Funding cashflow uses the supplied settlement timestamp, rate and mark
-  price; positive rates cost LONG and benefit SHORT. A settlement exactly at
+  price. Positive rates produce a negative cashflow (payment) for LONG and a
+  positive cashflow (receipt) for SHORT; negative rates reverse those signs.
+  The signed cashflow is added to net PnL. A settlement exactly at
   entry is ambiguous and excludes the event. Any settlement within an
   intrabar barrier-exit candle is ambiguous and excludes the event. For a
   time exit at candle close, earlier settlements in that candle are applied,
   while a settlement exactly at the close timestamp is excluded.
 - Missing funding coverage or unspecified fee/slippage assumptions fails
-  closed. No values are forward-filled or synthesized.
+  closed. Non-numeric and boolean OHLC/Funding inputs are rejected. No values
+  are forward-filled or synthesized.
 
 ## Important limitations (not approval)
 
