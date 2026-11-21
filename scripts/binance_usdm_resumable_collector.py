@@ -32,7 +32,7 @@ HEADERS = {
     "trade_15m": ["open_time", "open", "high", "low", "close", "volume",
                   "close_time", "quote_volume", "trade_count", "taker_buy_base",
                   "taker_buy_quote", "ignore"],
-    "mark_15m": ["open_time", "open", "high", "low", "close", "ignore"],
+    "mark_15m": ["open_time", "open", "high", "low", "close", "volume",\n                  "close_time", "quote_volume", "trade_count", "taker_buy_base",\n                  "taker_buy_quote", "ignore"],
     "funding": ["funding_time", "funding_rate", "mark_price"],
 }
 
