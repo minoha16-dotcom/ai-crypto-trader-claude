@@ -108,3 +108,70 @@ def test_funding_duplicates_are_rejected():
     f = FundingEvent(900_000, 0.001, 100)
     with pytest.raises(ValueError, match="unique"):
         run("LONG", [bar(900_000)], [f, f])
+
+
+
+def test_long_stop_gap_fills_at_open_not_stale_stop():
+    rows = [bar(900_000, 97, 98, 96, 97)] + [
+        bar((i + 2) * 900_000) for i in range(47)
+    ]
+    result = run("LONG", rows)
+    assert result["exit_reason"] == "stop_loss"
+    assert result["exit_fill"] == pytest.approx(97 * (1 - 0.0005))
+    assert result["exit_fill"] < result["stop_price"]
+
+
+def test_short_stop_gap_fills_at_open_not_stale_stop():
+    rows = [bar(900_000, 103, 104, 102, 103)] + [
+        bar((i + 2) * 900_000) for i in range(47)
+    ]
+    result = run("SHORT", rows)
+    assert result["exit_reason"] == "stop_loss"
+    assert result["exit_fill"] == pytest.approx(103 * (1 + 0.0005))
+    assert result["exit_fill"] > result["stop_price"]
+
+
+def test_funding_inside_time_exit_bar_is_applied():
+    rows = [bar((i + 1) * 900_000) for i in range(48)]
+    settlement = FundingEvent(48 * 900_000 - 100_000, 0.001, 100)
+    result = run("LONG", rows, [settlement])
+    assert result["status"] == "labeled"
+    assert result["funding_events_applied"] == 1
+    assert result["funding_cashflow_per_unit"] == pytest.approx(0.1)
+
+
+def test_funding_exactly_at_entry_timestamp_is_excluded():
+    rows = [bar(900_000)] + [bar((i + 2) * 900_000) for i in range(47)]
+    result = run("LONG", rows, [FundingEvent(900_000, 0.001, 100)])
+    assert result["status"] == "excluded"
+    assert result["reason"] == "funding_timing_ambiguous_at_entry"
+
+
+def test_missing_bar_inside_holding_horizon_is_excluded():
+    rows = [bar((i + 1) * 900_000) for i in range(48)]
+    rows[10] = bar(12 * 900_000)
+    result = run("LONG", rows)
+    assert result["status"] == "excluded"
+    assert result["reason"] == "missing_bar_in_holding_horizon"
+
+
+def test_entry_requires_immediate_next_bar_after_signal_close():
+    result = label_event(
+        event_time_ms=899_999, side="LONG", atr=1,
+        bars=[bar(1_800_000)], funding_events=[],
+        funding_coverage_verified=True, config=cfg(),
+    )
+    assert result == {"status": "excluded", "reason": "missing_immediate_next_bar"}
+
+
+def test_partial_15m_bar_is_rejected():
+    partial = Bar(900_000, 1_700_000, 100, 100, 100, 100)
+    with pytest.raises(ValueError, match="complete 15-minute"):
+        run("LONG", [partial])
+
+
+def test_fee_and_slippage_rates_must_be_below_one():
+    with pytest.raises(ValueError, match=r"\[0, 1\)"):
+        run("LONG", [bar(900_000)], taker_fee_rate=1.0)
+    with pytest.raises(ValueError, match=r"\[0, 1\)"):
+        run("LONG", [bar(900_000)], adverse_slippage_rate=1.0)
