@@ -17,11 +17,17 @@ Module: `backend/triple_barrier_labels.py`
   SL is selected first.
 - A time exit uses the close of the 48th complete bar. A shorter horizon is
   excluded as immature.
-- Taker fees are charged on entry and exit notional. Adverse slippage is
-  applied to both fills. Funding cashflow uses the actual supplied settlement
-  timestamp, rate and mark price; positive rates cost LONG and benefit SHORT.
-- If a funding settlement falls inside the exit bar of an intrabar barrier
-  exit, the ordering cannot be inferred from OHLC, so the sample is excluded.
+- Taker fees are charged on entry and exit notional per unit. Adverse slippage
+  is applied to both fills. A stop-market exit that gaps through its stop is
+  filled from the bar open, then adjusted for adverse slippage; it is not
+  assigned the stale stop price. A target is conservatively filled at its
+  target price.
+- Funding cashflow uses the supplied settlement timestamp, rate and mark
+  price; positive rates cost LONG and benefit SHORT. A settlement exactly at
+  entry is ambiguous and excludes the event. Any settlement within an
+  intrabar barrier-exit candle is ambiguous and excludes the event. For a
+  time exit at candle close, earlier settlements in that candle are applied,
+  while a settlement exactly at the close timestamp is excluded.
 - Missing funding coverage or unspecified fee/slippage assumptions fails
   closed. No values are forward-filled or synthesized.
 
