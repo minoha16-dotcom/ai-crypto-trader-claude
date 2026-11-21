@@ -17,7 +17,7 @@ def bar(t, o=100, h=100, l=100, c=100):
 
 def run(side, rows, funding=(), **kwargs):
     return label_event(
-        event_time_ms=0,
+        event_time_ms=rows[0].open_time_ms - 1,
         side=side,
         atr=1,
         bars=rows,
@@ -64,7 +64,7 @@ def test_entry_is_next_bar_open_after_signal():
 
 
 def test_funding_positive_rate_costs_long_and_benefits_short():
-    settlement = FundingEvent(900_000, 0.001, 100)
+    settlement = FundingEvent(900_001, 0.001, 100)
     long = run("LONG", [bar(900_000, 100, 100, 100, 100)] + [
         bar((i + 2) * 900_000) for i in range(47)
     ], [settlement])
@@ -149,7 +149,7 @@ def test_funding_exactly_at_entry_timestamp_is_excluded():
 
 def test_missing_bar_inside_holding_horizon_is_excluded():
     rows = [bar((i + 1) * 900_000) for i in range(48)]
-    rows[10] = bar(12 * 900_000)
+    rows.pop(10)
     result = run("LONG", rows)
     assert result["status"] == "excluded"
     assert result["reason"] == "missing_bar_in_holding_horizon"
