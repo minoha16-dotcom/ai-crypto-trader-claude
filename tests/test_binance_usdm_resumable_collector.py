@@ -363,13 +363,13 @@ def test_each_stream_resumes_after_csv_fsync_before_checkpoint(
     monkeypatch.setattr(collector, "atomic_json", fail_after_page)
     with pytest.raises(OSError, match="simulated crash"):
         collect_stream(
-            FakeSession([page]), tmp_path, "BTCUSDT", stream,
+            FakeSession(page), tmp_path, "BTCUSDT", stream,
             1000, end_ms, state, delay=0,
         )
 
     durable_state = load_checkpoint(checkpoint, "BTCUSDT", 1000, end_ms)
     monkeypatch.setattr(collector, "atomic_json", real_atomic_json)
-    resumed = FakeSession([page] if stream != "funding" else [page, []])
+    resumed = FakeSession(page, []) if stream == "funding" else FakeSession(page)
     result = collect_stream(
         resumed, tmp_path, "BTCUSDT", stream,
         1000, end_ms, durable_state, delay=0,
