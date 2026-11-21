@@ -10,6 +10,8 @@ from dataclasses import asdict, dataclass
 import math
 from typing import Iterable, Literal
 
+from backend.causal_market_features import validate_mark_price_alignment, mark_price_liquidation_breach
+
 Side = Literal["LONG", "SHORT"]
 BAR_INTERVAL_MS = 15 * 60 * 1000
 BAR_CLOSE_OFFSET_MS = BAR_INTERVAL_MS - 1
@@ -135,6 +137,8 @@ def label_event(
     bars: Iterable[Bar],
     funding_events: Iterable[FundingEvent],
     funding_coverage_verified: bool,
+    mark_price_bars: Iterable[Bar] | None = None,
+    liquidation_price: float | None = None,
     config: LabelConfig,
 ) -> dict:
     """Label one event; incomplete/ambiguous evidence fails closed.
@@ -227,6 +231,32 @@ def label_event(
     exit_fill = float(exit_raw) * (1.0 - direction * slip)
     if exit_fill <= 0:
         return {"status": "excluded", "reason": "invalid_exit_fill"}
+
+    # Mark Price is the liquidation trigger reference. Fail closed when either
+    # the aligned Mark Price stream or exchange-computed liquidation price is absent.
+    if mark_price_bars is None:
+        return {"status": "excluded", "reason": "mark_price_bars_missing"}
+    if liquidation_price is None:
+        return {"status": "excluded", "reason": "liquidation_price_missing"}
+    mark_rows = list(mark_price_bars)
+    relevant_trade_rows = rows[entry_index:entry_index + bars_scanned]
+    relevant_mark_rows = [
+        item for item in mark_rows
+        if relevant_trade_rows[0].open_time_ms <= item.open_time_ms <= exit_bar.open_time_ms
+    ]
+    try:
+        validate_mark_price_alignment(relevant_trade_rows, relevant_mark_rows)
+        liquidation_check = mark_price_liquidation_breach(
+            side=side, mark_bars=relevant_mark_rows,
+            liquidation_price=liquidation_price,
+        )
+    except ValueError as exc:
+        return {"status": "excluded", "reason": "mark_price_validation_failed", "detail": str(exc)}
+    if liquidation_check["status"] == "BREACH":
+        return {
+            "status": "excluded", "reason": "mark_price_liquidation_breach",
+            "liquidation_breach_time_ms": liquidation_check["breach_time_ms"],
+        }
 
     if any(item.funding_time_ms == entry_bar.open_time_ms for item in funding):
         return {"status": "excluded", "reason": "funding_timing_ambiguous_at_entry"}
