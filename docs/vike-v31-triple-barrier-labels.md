@@ -34,6 +34,9 @@ Module: `backend/triple_barrier_labels.py`
 ## Important limitations (not approval)
 
 This first slice does not yet:
+- model quantity, contract multiplier, inverse contracts, order-book spread/depth,
+  partial fills, or exchange-specific quantity/price precision; the accounting
+  is per underlying unit and must not be generalized to inverse contracts;
 - download or validate the full market dataset;
 - independently prove Funding archive semantic equivalence/completeness;
 - calculate Wilder ATR or causal features;
