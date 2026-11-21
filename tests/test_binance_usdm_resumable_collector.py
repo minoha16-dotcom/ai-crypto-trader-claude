@@ -36,9 +36,11 @@ class FakeSession:
     def __init__(self, *pages):
         self.pages = list(pages)
         self.calls = 0
+        self.request_params = []
 
     def get(self, *args, **kwargs):
         self.calls += 1
+        self.request_params.append(kwargs.get("params", {}))
         if not self.pages:
             raise AssertionError("Unexpected extra API request")
         return FakeResponse(self.pages.pop(0))
@@ -283,7 +285,7 @@ def test_same_size_csv_tampering_fails_checksum_validation(tmp_path: Path):
             [[{"fundingTime": 1000, "fundingRate": "0.001", "markPrice": "100"}], []],
             1002,
             3,
-            False,
+            True,
         ),
     ],
 )
@@ -308,6 +310,9 @@ def test_each_stream_writes_its_declared_schema(
     assert all(len(row) == expected_width for row in rows[1:])
     assert len(rows) == 2
     assert result["complete"] is expected_complete
+    if stream == "funding":
+        assert result["termination_reason"] == "api_empty_page"
+        assert result["coverage_verified"] is False
 
 
 def test_duplicate_timestamp_inside_page_is_rejected(tmp_path: Path):
@@ -321,3 +326,87 @@ def test_duplicate_timestamp_inside_page_is_rejected(tmp_path: Path):
     path = tmp_path / "BTCUSDT-trade_15m.csv"
     with path.open("r", newline="", encoding="utf-8") as handle:
         assert len(list(csv.reader(handle))) == 1
+
+
+
+@pytest.mark.parametrize(
+    ("stream", "page", "end_ms"),
+    [
+        ("trade_15m", [bar(1000)], 901000),
+        ("mark_15m", [bar(1000)], 901000),
+        (
+            "funding",
+            [{"fundingTime": 1000, "fundingRate": "0.001", "markPrice": "100"}],
+            1002,
+        ),
+    ],
+)
+def test_each_stream_resumes_after_csv_fsync_before_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stream: str,
+    page: list,
+    end_ms: int,
+):
+    checkpoint = tmp_path / "BTCUSDT-checkpoint.json"
+    state = load_checkpoint(checkpoint, "BTCUSDT", 1000, end_ms)
+    real_atomic_json = collector.atomic_json
+    writes = 0
+
+    def fail_after_page(path: Path, value: dict) -> None:
+        nonlocal writes
+        writes += 1
+        if writes == 2:
+            raise OSError("simulated crash before page checkpoint")
+        real_atomic_json(path, value)
+
+    monkeypatch.setattr(collector, "atomic_json", fail_after_page)
+    with pytest.raises(OSError, match="simulated crash"):
+        collect_stream(
+            FakeSession([page]), tmp_path, "BTCUSDT", stream,
+            1000, end_ms, state, delay=0,
+        )
+
+    durable_state = load_checkpoint(checkpoint, "BTCUSDT", 1000, end_ms)
+    monkeypatch.setattr(collector, "atomic_json", real_atomic_json)
+    resumed = FakeSession([page] if stream != "funding" else [page, []])
+    result = collect_stream(
+        resumed, tmp_path, "BTCUSDT", stream,
+        1000, end_ms, durable_state, delay=0,
+    )
+
+    with (tmp_path / f"BTCUSDT-{stream}.csv").open(
+        "r", newline="", encoding="utf-8"
+    ) as handle:
+        rows = list(csv.reader(handle))
+    assert len(rows) == 2
+    assert result["rows_written"] == 1
+    assert result["complete"] is True
+    assert resumed.calls == (2 if stream == "funding" else 1)
+
+
+def test_kline_requests_include_fifteen_minute_interval(tmp_path: Path):
+    for stream in ("trade_15m", "mark_15m"):
+        checkpoint = tmp_path / f"{stream}-checkpoint.json"
+        state = load_checkpoint(checkpoint, "BTCUSDT", 1000, 901000)
+        session = FakeSession([bar(1000)])
+        collect_stream(
+            session, tmp_path, "BTCUSDT", stream,
+            1000, 901000, state, delay=0,
+        )
+        assert session.request_params[0]["interval"] == "15m"
+
+
+def test_empty_funding_page_marks_query_exhausted_but_not_coverage_verified(
+    tmp_path: Path,
+):
+    checkpoint = tmp_path / "BTCUSDT-checkpoint.json"
+    state = load_checkpoint(checkpoint, "BTCUSDT", 1000, 10000)
+    result = collect_stream(
+        FakeSession([]), tmp_path, "BTCUSDT", "funding",
+        1000, 10000, state, delay=0,
+    )
+    assert result["complete"] is True
+    assert result["termination_reason"] == "api_empty_page"
+    assert result["coverage_verified"] is False
+    assert result["empty_page_at_ms"] == 1000
