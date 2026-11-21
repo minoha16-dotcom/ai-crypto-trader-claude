@@ -25,8 +25,8 @@ BASE_URL = "https://fapi.binance.com"
 BAR_MS = 15 * 60 * 1000
 CHECKPOINT_SCHEMA_VERSION = 3
 STREAMS = {
-    "trade_15m": ("/fapi/v1/klines", "bar", 1500),
-    "mark_15m": ("/fapi/v1/markPriceKlines", "bar", 1500),
+    "trade_15m": ("/fapi/v1/klines", "trade_bar", 1500),
+    "mark_15m": ("/fapi/v1/markPriceKlines", "mark_bar", 1500),
     "funding": ("/fapi/v1/fundingRate", "funding", 1000),
 }
 BAR_HEADERS = [
@@ -137,8 +137,10 @@ def _row_timestamp(row: Any, kind: str) -> int:
         if not isinstance(row, dict) or "fundingTime" not in row:
             raise ValueError("Funding response lacks fundingTime")
         return int(row["fundingTime"])
-    if not isinstance(row, list) or not row:
-        raise ValueError("Kline response row is malformed")
+    if kind in ("trade_bar", "mark_bar", "bar"):
+        if not isinstance(row, list) or not row:
+            raise ValueError("Kline response row is malformed")
+        return int(row[0])
     return int(row[0])
 
 
@@ -151,13 +153,15 @@ def _csv_values(row: Any, kind: str) -> list:
         if missing:
             raise ValueError(f"Funding response lacks fields: {', '.join(missing)}")
         return [row[field] for field in required]
-    if kind == "bar":
-        if not isinstance(row, list) or len(row) != len(BAR_HEADERS):
+    if kind in ("trade_bar", "mark_bar", "bar"):
+        expected_headers = MARK_HEADERS if kind == "mark_bar" else BAR_HEADERS
+        if not isinstance(row, list) or len(row) != len(expected_headers):
             width = len(row) if isinstance(row, list) else "non-list"
             raise ValueError(
-                f"Kline response must contain exactly {len(BAR_HEADERS)} fields; got {width}"
+                f"{kind} response must contain exactly {len(expected_headers)} fields; got {width}"
             )
-        return row
+        # Mark Price unused tuple positions stay neutral; never call them volume or trade stats.
+        return list(row)
     raise ValueError(f"Unsupported row kind: {kind}")
 
 
@@ -166,7 +170,7 @@ def _next_cursor(last_timestamp: int, kind: str) -> int:
     # assume exact 8-hour multiples. Klines advance by one full bar.
     if kind == "funding":
         return last_timestamp + 1
-    if kind == "bar":
+    if kind in ("trade_bar", "mark_bar", "bar"):
         return last_timestamp + BAR_MS
     raise ValueError(f"Unsupported stream kind: {kind}")
 
@@ -311,7 +315,7 @@ def collect_stream(
                 "endTime": end_ms - 1,
                 "limit": limit,
             }
-            if kind == "bar":
+            if kind in ("trade_bar", "mark_bar", "bar"):
                 params["interval"] = "15m"
             rows = request_rows(session, endpoint, params)
             if not rows:
