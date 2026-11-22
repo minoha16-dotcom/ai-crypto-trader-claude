@@ -4,9 +4,11 @@
 
 Run the existing resumable Binance USD-M collector on the user's Windows PC.
 It writes to a durable local staging directory first, then copies the completed
-month into a Google Drive for desktop synced folder. It verifies SHA-256 between
-the local source and the local Drive sync path. This local hash check does not
-prove cloud sync completion: wait for Google Drive for desktop to show Synced.
+month into a Google Drive for desktop synced folder. It performs per-UTC-day Trade/Mark checks, writes month-audit.json and a
+manifest.json with SHA-256/byte-size records, and verifies the local source
+against the local Drive sync path. The manifest includes raw CSVs, checkpoints,
+and the audit report. This local hash check does not prove cloud sync completion:
+wait for Google Drive for desktop to show Synced.
 
 No GitHub upload, OAuth token, service-account key, or Google password is needed.
 The user's Google Drive account must have Editor permission on the destination
@@ -40,13 +42,24 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\run_vike_month_windows.ps1 -Month 2023-11 -DriveRoot "G:\My Drive\Vike V3.1" -Symbols BTCUSDT
 ```
 
-Replace the example DriveRoot with the path found on the user's PC. The script
+Replace the example DriveRoot with the actual local path found on the PC. On
+this setup, the confirmed path is
+G:\Mon Drive\ai trade\Vike V3.1 (use that only if it is still the active
+Drive mount). The script
 will:
 - enforce the development window 2023-11 through 2026-04;
+- require complete stream checkpoints and matching checkpoint SHA-256 values;
+- audit each UTC day for exactly 96 valid Trade and Mark 15m bars per feed;
+- mark any incomplete/invalid price day EXCLUDE_DAY (no fill or interpolation);
+- require structurally valid Funding rows while explicitly leaving Funding
+  coverage NOT_VERIFIED;
+- create month-audit.json, manifest.json, and manifest.json.sha256;
 - collect Trade 15m, Mark Price 15m, and Funding using the resumable collector;
 - retain local checkpoints under C:\Vike_Data\Vike_V3.1\raw-staging\YYYY-MM;
 - copy the completed month into the synced Drive folder;
-- compare SHA-256 for each local copied file;
+- verify every manifest-listed copied file, checkpoint, audit report, and
+  manifest sidecar by byte size and SHA-256;
+- reject extra unmanifested files in either copy;
 - never delete local raw files.
 
 If interrupted, rerun the exact same month/symbol command. Do not change the
@@ -67,6 +80,11 @@ storage capacity, API stability, and independent coverage audits pass.
 ## Critical limitations
 
 - This script performs collection and local Drive-folder mirroring only.
+- Funding structural validity is not funding coverage verification. The
+  manifest deliberately records funding_coverage_status=NOT_VERIFIED, and
+  every daily label_eligible flag remains false.
+- The local Drive sync-path hash verification is not remote Google Drive
+  read-back or proof that cloud sync has completed.
 - The existing collector does not prove historical Funding coverage; empty API
   pages mean pagination exhaustion, not coverage PASS.
 - Mark Price, Funding archive semantics, historical contract availability,
