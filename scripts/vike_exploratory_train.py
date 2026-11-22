@@ -13,12 +13,6 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
-import joblib
-import numpy as np
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, brier_score_loss, precision_score, recall_score, roc_auc_score
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
 BAR_MS, DAY_MS, HOUR_MS = 900_000, 86_400_000, 3_600_000
 SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "LINKUSDT")
@@ -261,6 +255,13 @@ def load_dataset(drive_root: Path, symbols: Iterable[str], months: Iterable[str]
 
 
 def train_and_report(events: list[dict], output_dir: Path, metadata: dict):
+    # Keep research-only ML dependencies lazy so data-loader tests can run in the base test environment.
+    import joblib
+    import numpy as np
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import accuracy_score, brier_score_loss, precision_score, recall_score, roc_auc_score
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
     if len(events) < 60: raise ValueError(f"Only {len(events)} eligible events; at least 60 required for exploratory split")
     events.sort(key=lambda x: x["signal_time_ms"])
     split_index = int(len(events) * 0.70)
