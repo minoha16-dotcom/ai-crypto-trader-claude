@@ -117,6 +117,11 @@ def cmd_verify(a):
  for name in (a.manifest.name,side.name):
   s=a.source/name; d=a.destination/name
   if not s.is_file() or not d.is_file() or digest(s)!=digest(d): errors.append("manifest copy missing/mismatch: "+name)
+ expected_names={x["path"] for x in m.get("files",[])}|{a.manifest.name,side.name}
+ for label,folder in (("source",a.source),("destination",a.destination)):
+  actual_names={p.name for p in folder.iterdir() if p.is_file()}
+  extras=actual_names-expected_names
+  if extras: errors.append(label+" contains unmanifested files: "+", ".join(sorted(extras)))
  result={"month_utc":m.get("month_utc"),"files_expected":len(m.get("files",[]))+2,"files_verified":len(verified)+ (0 if errors else 2),"verified_files":verified,"status":"PASS_LOCAL_SYNC_PATH_COPY" if not errors else "FAIL","cloud_sync_status":"NOT_VERIFIED_BY_LOCAL_HASH_CHECK","errors":errors}
  print(json.dumps(result,indent=2))
  if errors: raise SystemExit(2)
