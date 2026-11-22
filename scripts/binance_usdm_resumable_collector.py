@@ -422,6 +422,19 @@ def main() -> int:
             indent=2,
         )
     )
+    incomplete = [
+        f"{symbol}/{stream}"
+        for symbol, streams in summary.items()
+        for stream, stream_state in streams.items()
+        if not stream_state.get("complete", False)
+    ]
+    if incomplete:
+        print(
+            "ERROR: required collection streams are incomplete: "
+            + ", ".join(incomplete),
+            file=__import__("sys").stderr,
+        )
+        return 2
     return 0
 
 

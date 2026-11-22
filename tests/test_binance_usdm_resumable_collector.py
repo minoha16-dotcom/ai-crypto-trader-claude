@@ -452,3 +452,72 @@ def test_trade_and_mark_streams_use_different_row_parsers():
     assert collector.STREAMS["trade_15m"][1] == "trade_bar"
     assert collector.STREAMS["mark_15m"][1] == "mark_bar"
     assert _csv_values(bar(1000), "trade_bar")[5] == "10"
+
+
+
+def test_main_returns_nonzero_when_any_required_stream_is_incomplete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    checkpoint_states = {
+        "trade_15m": {"complete": False},
+        "mark_15m": {"complete": True},
+        "funding": {"complete": True, "coverage_verified": False},
+    }
+
+    def fake_collect_stream(
+        session, out_dir, symbol, stream, start_ms, end_ms, state, delay
+    ):
+        result = dict(checkpoint_states[stream])
+        state.setdefault("streams", {})[stream] = result
+        return result
+
+    monkeypatch.setattr(collector, "make_session", lambda: object())
+    monkeypatch.setattr(collector, "collect_stream", fake_collect_stream)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "binance_usdm_resumable_collector.py",
+            "--symbols", "BTCUSDT",
+            "--start", "2023-11-01T00:00:00Z",
+            "--end", "2023-11-02T00:00:00Z",
+            "--out-dir", str(tmp_path),
+        ],
+    )
+
+    assert collector.main() == 2
+
+
+def test_main_accepts_funding_pagination_end_without_claiming_coverage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    checkpoint_states = {
+        "trade_15m": {"complete": True},
+        "mark_15m": {"complete": True},
+        "funding": {
+            "complete": True,
+            "termination_reason": "api_empty_page",
+            "coverage_verified": False,
+        },
+    }
+
+    def fake_collect_stream(
+        session, out_dir, symbol, stream, start_ms, end_ms, state, delay
+    ):
+        result = dict(checkpoint_states[stream])
+        state.setdefault("streams", {})[stream] = result
+        return result
+
+    monkeypatch.setattr(collector, "make_session", lambda: object())
+    monkeypatch.setattr(collector, "collect_stream", fake_collect_stream)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "binance_usdm_resumable_collector.py",
+            "--symbols", "BTCUSDT",
+            "--start", "2023-11-01T00:00:00Z",
+            "--end", "2023-11-02T00:00:00Z",
+            "--out-dir", str(tmp_path),
+        ],
+    )
+
+    assert collector.main() == 0
