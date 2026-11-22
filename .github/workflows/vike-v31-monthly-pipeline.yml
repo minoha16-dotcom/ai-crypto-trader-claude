@@ -1,0 +1,54 @@
+name: Vike V3.1 Monthly Pipeline (preflight only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      month:
+        description: "UTC month YYYY-MM (development months only)"
+        required: true
+        type: string
+      dry_run:
+        description: "Validate configuration only; do not download or delete data"
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vike-v31-monthly-${{ inputs.month }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate month and locked holdout boundary
+        env:
+          MONTH: ${{ inputs.month }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          python - <<'PY'
+          import os, re
+          from datetime import date
+          month = os.environ["MONTH"]
+          if not re.fullmatch(r"202[3-6]-(0[1-9]|1[0-2])", month):
+              raise SystemExit("month must be YYYY-MM")
+          y, m = map(int, month.split("-"))
+          if (y, m) < (2023, 11) or (y, m) > (2026, 10):
+              raise SystemExit("month outside approved 36-month window")
+          if (y, m) >= (2026, 5):
+              raise SystemExit("LOCKED HOLDOUT: monthly training workflow cannot access May-Oct 2026")
+          print(f"PRE-FLIGHT ONLY: {month}; dry_run={os.environ['DRY_RUN']}")
+          print("No collection, Drive transfer, labels, model fit, or deletion is implemented in this workflow.")
+          PY
+      - name: Fail closed until Drive and training stages are implemented
+        run: |
+          echo "::error::Monthly pipeline is preflight-only. Do not configure a schedule or treat this run as data collection/training."
+          exit 1
