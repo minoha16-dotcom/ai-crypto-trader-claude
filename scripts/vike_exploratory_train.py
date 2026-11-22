@@ -101,7 +101,7 @@ def audit_funding_file(path: Path, start: int, end: int) -> dict:
             if previous is not None and t <= previous:
                 raise ValueError(f"{path}:{line}: funding timestamps not strictly increasing")
             previous, count = t, count + 1
-    return {"rows": count, "structural_status": "PASS", "coverage_status": "NOT_VERIFIED",
+    return {"rows": count, "structural_status": "PASS" if count else "FAIL", "coverage_status": "NOT_VERIFIED",
             "used_as_feature_or_label_input": False}
 
 
@@ -176,7 +176,7 @@ def rsi14(bars: list[dict], i: int) -> float:
 
 def build_segment_events(symbol: str, bars: list[dict], mark_bars: list[dict],
                          fee_rate: float, slippage_rate: float, horizon: int):
-    if len(bars) < max(21, horizon + 2): return []
+    if len(bars) < horizon + 21: return []
     atrs = wilder_atr_values(bars)
     h1c, h1v = aggregate_context(bars, HOUR_MS, 4)
     h4c, h4v = aggregate_context(bars, 4 * HOUR_MS, 16)
@@ -244,6 +244,8 @@ def load_dataset(drive_root: Path, symbols: Iterable[str], months: Iterable[str]
             trade = read_trade_or_mark(files["trade_15m"], "trade_15m", start, end)
             mark = read_trade_or_mark(files["mark_15m"], "mark_15m", start, end)
             funding = audit_funding_file(files["funding"], start, end)
+            if funding["structural_status"] != "PASS":
+                raise ValueError(f"{symbol}/{month}: Funding file has no valid rows")
             eligible, excluded = complete_day_bars(trade, mark, start, end)
             monthly.append({"symbol": symbol, "month": month, "trade_rows": len(trade),
                             "mark_rows": len(mark), "price_eligible_days": len(eligible) // 96,
