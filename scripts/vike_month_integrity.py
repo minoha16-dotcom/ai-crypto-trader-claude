@@ -104,27 +104,49 @@ def cmd_audit(a):
  a.manifest.write_text(json.dumps(manifest,indent=2,sort_keys=True)+"\n",encoding="utf-8")
  a.manifest.with_suffix(a.manifest.suffix+".sha256").write_text(f"{digest(a.manifest)}  {a.manifest.name}\n",encoding="ascii")
  print(json.dumps({"status":"PASS_LOCAL_INTEGRITY","month":a.month,"files":len(records),"funding_coverage_status":"NOT_VERIFIED","model_or_label_approval":"NOT_GRANTED"},indent=2))
-def cmd_verify(a):
- m=json.loads(a.manifest.read_text(encoding="utf-8")); errors=[]; verified=[]
- side=a.manifest.with_suffix(a.manifest.suffix+".sha256")
- if not side.is_file() or side.read_text(encoding="ascii").split()[0].lower()!=digest(a.manifest): errors.append("manifest SHA-256 sidecar missing/mismatch")
- for item in m.get("files",[]):
-  s=a.source/item["path"]; d=a.destination/item["path"]
-  if not s.is_file() or not d.is_file(): errors.append("missing source/destination: "+item["path"]); continue
-  if s.stat().st_size!=item["bytes"] or digest(s)!=item["sha256"]: errors.append("source differs from manifest: "+item["path"])
-  if d.stat().st_size!=item["bytes"] or digest(d)!=item["sha256"]: errors.append("destination SHA-256 mismatch: "+item["path"])
-  else: verified.append(item["path"])
- for name in (a.manifest.name,side.name):
-  s=a.source/name; d=a.destination/name
+def verify_copy(source,destination,manifest_path):
+ source=Path(source); destination=Path(destination); manifest_path=Path(manifest_path)
+ m=json.loads(manifest_path.read_text(encoding="utf-8"))
+ errors=[]; verified=[]
+ side=manifest_path.with_suffix(manifest_path.suffix+".sha256")
+ try:
+  side_text=side.read_text(encoding="ascii").split()
+  if not side_text or side_text[0].lower()!=digest(manifest_path): errors.append("manifest SHA-256 sidecar missing/mismatch")
+ except OSError:
+  errors.append("manifest SHA-256 sidecar missing/mismatch")
+ files=m.get("files",[])
+ if not isinstance(files,list): errors.append("manifest files must be a list"); files=[]
+ expected_paths=set()
+ for item in files:
+  rel=item.get("path","")
+  if not isinstance(rel,str) or not rel or Path(rel).name!=rel or rel in (".",".."):
+   errors.append("invalid manifest path: "+str(rel)); continue
+  if rel in expected_paths: errors.append("duplicate manifest path: "+rel); continue
+  expected_paths.add(rel)
+  s=source/rel; d=destination/rel
+  if not s.is_file() or not d.is_file():
+   errors.append("missing source/destination: "+rel); continue
+  try:
+   if s.stat().st_size!=item["bytes"] or digest(s)!=item["sha256"]: errors.append("source differs from manifest: "+rel)
+   if d.stat().st_size!=item["bytes"] or digest(d)!=item["sha256"]: errors.append("destination SHA-256 mismatch: "+rel)
+   else: verified.append(rel)
+  except (KeyError,TypeError,ValueError) as e:
+   errors.append("invalid manifest entry for "+rel+": "+str(e))
+ for name in (manifest_path.name,side.name):
+  s=source/name; d=destination/name
   if not s.is_file() or not d.is_file() or digest(s)!=digest(d): errors.append("manifest copy missing/mismatch: "+name)
- expected_names={x["path"] for x in m.get("files",[])}|{a.manifest.name,side.name}
- for label,folder in (("source",a.source),("destination",a.destination)):
+ expected_names=expected_paths|{manifest_path.name,side.name}
+ for label,folder in (("source",source),("destination",destination)):
   actual_names={p.name for p in folder.iterdir() if p.is_file()}
   extras=actual_names-expected_names
   if extras: errors.append(label+" contains unmanifested files: "+", ".join(sorted(extras)))
- result={"month_utc":m.get("month_utc"),"files_expected":len(m.get("files",[]))+2,"files_verified":len(verified)+ (0 if errors else 2),"verified_files":verified,"status":"PASS_LOCAL_SYNC_PATH_COPY" if not errors else "FAIL","cloud_sync_status":"NOT_VERIFIED_BY_LOCAL_HASH_CHECK","errors":errors}
+ result={"month_utc":m.get("month_utc"),"files_expected":len(files)+2,"files_verified":len(verified)+(0 if errors else 2),"verified_files":verified,"status":"PASS_LOCAL_SYNC_PATH_COPY" if not errors else "FAIL","cloud_sync_status":"NOT_VERIFIED_BY_LOCAL_HASH_CHECK","errors":errors}
+ return result
+def cmd_verify(a):
+ result=verify_copy(a.source,a.destination,a.manifest)
  print(json.dumps(result,indent=2))
- if errors: raise SystemExit(2)
+ if result["status"]!="PASS_LOCAL_SYNC_PATH_COPY": raise SystemExit(2)
+
 def main():
  p=argparse.ArgumentParser(description=__doc__); sub=p.add_subparsers(dest="cmd",required=True)
  a=sub.add_parser("audit"); a.add_argument("--month",required=True); a.add_argument("--month-dir",type=Path,required=True); a.add_argument("--symbols",required=True); a.add_argument("--report",type=Path,required=True); a.add_argument("--manifest",type=Path,required=True)
