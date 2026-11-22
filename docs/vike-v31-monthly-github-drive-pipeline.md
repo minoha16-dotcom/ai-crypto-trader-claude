@@ -91,7 +91,7 @@ service account with access only to the Vike Drive folder. Google Drive connecto
 availability in ChatGPT is not required for Actions, but the Actions identity
 must be provisioned by the repository owner.
 
-## Implemented local monthly runner
+## Implemented Google Drive desktop monthly runner
 
 Run from the repository Worktree on Windows PowerShell:
 
@@ -100,7 +100,7 @@ Run from the repository Worktree on Windows PowerShell:
 ```
 
 The runner:
-1. resumes the collector from local per-symbol checkpoints;
+1. writes collector data and resumable per-symbol checkpoints directly into the Google Drive for desktop sync folder (`raw-staging/YYYY-MM`);
 2. requires complete Trade, Mark, and Funding stream checkpoints for every requested symbol;
 3. audits each UTC day independently: exactly 96 valid 15-minute Trade and Mark bars per feed are required; a deficient day is marked EXCLUDE_DAY and is never filled;
 4. requires Funding CSV structural validity, but always leaves historical Funding coverage NOT_VERIFIED;
@@ -110,7 +110,7 @@ The runner:
 The local hash check proves the destination folder copy, not that the cloud upload
 has completed. Confirm Google Drive for desktop reports Synced. Funding coverage
 is still unverified, all label_eligible flags remain false, and this output is
-not model approval. The runner retains local raw staging and never deletes it.
+not model approval. The runner retains raw staging in the Google Drive sync folder and never deletes it.
 
 The first pilot should be one symbol and one development month only. Do not scale
 to all eight symbols or all 30 development months until the pilot report, hashes,
