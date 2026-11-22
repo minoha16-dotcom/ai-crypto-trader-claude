@@ -6,7 +6,6 @@ param(
     [Parameter(Mandatory=$true)]
     [ValidateScript({ Test-Path -LiteralPath $_ -PathType Container })]
     [string]$DriveRoot,
-    [string]$LocalRoot = 'C:\Vike_Data\Vike_V3.1',
     [string]$Symbols = 'BTCUSDT',
     [double]$DelaySeconds = 0.20
 )
@@ -33,19 +32,18 @@ $start = [DateTime]::SpecifyKind([DateTime]::ParseExact("$Month-01", 'yyyy-MM-dd
 $end = $start.AddMonths(1)
 $startIso = $start.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
 $endIso = $end.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
-$monthLocal = Join-Path $LocalRoot "raw-staging\$Month"
-$monthDrive = Join-Path $DriveRoot "raw-staging\$Month"
-$logRoot = Join-Path $LocalRoot 'logs'
-New-Item -ItemType Directory -Force -Path $monthLocal, $monthDrive, $logRoot | Out-Null
+$monthLocal = Join-Path $DriveRoot "raw-staging\$Month"
+$logRoot = Join-Path $DriveRoot 'logs'
+New-Item -ItemType Directory -Force -Path $monthLocal, $logRoot | Out-Null
 Write-Host 'Vike V3.1 monthly collection + integrity pipeline'
 Write-Host "Month: $Month UTC [$startIso, $endIso)"
 Write-Host "Symbols: $($requestedSymbols -join ',')"
-Write-Host "Local staging: $monthLocal"
-Write-Host "Drive sync destination: $monthDrive"
+Write-Host "Primary collection and storage (Google Drive sync folder): $monthLocal"
+Write-Host "No separate local raw-data staging or Robocopy step is used."
 Push-Location $RepoRoot
 try {
     & python $Collector --symbols ($requestedSymbols -join ',') --start $startIso --end $endIso --out-dir $monthLocal --delay $DelaySeconds
-    if ($LASTEXITCODE -ne 0) { throw "Collector failed ($LASTEXITCODE). Local checkpoint retained; rerun the same month to resume." }
+    if ($LASTEXITCODE -ne 0) { throw "Collector failed ($LASTEXITCODE). Drive-folder checkpoint retained; rerun the same month to resume after confirming Google Drive sync status." }
     foreach ($symbol in $requestedSymbols) {
         $checkpointPath = Join-Path $monthLocal "$symbol-checkpoint.json"
         if (-not (Test-Path -LiteralPath $checkpointPath -PathType Leaf)) { throw "Missing checkpoint for $symbol; refusing Drive copy." }
@@ -59,20 +57,10 @@ try {
     $reportPath = Join-Path $monthLocal 'month-audit.json'
     $manifestPath = Join-Path $monthLocal 'manifest.json'
     & python $Integrity audit --month $Month --month-dir $monthLocal --symbols ($requestedSymbols -join ',') --report $reportPath --manifest $manifestPath
-    if ($LASTEXITCODE -ne 0) { throw "Monthly integrity audit failed ($LASTEXITCODE); local staging retained." }
-}
-finally { Pop-Location }
-$robocopyLog = Join-Path $logRoot "robocopy-drive-$Month.log"
-& robocopy $monthLocal $monthDrive /E /COPY:DAT /DCOPY:DAT /R:3 /W:5 /FFT /NP /LOG:$robocopyLog
-$robocopyCode = $LASTEXITCODE
-if ($robocopyCode -ge 8) { throw "Robocopy failed (exit $robocopyCode). Local staging retained; retry the same month." }
-Push-Location $RepoRoot
-try {
-    & python $Integrity verify-copy --source $monthLocal --destination $monthDrive --manifest $manifestPath
-    if ($LASTEXITCODE -ne 0) { throw "Drive sync-folder copy verification failed ($LASTEXITCODE). Do not use this month." }
+    if ($LASTEXITCODE -ne 0) { throw "Monthly integrity audit failed ($LASTEXITCODE); Drive raw-staging retained for diagnosis and resume." }
 }
 finally { Pop-Location }
 Write-Host ''
-Write-Host 'PASS: local data integrity, daily audit, manifest, and sync-folder SHA-256 copy verification.'
-Write-Host 'CLOUD SYNC: NOT VERIFIED by this local check. Confirm Google Drive for desktop reports Synced.'
+Write-Host 'PASS: data integrity, daily audit, and manifest generated in the Google Drive sync folder.'
+Write-Host 'CLOUD SYNC: NOT VERIFIED by this script. Confirm Google Drive for desktop reports Synced before treating the month as backed up.'
 Write-Host 'Funding coverage remains NOT_VERIFIED. No labels, training, model approval, holdout access, or raw-data deletion.'
