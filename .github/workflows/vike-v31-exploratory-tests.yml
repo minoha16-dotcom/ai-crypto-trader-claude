@@ -1,0 +1,38 @@
+name: Vike V3.1 Exploratory Trainer Tests
+
+on:
+  push:
+    branches: [feat/vike-v31-drive-exploratory-training]
+    paths:
+      - "scripts/vike_exploratory_train.py"
+      - "tests/test_vike_exploratory_train.py"
+      - "requirements-vike-research.txt"
+      - ".github/workflows/vike-v31-exploratory-tests.yml"
+  pull_request:
+    branches: [feat/vike-v31-monthly-github-drive-pipeline]
+    paths:
+      - "scripts/vike_exploratory_train.py"
+      - "tests/test_vike_exploratory_train.py"
+      - "requirements-vike-research.txt"
+      - ".github/workflows/vike-v31-exploratory-tests.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  exploratory-pipeline-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-vike-research.txt
+      - name: Install research dependencies
+        run: python -m pip install -r requirements-vike-research.txt
+      - name: Compile trainer
+        run: python -m py_compile scripts/vike_exploratory_train.py
+      - name: Run exploratory loader tests
+        run: python -m pytest -q tests/test_vike_exploratory_train.py
