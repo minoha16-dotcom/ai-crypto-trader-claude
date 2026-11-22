@@ -65,7 +65,7 @@ def test_checkpoint_hash_mismatch_fails_closed(tmp_path):
 
 def test_empty_funding_file_fails_integrity(tmp_path):
     folder=_fixture(tmp_path/"month")
-    (folder/"BTCUSDT-funding.csv").write_text(",".join(v.HEADERS["funding"])+"\\n",encoding="utf-8")
+    (folder/"BTCUSDT-funding.csv").write_text(",".join(v.HEADERS["funding"])+"\n",encoding="utf-8")
     cp=json.loads((folder/"BTCUSDT-checkpoint.json").read_text())
     p=folder/"BTCUSDT-funding.csv"
     cp["streams"]["funding"]["rows_written"]=0
