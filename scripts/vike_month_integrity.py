@@ -22,7 +22,7 @@ def digest(p):
   for b in iter(lambda:f.read(1024*1024),b""): h.update(b)
  return h.hexdigest()
 def bounds(month):
- if not re.fullmatch(r"\\d{4}-(0[1-9]|1[0-2])",month): raise ValueError("month must be YYYY-MM")
+ if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])",month): raise ValueError("month must be YYYY-MM")
  y,m=map(int,month.split("-"))
  if (y,m)<(2023,11) or (y,m)>(2026,4): raise ValueError("Only 2023-11 through 2026-04 are allowed; holdout is locked")
  a=datetime(y,m,1,tzinfo=timezone.utc)
@@ -93,12 +93,12 @@ def cmd_audit(a):
  symbols=[x.strip().upper() for x in a.symbols.split(",") if x.strip()]
  if not symbols or len(set(symbols))!=len(symbols) or any(not x.isalnum() for x in symbols): raise ValueError("invalid symbols")
  report,records=audit_month(a.month_dir,a.month,symbols)
- a.report.write_text(json.dumps(report,indent=2,sort_keys=True)+"\\n",encoding="utf-8")
+ a.report.write_text(json.dumps(report,indent=2,sort_keys=True)+"\n",encoding="utf-8")
  if report["collection_integrity_status"]!="PASS": raise ValueError("integrity audit failed; refusing manifest")
  records.append({"path":a.report.name,"bytes":a.report.stat().st_size,"sha256":digest(a.report)})
  manifest={"schema_version":1,"dataset":"Vike V3.1 Binance USD-M monthly raw staging","month_utc":a.month,"symbols":symbols,"streams":list(STREAMS),"start_ms":report["start_ms"],"end_ms_exclusive":report["end_ms_exclusive"],"collection_integrity_status":"PASS","funding_coverage_status":"NOT_VERIFIED","model_or_label_approval":"NOT_GRANTED","files":records}
- a.manifest.write_text(json.dumps(manifest,indent=2,sort_keys=True)+"\\n",encoding="utf-8")
- a.manifest.with_suffix(a.manifest.suffix+".sha256").write_text(f"{digest(a.manifest)}  {a.manifest.name}\\n",encoding="ascii")
+ a.manifest.write_text(json.dumps(manifest,indent=2,sort_keys=True)+"\n",encoding="utf-8")
+ a.manifest.with_suffix(a.manifest.suffix+".sha256").write_text(f"{digest(a.manifest)}  {a.manifest.name}\n",encoding="ascii")
  print(json.dumps({"status":"PASS_LOCAL_INTEGRITY","month":a.month,"files":len(records),"funding_coverage_status":"NOT_VERIFIED","model_or_label_approval":"NOT_GRANTED"},indent=2))
 def cmd_verify(a):
  m=json.loads(a.manifest.read_text(encoding="utf-8")); errors=[]; verified=[]
