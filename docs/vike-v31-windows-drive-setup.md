@@ -79,7 +79,7 @@ storage capacity, API stability, and independent coverage audits pass.
 
 ## Critical limitations
 
-- This script performs collection and local Drive-folder mirroring only.
+- This script collects directly into the local Google Drive for desktop sync folder. It does not perform a remote Drive API read-back.
 - Funding structural validity is not funding coverage verification. The
   manifest deliberately records funding_coverage_status=NOT_VERIFIED, and
   every daily label_eligible flag remains false.
