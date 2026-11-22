@@ -74,3 +74,19 @@ def test_empty_funding_file_fails_integrity(tmp_path):
     report,_=v.audit_month(folder,"2024-02",["BTCUSDT"])
     assert report["collection_integrity_status"]=="FAIL"
     assert any("funding structural audit failed" in e for e in report["fatal_errors"])
+
+def test_unmanifested_extra_file_blocks_copy(tmp_path):
+    source=_fixture(tmp_path/"source")
+    report,records=v.audit_month(source,"2024-02",["BTCUSDT"])
+    rp=source/"month-audit.json"
+    rp.write_text(json.dumps(report,indent=2,sort_keys=True)+"\\n",encoding="utf-8")
+    records.append({"path":rp.name,"bytes":rp.stat().st_size,"sha256":_hash(rp)})
+    mp=source/"manifest.json"
+    mp.write_text(json.dumps({"month_utc":"2024-02","files":records},indent=2)+"\\n",encoding="utf-8")
+    side=mp.with_suffix(".json.sha256")
+    side.write_text(f"{_hash(mp)}  manifest.json\\n",encoding="ascii")
+    dest=tmp_path/"drive"; shutil.copytree(source,dest)
+    (dest/"unexpected.csv").write_text("extra",encoding="utf-8")
+    result=v.verify_copy(source,dest,mp)
+    assert result["status"]=="FAIL"
+    assert any("unmanifested files" in e for e in result["errors"])
