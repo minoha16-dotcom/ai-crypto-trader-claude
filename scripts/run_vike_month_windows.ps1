@@ -35,7 +35,7 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Python dependencies missing. Run: python -m pip install requests urllib3'
 }
 
-$start = [DateTime]::ParseExact("$Month-01", 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture).ToUniversalTime()
+$start = [DateTime]::SpecifyKind([DateTime]::ParseExact("$Month-01", 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture), [DateTimeKind]::Utc)
 $end = $start.AddMonths(1)
 $startIso = $start.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
 $endIso = $end.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
