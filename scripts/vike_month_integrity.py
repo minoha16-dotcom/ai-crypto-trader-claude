@@ -79,6 +79,10 @@ def audit_month(folder,month,symbols):
    tm,ti=audit_bar_rows(rows["trade_15m"],"trade_15m",start,end)
    mm,mi=audit_bar_rows(rows["mark_15m"],"mark_15m",start,end)
    fd=audit_funding(rows["funding"],start,end)
+   if fd["structural_status"]!="PASS": raise ValueError("funding structural audit failed")
+   for issue in ti+mi:
+    t=issue.get("timestamp_ms")
+    if t is None or not start<=t<end: raise ValueError("price CSV contains malformed or out-of-window rows")
    daily=[]
    for i in range(ndays):
     ds=start+i*86_400_000; de=ds+86_400_000; expected=set(range(ds,de,BAR_MS))
