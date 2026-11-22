@@ -57,6 +57,23 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "Collector failed with exit code $LASTEXITCODE. Local checkpoint is retained; rerun the same command to resume."
     }
+
+    # Defense in depth: never copy a month if any requested stream checkpoint
+    # is incomplete. Funding pagination completion is not coverage verification.
+    $requestedSymbols = @($Symbols.Split(',') | ForEach-Object { $_.Trim().ToUpperInvariant() } | Where-Object { $_ })
+    foreach ($symbol in $requestedSymbols) {
+        $checkpointPath = Join-Path $monthLocal "$symbol-checkpoint.json"
+        if (-not (Test-Path -LiteralPath $checkpointPath -PathType Leaf)) {
+            throw "Missing collector checkpoint for $symbol. Local staging retained; refusing Drive copy."
+        }
+        $checkpoint = Get-Content -LiteralPath $checkpointPath -Raw | ConvertFrom-Json
+        foreach ($stream in @('trade_15m', 'mark_15m', 'funding')) {
+            $streamState = $checkpoint.streams.PSObject.Properties[$stream]
+            if (-not $streamState -or -not $streamState.Value.complete) {
+                throw "Incomplete $symbol/$stream checkpoint. Local staging retained; refusing Drive copy."
+            }
+        }
+    }
 }
 finally {
     Pop-Location
