@@ -1,6 +1,6 @@
 # Vike V3.1 monthly GitHub Actions + Google Drive pipeline
 
-## Status: implementation plan / not training-enabled
+## Status: local Windows collection-integrity stage implemented / not training-enabled
 
 This branch defines the safe execution contract for the monthly pipeline. It does
 not claim that monthly labels, model fitting, or Google Drive transfer are
@@ -90,6 +90,32 @@ Use GitHub Actions encrypted secrets / environment secrets. Prefer a dedicated
 service account with access only to the Vike Drive folder. Google Drive connector
 availability in ChatGPT is not required for Actions, but the Actions identity
 must be provisioned by the repository owner.
+
+## Implemented local monthly runner
+
+Run from the repository Worktree on Windows PowerShell:
+
+```powershell
+.\scripts\run_vike_month_windows.ps1 -Month 2023-11 -DriveRoot "G:\Mon Drive\ai trade\Vike V3.1" -LocalRoot "C:\Vike_Data\Vike_V3.1" -Symbols BTCUSDT
+```
+
+The runner:
+1. resumes the collector from local per-symbol checkpoints;
+2. requires complete Trade, Mark, and Funding stream checkpoints for every requested symbol;
+3. audits each UTC day independently: exactly 96 valid 15-minute Trade and Mark bars per feed are required; a deficient day is marked EXCLUDE_DAY and is never filled;
+4. requires Funding CSV structural validity, but always leaves historical Funding coverage NOT_VERIFIED;
+5. writes month-audit.json, manifest.json, and manifest.json.sha256;
+6. copies the month to the local Google Drive for desktop sync path and verifies every manifest-listed file and the manifest sidecar by size and SHA-256.
+
+The local hash check proves the destination folder copy, not that the cloud upload
+has completed. Confirm Google Drive for desktop reports Synced. Funding coverage
+is still unverified, all label_eligible flags remain false, and this output is
+not model approval. The runner retains local raw staging and never deletes it.
+
+The first pilot should be one symbol and one development month only. Do not scale
+to all eight symbols or all 30 development months until the pilot report, hashes,
+Drive sync state, and resume behavior have been reviewed. The locked holdout
+months 2026-05 through 2026-10 are rejected by both runner and audit utility.
 
 ## Deletion / recovery rules
 
