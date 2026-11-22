@@ -79,12 +79,12 @@ def test_unmanifested_extra_file_blocks_copy(tmp_path):
     source=_fixture(tmp_path/"source")
     report,records=v.audit_month(source,"2024-02",["BTCUSDT"])
     rp=source/"month-audit.json"
-    rp.write_text(json.dumps(report,indent=2,sort_keys=True)+"\\n",encoding="utf-8")
+    rp.write_text(json.dumps(report,indent=2,sort_keys=True)+"\n",encoding="utf-8")
     records.append({"path":rp.name,"bytes":rp.stat().st_size,"sha256":_hash(rp)})
     mp=source/"manifest.json"
-    mp.write_text(json.dumps({"month_utc":"2024-02","files":records},indent=2)+"\\n",encoding="utf-8")
+    mp.write_text(json.dumps({"month_utc":"2024-02","files":records},indent=2)+"\n",encoding="utf-8")
     side=mp.with_suffix(".json.sha256")
-    side.write_text(f"{_hash(mp)}  manifest.json\\n",encoding="ascii")
+    side.write_text(f"{_hash(mp)}  manifest.json\n",encoding="ascii")
     dest=tmp_path/"drive"; shutil.copytree(source,dest)
     (dest/"unexpected.csv").write_text("extra",encoding="utf-8")
     result=v.verify_copy(source,dest,mp)
