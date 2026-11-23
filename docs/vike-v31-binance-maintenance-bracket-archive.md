@@ -104,6 +104,30 @@ retained whenever the simulated notional can reach them.
 | 2025-08-19 06:30 | BTCUSDT | 0–300,000 | 0.40% | Affected | [Binance notice](https://www.binance.com/en/support/announcement/detail/8e428625ebeb4cc7ae8678026846095c) |
 | 2025-08-19 06:30 | ETHUSDT | 0–300,000 | 0.40% | Affected | [Binance notice](https://www.binance.com/en/support/announcement/detail/8e428625ebeb4cc7ae8678026846095c) |
 
+For the synthetic notional range (up to 30,000 USDT), the second band is
+also material for several symbols. The following published schedules show the
+first two bands; cumulative maintenance amounts are derived by the documented
+continuity formula:
+
+| Effective UTC | Symbol | First band (MMR) | Second band (MMR) | Existing positions | Official source |
+|---|---|---|---|---|---|
+| 2023-12-24 09:35 | SOLUSDT | 0–10,000 at 0.50% | 10,000–50,000 at 0.65% | Not affected | [Binance 2024-01-02 notice](https://www.binance.com/en/support/announcement/detail/d75c5ca94f704e96a6a4e55ffddfd65d) |
+| 2024-01-02 12:50 | BNBUSDT | 0–10,000 at 0.50% | 10,000–50,000 at 0.60% | Not affected | [Binance 2024-01-02 notice](https://www.binance.com/en/support/announcement/detail/d75c5ca94f704e96a6a4e55ffddfd65d) |
+| 2024-08-02 06:30 | SOLUSDT | 0–10,000 at 0.50% | 10,000–50,000 at 0.65% | Not affected | [Binance 2024-08-02 notice](https://www.binance.com/en/support/announcement/detail/365375ab9cda445aa025c51bbaeea88e) |
+| 2024-08-22 09:30 | SOLUSDT | 0–20,000 at 0.50% | 20,000–100,000 at 0.65% | Not affected | [Binance 2024-08-22 notice](https://www.binance.com/en/support/announcement/detail/572598a13c384de6aa3c4d4dc1be5f81) |
+| 2024-08-22 09:30 | DOGEUSDT | 0–10,000 at 0.50% | 10,000–50,000 at 0.70% | Not affected | [Binance 2024-08-22 notice](https://www.binance.com/en/support/announcement/detail/572598a13c384de6aa3c4d4dc1be5f81) |
+| 2024-08-27 07:30 | XRPUSDT | 0–10,000 at 0.50% | 10,000–20,000 at 0.65% | Not affected | [Binance 2024-08-27 notice](https://www.binance.com/fr/support/announcement/detail/194e244a94e9416cb400318dbed2f4b9) |
+| 2025-06-20 06:30 | XRPUSDT | 0–10,000 at 0.65% | 10,000–150,000 at 1.00% | Affected | [Binance June 2025 notice](https://www.binance.com/en-PH/support/announcement/detail/e778988edec446038ad536bcb0c8d460) |
+| 2025-06-20 06:30 | DOGEUSDT | 0–10,000 at 0.65% | 10,000–150,000 at 1.00% | Affected | [Binance June 2025 notice](https://www.binance.com/en-PH/support/announcement/detail/e778988edec446038ad536bcb0c8d460) |
+
+The derived `cum` values for these second bands are respectively 15, 10, 15,
+30, 20, 15, 35 and 35 USDT. The 2025-06 XRP/DOGE values use the same first
+and second band thresholds published in the announcement; the extracted
+table text contains a formatting artifact in the first MMR cell, so the
+0.65% value must be checked against the downloaded original artifact before
+a signed manifest is produced. These are partial schedule extracts, not
+hash-bound artifacts and not a substitute for the full historical ledger.
+
 For each listed first band, the initial tier has notional floor 0 and
 maintenance amount/cumulative deduction `cum = 0`. Higher-tier `cum`
 values must be calculated from the full adjacent tier schedule and reviewed
