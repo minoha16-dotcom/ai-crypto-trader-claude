@@ -28,6 +28,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
 from backend.binance_usdm_liquidation import (
     MaintenanceBracket,
     calculate_isolated_liquidation_price,
+    derive_brackets_from_published_tiers,
 )
 from backend.causal_market_features import validate_mark_price_alignment
 from backend.triple_barrier_labels import Bar, FundingEvent, LabelConfig, label_event
@@ -191,10 +192,12 @@ def load_liquidation_manifest(path: Path | None, symbols: list[str]) -> tuple[li
         if not _artifact_matches(path, row["source_artifact_path"], row["source_sha256"]):
             return [], "NOT_VERIFIED"
         try:
-            tiers = [MaintenanceBracket(float(t["notional_floor"]), float(t["notional_cap"]),
-                float(t["maint_margin_ratio"]), float(t["cum"])) for t in row["brackets"]]
-            from backend.binance_usdm_liquidation import validate_brackets
-            validate_brackets(tiers)
+            tiers = derive_brackets_from_published_tiers(row["brackets"])
+            for source_tier, derived_tier in zip(row["brackets"], tiers):
+                if "cum" in source_tier and not math.isclose(
+                    float(source_tier["cum"]), derived_tier.cum, rel_tol=1e-9, abs_tol=1e-8
+                ):
+                    return [], "NOT_VERIFIED"
         except (KeyError, TypeError, ValueError, OverflowError):
             return [], "NOT_VERIFIED"
         rows.append({**row, "symbol": str(row["symbol"]).upper(),
