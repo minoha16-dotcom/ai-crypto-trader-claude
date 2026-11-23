@@ -8,6 +8,7 @@ import pytest
 
 from backend.binance_usdm_liquidation import MaintenanceBracket
 from scripts.vike_exploratory_train import BAR_MS
+from scripts.vike_v31_funding_archive_audit import audit_funding_csv
 from scripts.vike_v31_research_pipeline import (
     apply_overlap_control,
     build_opportunity_events,
@@ -129,6 +130,32 @@ def test_funding_attestation_rejects_modified_evidence_artifact(tmp_path: Path):
     index, status = load_funding_attestation(path, ["BTCUSDT"])
     assert index == {}
     assert status == "NOT_VERIFIED"
+
+
+def test_funding_archive_audit_checks_structure_without_claiming_completeness(tmp_path: Path):
+    path = tmp_path / "funding.csv"
+    path.write_text(
+        "funding_time,funding_rate,mark_price\n"
+        "1000,0.0001,100.0\n"
+        "2000,-0.0001,101.0\n",
+        encoding="utf-8",
+    )
+    result = audit_funding_csv(path, 0, 3000)
+    assert result["structural_status"] == "PASS"
+    assert result["row_count"] == 2
+    assert result["funding_interval_hours_counts"] == {round(1000 / 3_600_000, 6): 1}
+
+
+def test_funding_archive_audit_rejects_unsorted_or_duplicate_timestamps(tmp_path: Path):
+    path = tmp_path / "funding.csv"
+    path.write_text(
+        "funding_time,funding_rate,mark_price\n"
+        "2000,0.0001,100.0\n"
+        "1000,-0.0001,101.0\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="not ascending"):
+        audit_funding_csv(path, 0, 3000)
 
 
 def test_empty_funding_file_is_rejected(tmp_path: Path):
