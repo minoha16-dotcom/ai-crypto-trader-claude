@@ -90,7 +90,7 @@ def load_funding_attestation(path: Path | None, symbols: list[str]) -> tuple[dic
     return index, "VERIFIED"
 
 
-def load_liquidation_manifest(path: Path | None) -> tuple[list[dict], str]:
+def load_liquidation_manifest(path: Path | None, symbols: list[str]) -> tuple[list[dict], str]:
     if path is None or not path.is_file():
         return [], "NOT_VERIFIED"
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -135,7 +135,24 @@ def load_liquidation_manifest(path: Path | None) -> tuple[list[dict], str]:
             continue
         validated.append({**row, "quantity": quantity, "isolated_wallet_balance": wallet,
                           "_brackets": brackets})
-    return validated, "VERIFIED" if validated else "NOT_VERIFIED"
+    if not validated:
+        return [], "NOT_VERIFIED"
+    # The manifest must cover the entire development window for every symbol;
+    # event-level matching below still rejects overlaps or missing snapshots.
+    window_start, window_end = _month_start(MONTHS[0]), _month_end(MONTHS[-1])
+    for symbol in symbols:
+        intervals = sorted(
+            (row["valid_from_ms"], row["valid_to_ms"])
+            for row in validated if row["symbol"] == symbol
+        )
+        cursor = window_start
+        for start_ms, end_ms in intervals:
+            if start_ms > cursor:
+                break
+            cursor = max(cursor, end_ms)
+        if cursor < window_end:
+            return [], "NOT_VERIFIED"
+    return validated, "VERIFIED"
 
 
 def _read_funding(path: Path, start: int, end: int) -> list[FundingEvent]:
@@ -413,7 +430,7 @@ def run(args) -> dict:
         raise ValueError("fee and slippage assumptions must be nonnegative")
 
     funding_attestation, funding_status = load_funding_attestation(args.funding_attestation, symbols)
-    liquidation_positions, liquidation_status = load_liquidation_manifest(args.liquidation_manifest)
+    liquidation_positions, liquidation_status = load_liquidation_manifest(args.liquidation_manifest, symbols)
     monthly_audits, exclusions, hashes, all_events, labeled = [], [], [], [], []
     symbol_segments = {}
     funding_by_symbol = {}
