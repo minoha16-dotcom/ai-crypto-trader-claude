@@ -89,7 +89,7 @@ def test_funding_attestation_must_be_verified_and_cover_exact_symbol_month_grid(
 
 def test_empty_funding_file_is_rejected(tmp_path: Path):
     path = tmp_path / "funding.csv"
-    path.write_text("funding_time,funding_rate,mark_price\\n", encoding="utf-8")
+    path.write_text("funding_time,funding_rate,mark_price" + chr(10), encoding="utf-8")
     with pytest.raises(ValueError, match="no valid records"):
         _read_funding(path, 0, 10_000_000)
 
