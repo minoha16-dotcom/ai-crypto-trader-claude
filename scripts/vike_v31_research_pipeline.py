@@ -100,6 +100,8 @@ def load_liquidation_manifest(path: Path | None, symbols: list[str]) -> tuple[li
         return [], "NOT_VERIFIED"
     if not _valid_sha256(payload.get("evidence_sha256")):
         return [], "NOT_VERIFIED"
+    if not payload.get("reviewed_by") or not payload.get("reviewed_at_utc"):
+        return [], "NOT_VERIFIED"
     positions = payload.get("positions")
     if not isinstance(positions, list) or not positions:
         return [], "NOT_VERIFIED"
@@ -455,6 +457,7 @@ def run(args) -> dict:
     funding_attestation, funding_status = load_funding_attestation(args.funding_attestation, symbols)
     liquidation_positions, liquidation_status = load_liquidation_manifest(args.liquidation_manifest, symbols)
     monthly_audits, exclusions, hashes, all_events, labeled = [], [], [], [], []
+    funding_hashes_match = True
     symbol_segments = {}
     funding_by_symbol = {}
     funding_verified_by_symbol = {}
@@ -482,6 +485,7 @@ def run(args) -> dict:
                 funding_status == "VERIFIED" and funding_item
                 and funding_item.get("funding_file_sha256") == source_funding_hash
             )
+            funding_hashes_match = funding_hashes_match and month_funding_verified
             symbol_funding_verified = symbol_funding_verified and month_funding_verified
             monthly_audits.append({
                 "symbol": symbol, "month": month, "trade_rows": len(trade), "mark_rows": len(mark),
@@ -506,6 +510,8 @@ def run(args) -> dict:
         for segment in segments:
             all_events.extend(build_opportunity_events(symbol, segment))
 
+    if funding_status == "VERIFIED" and not funding_hashes_match:
+        funding_status = "NOT_VERIFIED"
     all_events = apply_overlap_control(all_events)
     for event in all_events:
         event["label_status"] = "NOT_ATTEMPTED"
