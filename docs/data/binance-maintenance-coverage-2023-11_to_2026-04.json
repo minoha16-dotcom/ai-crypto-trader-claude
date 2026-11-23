@@ -1272,8 +1272,14 @@
     {
       "symbol": "ADAUSDT",
       "month": "2024-09",
-      "status": "NOT_REVIEWED",
-      "evidence": []
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2024-09-11T07:30:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/kk-KZ/support/announcement/detail/1d37707c47794fc9bb2236325c435642"
+        }
+      ]
     },
     {
       "symbol": "ADAUSDT",
@@ -1482,8 +1488,14 @@
     {
       "symbol": "LINKUSDT",
       "month": "2024-12",
-      "status": "NOT_REVIEWED",
-      "evidence": []
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2024-12-12T09:15:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/en-AU/support/announcement/detail/6995f8a0de1b4945a36e42a580eb652c"
+        }
+      ]
     },
     {
       "symbol": "LINKUSDT",
