@@ -1,0 +1,1586 @@
+{
+  "schema_version": 1,
+  "scope": "Binance USD-M USDT perpetual",
+  "development_window": {
+    "start_month": "2023-11",
+    "end_month": "2026-04"
+  },
+  "symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+    "ADAUSDT",
+    "LINKUSDT"
+  ],
+  "entries": [
+    {
+      "symbol": "BTCUSDT",
+      "month": "2023-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2023-12",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2023-12-24T09:35:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/d75c5ca94f704e96a6a4e55ffddfd65d"
+        }
+      ]
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2024-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2024-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2024-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2024-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2024-05",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2024-05-28T10:30:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/aa735cd2d8bd4e7bb092179cf086e486"
+        }
+      ]
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2024-06",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2024-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2024-08",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2024-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2024-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2024-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2024-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2025-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2025-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2025-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2025-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2025-05",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2025-06",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2025-06-17T06:30:00Z",
+          "applicability": "AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/e778988edec446038ad536bcb0c8d460"
+        }
+      ]
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2025-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2025-08",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2025-08-19T06:30:00Z",
+          "applicability": "AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/8e428625ebeb4cc7ae8678026846095c"
+        }
+      ]
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2025-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2025-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2025-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2025-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2026-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2026-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2026-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BTCUSDT",
+      "month": "2026-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2023-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2023-12",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2023-12-24T09:35:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/d75c5ca94f704e96a6a4e55ffddfd65d"
+        }
+      ]
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2024-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2024-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2024-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2024-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2024-05",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2024-05-28T10:30:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/aa735cd2d8bd4e7bb092179cf086e486"
+        }
+      ]
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2024-06",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2024-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2024-08",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2024-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2024-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2024-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2024-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2025-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2025-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2025-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2025-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2025-05",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2025-06",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2025-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2025-08",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2025-08-19T06:30:00Z",
+          "applicability": "AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/8e428625ebeb4cc7ae8678026846095c"
+        }
+      ]
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2025-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2025-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2025-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2025-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2026-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2026-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2026-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ETHUSDT",
+      "month": "2026-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2023-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2023-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2024-01",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2024-01-02T12:50:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/d75c5ca94f704e96a6a4e55ffddfd65d"
+        }
+      ]
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2024-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2024-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2024-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2024-05",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2024-06",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2024-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2024-08",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2024-08-27T07:30:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/fr/support/announcement/detail/194e244a94e9416cb400318dbed2f4b9"
+        }
+      ]
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2024-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2024-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2024-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2024-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2025-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2025-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2025-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2025-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2025-05",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2025-06",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2025-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2025-08",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2025-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2025-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2025-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2025-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2026-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2026-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2026-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "BNBUSDT",
+      "month": "2026-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2023-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2023-12",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2023-12-24T09:35:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/d75c5ca94f704e96a6a4e55ffddfd65d"
+        }
+      ]
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2024-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2024-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2024-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2024-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2024-05",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2024-06",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2024-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2024-08",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2024-08-02T06:30:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/365375ab9cda445aa025c51bbaeea88e"
+        },
+        {
+          "effective_at_utc": "2024-08-22T09:30:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/572598a13c384de6aa3c4d4dc1be5f81"
+        }
+      ]
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2024-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2024-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2024-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2024-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2025-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2025-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2025-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2025-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2025-05",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2025-06",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2025-06-23T06:30:00Z",
+          "applicability": "AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/aa1d165426df4a7a84a0005a5a2f1e03"
+        }
+      ]
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2025-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2025-08",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2025-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2025-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2025-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2025-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2026-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2026-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2026-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "SOLUSDT",
+      "month": "2026-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2023-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2023-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-05",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-06",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-08",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2024-08-27T07:30:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/fr/support/announcement/detail/194e244a94e9416cb400318dbed2f4b9"
+        }
+      ]
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-11",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2024-11-07T08:30:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/2c473e4efef140e8b58b950987bcc577"
+        }
+      ]
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2024-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2025-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2025-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2025-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2025-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2025-05",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2025-06",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2025-06-20T06:30:00Z",
+          "applicability": "AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/e778988edec446038ad536bcb0c8d460"
+        }
+      ]
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2025-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2025-08",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2025-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2025-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2025-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2025-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2026-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2026-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2026-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "XRPUSDT",
+      "month": "2026-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2023-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2023-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-05",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-06",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-08",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2024-08-22T09:30:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/572598a13c384de6aa3c4d4dc1be5f81"
+        }
+      ]
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-11",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2024-11-13T08:50:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/ar-AE/support/announcement/detail/0dc37e5073504db2968a5c3e9b2655fa"
+        }
+      ]
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2024-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2025-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2025-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2025-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2025-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2025-05",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2025-06",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2025-06-20T06:30:00Z",
+          "applicability": "AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/e778988edec446038ad536bcb0c8d460"
+        }
+      ]
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2025-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2025-08",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2025-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2025-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2025-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2025-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2026-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2026-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2026-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "DOGEUSDT",
+      "month": "2026-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2023-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2023-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2024-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2024-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2024-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2024-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2024-05",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2024-06",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2024-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2024-08",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2024-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2024-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2024-11",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2024-11-19T07:30:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/en-AU/support/announcement/detail/2766181be07e49748736810996554c47"
+        }
+      ]
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2024-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2025-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2025-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2025-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2025-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2025-05",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2025-06",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2025-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2025-08",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2025-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2025-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2025-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2025-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2026-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2026-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2026-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "ADAUSDT",
+      "month": "2026-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2023-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2023-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2024-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2024-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2024-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2024-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2024-05",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2024-06",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2024-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2024-08",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2024-09",
+      "status": "CONFIRMED_CHANGE",
+      "evidence": [
+        {
+          "effective_at_utc": "2024-09-17T07:30:00Z",
+          "applicability": "NOT_AFFECTED",
+          "url": "https://www.binance.com/en/support/announcement/detail/a05ae5aad6e44f6c848bde0a4c94ad4b"
+        }
+      ]
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2024-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2024-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2024-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2025-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2025-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2025-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2025-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2025-05",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2025-06",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2025-07",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2025-08",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2025-09",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2025-10",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2025-11",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2025-12",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2026-01",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2026-02",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2026-03",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    },
+    {
+      "symbol": "LINKUSDT",
+      "month": "2026-04",
+      "status": "NOT_REVIEWED",
+      "evidence": []
+    }
+  ],
+  "warning": "NOT_REVIEWED does not mean no tier change. Do not claim archive completeness from this inventory."
+}
