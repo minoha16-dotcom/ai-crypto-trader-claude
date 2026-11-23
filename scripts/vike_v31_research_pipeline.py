@@ -50,6 +50,11 @@ from scripts.vike_exploratory_train import (
 )
 
 MAX_HOLDING_BARS = 48
+DEFAULT_RESEARCH_ACCOUNT = {
+    "initial_equity_usdt": 10_000.0, "risk_fraction": 0.005, "max_leverage": 3.0,
+    "margin_mode": "ISOLATED", "position_mode": "ONE_WAY", "contract_type": "USDT_LINEAR",
+    "account_scope": "INDEPENDENT_EVENT_RESET_NO_CONCURRENT_POSITIONS",
+}
 EMBARGO_MS = MAX_HOLDING_BARS * BAR_MS
 FOLDS = (
     ("2024-11", "2025-01", "2025-02", "2025-04"),
@@ -134,117 +139,118 @@ def _validate_time_series_coverage(rows: list[dict], symbol: str,
     return cursor == window_end
 
 def load_liquidation_manifest(path: Path | None, symbols: list[str]) -> tuple[list[dict], str]:
-    """Load v2 manifest with separate exchange tier history and account assumptions."""
+    """Load v3 verified exchange tier history and synthetic account configuration."""
     if path is None or not path.is_file():
         return [], "NOT_VERIFIED"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return [], "NOT_VERIFIED"
-    if not isinstance(payload, dict) or payload.get("schema_version") != 2 or payload.get("status") != "VERIFIED":
+    if not isinstance(payload, dict) or payload.get("schema_version") != 3 or payload.get("status") != "VERIFIED":
         return [], "NOT_VERIFIED"
     if not payload.get("reviewed_by") or not payload.get("reviewed_at_utc"):
         return [], "NOT_VERIFIED"
-
-    raw_brackets = payload.get("maintenance_bracket_history")
-    raw_positions = payload.get("position_assumptions")
-    if not isinstance(raw_brackets, list) or not raw_brackets:
+    account = payload.get("research_account")
+    if not isinstance(account, dict):
         return [], "NOT_VERIFIED"
-    if not isinstance(raw_positions, list) or not raw_positions:
+    try:
+        equity, risk_fraction, leverage = (float(account[k]) for k in
+            ("initial_equity_usdt", "risk_fraction", "max_leverage"))
+    except (KeyError, TypeError, ValueError, OverflowError):
         return [], "NOT_VERIFIED"
-
-    bracket_rows = []
-    for row in raw_brackets:
+    if (not all(math.isfinite(v) for v in (equity, risk_fraction, leverage))
+            or equity <= 0 or not 0 < risk_fraction <= 0.02 or not 1 <= leverage <= 3):
+        return [], "NOT_VERIFIED"
+    if (account.get("margin_mode") != "ISOLATED" or account.get("position_mode") != "ONE_WAY"
+            or account.get("contract_type") != "USDT_LINEAR"
+            or account.get("account_scope") != "INDEPENDENT_EVENT_RESET_NO_CONCURRENT_POSITIONS"):
+        return [], "NOT_VERIFIED"
+    normalized = {**DEFAULT_RESEARCH_ACCOUNT, "initial_equity_usdt": equity,
+                  "risk_fraction": risk_fraction, "max_leverage": leverage}
+    raw = payload.get("maintenance_bracket_history")
+    if not isinstance(raw, list) or not raw:
+        return [], "NOT_VERIFIED"
+    rows = []
+    for row in raw:
         if not isinstance(row, dict):
             return [], "NOT_VERIFIED"
-        required = ("symbol", "valid_from_ms", "valid_to_ms", "applicability",
-                    "brackets", "source_artifact_path", "source_sha256", "source_url")
-        if any(key not in row for key in required):
+        required = ("symbol", "valid_from_ms", "valid_to_ms", "applicability", "brackets",
+                    "source_artifact_path", "source_sha256", "source_url")
+        if any(k not in row for k in required):
             return [], "NOT_VERIFIED"
-        if row.get("applicability") not in {"AFFECTED", "NOT_AFFECTED", "NOT_STATED"}:
+        if row["applicability"] not in {"AFFECTED", "NOT_AFFECTED", "NOT_STATED"}:
             return [], "NOT_VERIFIED"
-        if not isinstance(row.get("source_url"), str) or not row["source_url"].startswith("https://www.binance.com/"):
+        if not isinstance(row["source_url"], str) or not row["source_url"].startswith("https://www.binance.com/"):
             return [], "NOT_VERIFIED"
-        if not isinstance(row["valid_from_ms"], int) or not isinstance(row["valid_to_ms"], int):
+        if (not isinstance(row["valid_from_ms"], int) or isinstance(row["valid_from_ms"], bool)
+                or not isinstance(row["valid_to_ms"], int) or isinstance(row["valid_to_ms"], bool)
+                or row["valid_to_ms"] <= row["valid_from_ms"]):
             return [], "NOT_VERIFIED"
-        if row["valid_to_ms"] <= row["valid_from_ms"]:
-            return [], "NOT_VERIFIED"
-        if not _artifact_matches(path, row.get("source_artifact_path"), row.get("source_sha256")):
+        if not _artifact_matches(path, row["source_artifact_path"], row["source_sha256"]):
             return [], "NOT_VERIFIED"
         try:
-            tiers = [MaintenanceBracket(
-                float(item["notional_floor"]), float(item["notional_cap"]),
-                float(item["maint_margin_ratio"]), float(item["cum"]),
-            ) for item in row["brackets"]]
+            tiers = [MaintenanceBracket(float(t["notional_floor"]), float(t["notional_cap"]),
+                float(t["maint_margin_ratio"]), float(t["cum"])) for t in row["brackets"]]
             from backend.binance_usdm_liquidation import validate_brackets
             validate_brackets(tiers)
         except (KeyError, TypeError, ValueError, OverflowError):
             return [], "NOT_VERIFIED"
-        bracket_rows.append({**row, "symbol": str(row["symbol"]).upper(), "_brackets": tiers})
+        rows.append({**row, "symbol": str(row["symbol"]).upper(),
+                     "_brackets": tiers, "_research_account": normalized})
+    start, end = _month_start(MONTHS[0]), _month_end(MONTHS[-1])
+    if any(not _validate_time_series_coverage(rows, sym, start, end) for sym in symbols):
+        return [], "NOT_VERIFIED"
+    return rows, "VERIFIED"
 
-    position_rows = []
-    for row in raw_positions:
-        if not isinstance(row, dict):
-            return [], "NOT_VERIFIED"
-        required = ("symbol", "valid_from_ms", "valid_to_ms", "quantity",
-                    "isolated_wallet_balance", "margin_mode", "position_mode",
-                    "contract_type", "no_external_flows",
-                    "snapshot_artifact_path", "snapshot_sha256")
-        if any(key not in row for key in required):
-            return [], "NOT_VERIFIED"
-        if row["margin_mode"] != "ISOLATED" or row["position_mode"] != "ONE_WAY":
-            return [], "NOT_VERIFIED"
-        if row["contract_type"] != "USDT_LINEAR" or row["no_external_flows"] is not True:
-            return [], "NOT_VERIFIED"
-        if not isinstance(row["valid_from_ms"], int) or not isinstance(row["valid_to_ms"], int):
-            return [], "NOT_VERIFIED"
-        if row["valid_to_ms"] <= row["valid_from_ms"]:
-            return [], "NOT_VERIFIED"
-        if not _artifact_matches(path, row.get("snapshot_artifact_path"), row.get("snapshot_sha256")):
-            return [], "NOT_VERIFIED"
-        try:
-            quantity = float(row["quantity"])
-            wallet = float(row["isolated_wallet_balance"])
-            if not math.isfinite(quantity) or quantity <= 0 or not math.isfinite(wallet) or wallet <= 0:
-                return [], "NOT_VERIFIED"
-        except (TypeError, ValueError, OverflowError):
-            return [], "NOT_VERIFIED"
-        position_rows.append({**row, "symbol": str(row["symbol"]).upper(),
-                              "quantity": quantity, "isolated_wallet_balance": wallet})
 
-    window_start, window_end = _month_start(MONTHS[0]), _month_end(MONTHS[-1])
-    for symbol in symbols:
-        symbol_brackets = [row for row in bracket_rows if row["symbol"] == symbol]
-        symbol_positions = [row for row in position_rows if row["symbol"] == symbol]
-        if not _validate_time_series_coverage(symbol_brackets, symbol, window_start, window_end):
-            return [], "NOT_VERIFIED"
-        if not _validate_time_series_coverage(symbol_positions, symbol, window_start, window_end):
-            return [], "NOT_VERIFIED"
-
-    # Join the two independent histories only over their actual interval intersection.
-    combined = []
-    for symbol in symbols:
-        for tier in (row for row in bracket_rows if row["symbol"] == symbol):
-            for account in (row for row in position_rows if row["symbol"] == symbol):
-                start_ms = max(tier["valid_from_ms"], account["valid_from_ms"])
-                end_ms = min(tier["valid_to_ms"], account["valid_to_ms"])
-                if start_ms < end_ms:
-                    combined.append({
-                        "symbol": symbol, "valid_from_ms": start_ms, "valid_to_ms": end_ms,
-                        "quantity": account["quantity"],
-                        "isolated_wallet_balance": account["isolated_wallet_balance"],
-                        "margin_mode": account["margin_mode"],
-                        "position_mode": account["position_mode"],
-                        "contract_type": account["contract_type"],
-                        "no_external_flows": account["no_external_flows"],
-                        "applicability": tier["applicability"],
-                        "source_url": tier["source_url"],
-                        "_brackets": tier["_brackets"],
-                    })
-    for symbol in symbols:
-        if not _validate_time_series_coverage(combined, symbol, window_start, window_end):
-            return [], "NOT_VERIFIED"
-    return combined, "VERIFIED"
+def size_research_position(*, side: str, entry_price: float, atr: float,
+                           fee_bps: float, slippage_bps: float,
+                           account: dict | None = None) -> dict:
+    """Derive quantity and isolated wallet from a frozen per-event risk budget."""
+    cfg = account or DEFAULT_RESEARCH_ACCOUNT
+    if side not in {"LONG", "SHORT"}:
+        raise ValueError("side must be LONG or SHORT")
+    vals = (entry_price, atr, fee_bps, slippage_bps, cfg["initial_equity_usdt"],
+            cfg["risk_fraction"], cfg["max_leverage"])
+    if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(float(v)) for v in vals):
+        raise ValueError("position sizing inputs must be finite numeric values")
+    entry_price, atr, fee_bps, slippage_bps = map(float, (entry_price, atr, fee_bps, slippage_bps))
+    equity, risk_fraction, leverage = (float(cfg[k]) for k in
+        ("initial_equity_usdt", "risk_fraction", "max_leverage"))
+    if entry_price <= 0 or atr <= 0 or fee_bps < 0 or slippage_bps < 0:
+        raise ValueError("entry price and ATR must be positive; fees and slippage nonnegative")
+    if equity <= 0 or not 0 < risk_fraction <= 0.02 or not 1 <= leverage <= 3:
+        raise ValueError("invalid research account limits")
+    d, slip, fee = (1.0 if side == "LONG" else -1.0), slippage_bps / 10_000, fee_bps / 10_000
+    entry_fill = entry_price * (1 + d * slip)
+    stop_price = entry_fill - d * 1.5 * atr
+    stop_fill = stop_price * (1 - d * slip)
+    if stop_price <= 0 or stop_fill <= 0:
+        raise ValueError("stop price must remain positive after adverse slippage")
+    loss_unit = d * (entry_fill - stop_fill) + fee * (entry_fill + stop_fill)
+    if not math.isfinite(loss_unit) or loss_unit <= 0:
+        raise ValueError("per-unit stop loss must be finite and positive")
+    risk_budget = equity * risk_fraction
+    qty_risk = risk_budget / loss_unit
+    qty_leverage = equity * leverage / entry_fill
+    qty = min(qty_risk, qty_leverage)
+    notional = qty * entry_fill
+    margin = notional / leverage
+    entry_fee = notional * fee
+    wallet = margin - entry_fee
+    if qty <= 0 or wallet <= 0:
+        raise ValueError("derived quantity or isolated wallet balance is not positive")
+    return {
+        "status": "PASS", "quantity": qty, "entry_fill": entry_fill,
+        "stop_price": stop_price, "stop_fill": stop_fill,
+        "risk_budget_usdt": risk_budget, "estimated_stop_loss_usdt": qty * loss_unit,
+        "risk_budget_utilization": qty * loss_unit / risk_budget,
+        "position_notional_usdt": notional, "effective_leverage": notional / margin,
+        "initial_margin_usdt": margin, "entry_fee_reserve_usdt": entry_fee,
+        "isolated_wallet_balance": wallet, "margin_mode": "ISOLATED",
+        "position_mode": "ONE_WAY", "contract_type": "USDT_LINEAR",
+        "account_scope": cfg.get("account_scope", DEFAULT_RESEARCH_ACCOUNT["account_scope"]),
+    }
 
 def _read_funding(path: Path, start: int, end: int) -> list[FundingEvent]:
     rows = []
@@ -340,90 +346,73 @@ def _to_bar(row: dict, prefix: str = "") -> Bar:
                row[f"{prefix}l"], row[f"{prefix}c"])
 
 
-def _liquidation_position(positions: list[dict], symbol: str, entry_time: int) -> dict | None:
-    matches = [row for row in positions if str(row["symbol"]).upper() == symbol
-               and row["valid_from_ms"] <= entry_time < row["valid_to_ms"]]
+def _liquidation_bracket(history: list[dict], symbol: str, entry_time: int) -> dict | None:
+    matches = [r for r in history if str(r["symbol"]).upper() == symbol
+               and r["valid_from_ms"] <= entry_time < r["valid_to_ms"]]
     return matches[0] if len(matches) == 1 else None
 
 
 def label_opportunity(event: dict, segment: list[dict], mark_by_time: dict[int, dict],
                       funding: list[FundingEvent], funding_verified: bool,
-                      positions: list[dict], liquidation_verified: bool,
+                      liquidation_history: list[dict], liquidation_verified: bool,
                       fee_bps: float, slippage_bps: float) -> dict:
     if event["overlap_status"] != "ELIGIBLE_NON_OVERLAPPING":
         return {"status": "excluded", "reason": event["overlap_status"]}
     if not funding_verified:
         return {"status": "excluded", "reason": "funding_coverage_not_verified"}
     if not liquidation_verified:
-        return {"status": "excluded", "reason": "historical_liquidation_brackets_or_account_state_not_verified"}
+        return {"status": "excluded", "reason": "historical_maintenance_bracket_history_not_verified"}
     if event["entry_time_ms"] is None:
         return {"status": "excluded", "reason": "no_next_bar"}
-    trade_rows = [row for row in segment if row["t"] >= event["entry_time_ms"]][:MAX_HOLDING_BARS]
+    trade_rows = [r for r in segment if r["t"] >= event["entry_time_ms"]][:MAX_HOLDING_BARS]
     if not trade_rows:
         return {"status": "excluded", "reason": "no_next_bar"}
     if len(trade_rows) < MAX_HOLDING_BARS:
         return {"status": "excluded", "reason": "insufficient_matured_horizon"}
-    mark_rows = [mark_by_time.get(row["t"]) for row in trade_rows]
-    if any(row is None for row in mark_rows):
+    mark_rows = [mark_by_time.get(r["t"]) for r in trade_rows]
+    if any(r is None for r in mark_rows):
         return {"status": "excluded", "reason": "mark_price_coverage_not_verified"}
     try:
-        validate_mark_price_alignment(
-            [_to_bar(row) for row in trade_rows],
-            [_to_bar(row, "mark_") for row in mark_rows],
-        )
+        validate_mark_price_alignment([_to_bar(r) for r in trade_rows],
+                                      [_to_bar(r, "mark_") for r in mark_rows])
     except ValueError as exc:
         return {"status": "excluded", "reason": "mark_price_alignment_failed", "detail": str(exc)}
-    # Funding changes isolated wallet balance and therefore liquidation price.
-    # We first resolve the actual barrier exit, then reject only if a settlement
-    # occurred before that exit. Settlements after an early exit do not affect
-    # the position and need not exclude the event.
     entry_time = event["entry_time_ms"]
-    position = _liquidation_position(positions, event["symbol"], entry_time)
-    if position is None:
-        return {"status": "excluded", "reason": "no_time_matched_historical_liquidation_snapshot"}
-    direction = 1.0 if event["side"] == "LONG" else -1.0
-    slip = slippage_bps / 10_000.0
-    entry_fill = trade_rows[0]["o"] * (1.0 + direction * slip)
+    tier = _liquidation_bracket(liquidation_history, event["symbol"], entry_time)
+    if tier is None:
+        return {"status": "excluded", "reason": "no_time_matched_maintenance_bracket_history"}
     try:
-        liquidation = calculate_isolated_liquidation_price(
-            side=event["side"], entry_price=entry_fill,
-            quantity=position["quantity"],
-            isolated_wallet_balance=position["isolated_wallet_balance"],
-            brackets=position["_brackets"],
-        )
+        sizing = size_research_position(side=event["side"], entry_price=trade_rows[0]["o"],
+            atr=event["atr"], fee_bps=fee_bps, slippage_bps=slippage_bps,
+            account=tier["_research_account"])
+        liquidation = calculate_isolated_liquidation_price(side=event["side"],
+            entry_price=sizing["entry_fill"], quantity=sizing["quantity"],
+            isolated_wallet_balance=sizing["isolated_wallet_balance"], brackets=tier["_brackets"])
     except ValueError as exc:
-        return {"status": "excluded", "reason": "liquidation_calculation_failed", "detail": str(exc)}
+        return {"status": "excluded", "reason": "research_position_or_liquidation_calculation_failed",
+                "detail": str(exc)}
     try:
-        result = label_event(
-            event_time_ms=event["signal_time_ms"], side=event["side"], atr=event["atr"],
-            bars=[_to_bar(row) for row in trade_rows],
+        result = label_event(event_time_ms=event["signal_time_ms"], side=event["side"],
+            atr=event["atr"], bars=[_to_bar(r) for r in trade_rows],
             funding_events=funding, funding_coverage_verified=True,
-            mark_price_bars=[_to_bar(row, "mark_") for row in mark_rows],
+            mark_price_bars=[_to_bar(r, "mark_") for r in mark_rows],
             liquidation_price=liquidation["liquidation_price"],
             mark_price_coverage_verified=True, liquidation_verification=liquidation,
-            config=LabelConfig(
-                atr_multiple_stop=1.5, atr_multiple_target=3.0,
-                max_holding_bars=MAX_HOLDING_BARS,
-                taker_fee_rate=fee_bps / 10_000.0,
-                adverse_slippage_rate=slippage_bps / 10_000.0,
-            ),
-        )
+            config=LabelConfig(atr_multiple_stop=1.5, atr_multiple_target=3.0,
+                max_holding_bars=MAX_HOLDING_BARS, taker_fee_rate=fee_bps / 10_000,
+                adverse_slippage_rate=slippage_bps / 10_000))
     except ValueError as exc:
         return {"status": "excluded", "reason": "label_precondition_failed", "detail": str(exc)}
     if result.get("status") == "labeled":
         exit_time = result["exit_time_ms"]
-        funding_during_position = [
-            item for item in funding
-            if entry_time <= item.funding_time_ms <= exit_time
-        ]
-        if funding_during_position:
-            return {
-                "status": "excluded",
-                "reason": "dynamic_liquidation_margin_after_funding_not_modeled",
-                "funding_events_during_position": len(funding_during_position),
-            }
+        funding_during = [f for f in funding if entry_time <= f.funding_time_ms <= exit_time]
+        if funding_during:
+            return {"status": "excluded", "reason": "dynamic_liquidation_margin_after_funding_not_modeled",
+                    "funding_events_during_position": len(funding_during)}
+        result["position_sizing"] = sizing
+        result["liquidation_price"] = liquidation["liquidation_price"]
+        result["maintenance_margin_rate"] = liquidation["maintenance_margin_rate"]
     return result
-
 
 def _fold_bounds(row: tuple[str, str, str, str]) -> dict:
     val_start, val_end, test_start, test_end = row
@@ -678,7 +667,7 @@ def run(args) -> dict:
         )
     if liquidation_status != "VERIFIED":
         acceptance_blockers.append(
-            "Historical liquidation brackets and time-bounded isolated position assumptions do not cover the full development window."
+            "Historical Binance maintenance-bracket history does not cover the full development window with hash-bound source artifacts."
         )
     if any(event.get("label_reason") == "dynamic_liquidation_margin_after_funding_not_modeled"
            for event in all_events):
@@ -702,13 +691,15 @@ def run(args) -> dict:
         "raw_data_mutated": False,
         "fee_bps_per_side": args.fee_bps_per_side,
         "slippage_bps_per_side": args.slippage_bps_per_side,
+        "research_account": DEFAULT_RESEARCH_ACCOUNT,
+        "position_sizing_policy": "risk-budget quantity includes adverse stop slippage and both-side fees; capped at 3x; isolated wallet is initial margin less entry fee; independent event reset, no concurrent positions",
         "label_policy": "TRIPLE_BARRIER_STOP_1_5_ATR_TARGET_3_ATR_MAX_48_BARS",
         "event_generator": "DONCHIAN_20_DIRECTION_NEUTRAL_CLOSED_15M",
         "overlap_policy": "FIXED_48_BAR_PER_SYMBOL_COOLDOWN_OUTCOME_INDEPENDENT",
         "funding_coverage_status": funding_status,
         "funding_label_gate": "PASS" if funding_status == "VERIFIED" else "BLOCKED_NOT_VERIFIED",
         "liquidation_verification_status": liquidation_status,
-        "liquidation_policy": "HISTORICAL_ISOLATED_ONE_WAY_SNAPSHOT_REQUIRED; dynamic funding margin changes are excluded",
+        "liquidation_policy": "SYNTHETIC_PER_EVENT_ISOLATED_ONE_WAY_POSITION; dynamic funding margin changes are excluded",
         "event_count": len(all_events), "labeled_event_count": len(labeled),
         "per_symbol": per_symbol,
         "walk_forward": walk_forward,
