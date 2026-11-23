@@ -76,6 +76,8 @@ snapshot. The supported manifest shape is:
   "schema_version": 1,
   "status": "VERIFIED",
   "evidence_sha256": "<64 lowercase hex characters>",
+  "reviewed_by": "<reviewer or review process>",
+  "reviewed_at_utc": "<ISO-8601 UTC timestamp>",
   "positions": [
     {
       "symbol": "BTCUSDT",
