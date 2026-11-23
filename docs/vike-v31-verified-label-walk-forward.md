@@ -65,20 +65,30 @@ currently on Drive. A status copied from the old 240/240 audit is not enough.
 If no acceptable certificate exists, the pipeline records
 funding_coverage_not_verified and creates no labels.
 
-## Historical liquidation gate
+## Historical liquidation gate — schema v3
 
-A current maintenance-bracket schedule is not historical evidence. Schema v2
-separates exchange-published tier history from independently evidenced
-position/account assumptions. Both timelines must cover the entire development
-window without gaps or overlaps for every selected symbol, and every event
-must resolve to exactly one interval in each timeline.
+The liquidation gate now requires a complete, hash-bound history of Binance
+USD-M maintenance tiers, but it no longer requires fabricated historical
+user-account snapshots. Position quantity and isolated wallet balance are
+derived independently for every event from a frozen synthetic research account.
+
+The v3 manifest has this shape:
 
 ~~~json
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "status": "VERIFIED",
-  "reviewed_by": "<reviewer or review process>",
+  "reviewed_by": "<independent reviewer>",
   "reviewed_at_utc": "<ISO-8601 UTC timestamp>",
+  "research_account": {
+    "initial_equity_usdt": 10000,
+    "risk_fraction": 0.005,
+    "max_leverage": 3,
+    "margin_mode": "ISOLATED",
+    "position_mode": "ONE_WAY",
+    "contract_type": "USDT_LINEAR",
+    "account_scope": "INDEPENDENT_EVENT_RESET_NO_CONCURRENT_POSITIONS"
+  },
   "maintenance_bracket_history": [
     {
       "symbol": "BTCUSDT",
@@ -86,69 +96,81 @@ must resolve to exactly one interval in each timeline.
       "valid_to_ms": 1701388800000,
       "applicability": "NOT_AFFECTED",
       "source_url": "https://www.binance.com/en/support/announcement/detail/<id>",
-      "source_artifact_path": "exchange-notices/BTCUSDT-tier-update.pdf",
-      "source_sha256": "<SHA-256 of exact source artifact>",
+      "source_artifact_path": "exchange-notices/BTCUSDT-tier-update.html",
+      "source_sha256": "<SHA-256 of exact downloaded source artifact>",
       "brackets": [
         {
-          "notional_floor": 0.0,
-          "notional_cap": 50000.0,
+          "notional_floor": 0,
+          "notional_cap": 50000,
           "maint_margin_ratio": 0.004,
-          "cum": 0.0
+          "cum": 0
         }
       ]
-    }
-  ],
-  "position_assumptions": [
-    {
-      "symbol": "BTCUSDT",
-      "valid_from_ms": 1698796800000,
-      "valid_to_ms": 1701388800000,
-      "margin_mode": "ISOLATED",
-      "position_mode": "ONE_WAY",
-      "contract_type": "USDT_LINEAR",
-      "quantity": 0.001,
-      "isolated_wallet_balance": 100.0,
-      "no_external_flows": true,
-      "snapshot_artifact_path": "position-snapshots/BTCUSDT-2023-11.json",
-      "snapshot_sha256": "<SHA-256 of exact position snapshot>"
     }
   ]
 }
 ~~~
 
-`applicability` must be `AFFECTED`, `NOT_AFFECTED`, or `NOT_STATED`,
-recording Binance's wording for that tier change. The timeline used for a
-simulated new entry must reflect the schedule effective for new positions;
-the announcement's existing-position applicability is retained as provenance
-and must not be discarded.
+The synthetic account is fixed at 10,000 USDT, 0.5% risk per event (50 USDT),
+and a maximum 3x notional cap. Quantity is derived from the stop loss after
+adverse entry/stop slippage and both-side taker fees:
 
-The loader verifies each `source_artifact_path` and
-`snapshot_artifact_path` against its SHA-256. Paths must be relative to the
-manifest directory, remain inside that directory, and point to existing files.
-The bytes must match exactly. Hashes are not accepted on syntax alone.
+- risk budget = equity × risk fraction;
+- per-unit stop loss = adverse entry-to-stop fill loss + entry/exit fees;
+- quantity = minimum of (risk budget / per-unit stop loss) and
+  (equity × maximum leverage / entry fill);
+- initial isolated margin = position notional / 3;
+- isolated wallet balance = initial margin less the entry-fee reserve.
 
-The two histories are joined only over their actual time-interval
-intersections. Gaps, overlaps, missing symbols, unsupported margin/position
-modes, invalid tier schedules, missing evidence files, or unbound hashes make
-the entire manifest `NOT_VERIFIED`. Legacy schema v1 combined manifests are
-rejected and must not be silently migrated: the source of each tier schedule
-and each position assumption must be reviewed independently.
+Each event resets to the same 10,000 USDT equity snapshot. This is a
+single-event research convention, not a portfolio equity curve: it does not
+model concurrent positions, capital contention, compounding, funding transfers
+to margin, or historical user balances. Schema v2 historical account snapshots
+are rejected rather than silently reinterpreted.
 
-The quantity and isolated wallet balance are explicit, frozen research-position
-assumptions for that interval, not values inferred from a current account.
-Public exchange announcements do not prove historical user-specific position
-quantity or wallet balance. If defensible position-state evidence is not
-available, the liquidation gate remains blocked. Cross margin, hedge mode,
-portfolio offsets, multi-assets collateral and unsupported contract types
-remain excluded.
+The loader requires all selected symbols to have uninterrupted
+maintenance-bracket coverage across the complete development window, rejects
+gaps/overlaps, verifies each source artifact against its SHA-256, and preserves
+the announcement applicability field. A public announcement does not by itself
+prove the tier table was effective for every position mode or account class;
+reviewers must verify contract type, effective time, complete tiers, and
+whether existing positions were affected. Do not mark an interval VERIFIED
+from search snippets or a current leverage-bracket API response.
 
-The current Triple-Barrier engine uses one liquidation threshold for the
-holding interval. Funding settlements can change isolated wallet balance and
-therefore liquidation price. Until dynamic liquidation-margin updates are
-implemented, the pipeline conservatively excludes any event with a Funding
-settlement during its holding interval using
-dynamic_liquidation_margin_after_funding_not_modeled.
-This is deliberate; do not remove this guard to increase sample count.
+Funding settlements during an open position remain excluded until the engine
+updates isolated wallet balance and liquidation price after each settlement.
+This conservative limitation remains in force.
+
+## Funding archive review packet
+
+Run the read-only audit on the existing Drive archive:
+
+~~~powershell
+python .\\scripts\\vike_v31_funding_archive_audit.py --drive-root "G:\\Mon Drive\\ai trade\\Vike V3.1"
+~~~
+
+It writes derived/funding-audit/funding-archive-evidence.json and
+funding-coverage-certificate.template.json. The packet binds SHA-256 hashes
+for all 240 symbol-month Funding CSVs and reports row counts, timestamp order,
+duplicates, timestamp ranges, mark-price/rate ranges, and observed interval
+histograms. It does not alter raw-staging.
+
+The generated template deliberately remains PENDING_REVIEW and is rejected
+by the labeling gate. Structural integrity is not proof of complete exchange
+history. A reviewer must reconcile the archived settlements with an
+authoritative Binance retrieval/archive record, including pagination and
+contract-specific interval changes, then create the reviewed certificate with
+the exact 240 current file hashes. Never promote the template by changing only
+its status field.
+
+Binance documents GET /fapi/v1/fundingRate as an ascending historical funding
+endpoint with inclusive millisecond bounds and a maximum page size of 1,000;
+each record includes funding time, rate, and associated mark price. The API's
+paging semantics mean an auditable retrieval log must record symbol, requested
+start/end, page boundaries, response counts, and raw response hashes. See the
+[USDⓈ-M Funding Rate History API](https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Get-Funding-Rate-History).
+Current endpoint output alone cannot establish historical completeness without
+a full paginated archive/retrieval record.
 
 ## Walk-forward protocol
 
