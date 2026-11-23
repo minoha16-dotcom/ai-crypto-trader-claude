@@ -50,7 +50,7 @@ for the eight-symbol universe:
   the eight target symbols.
 - 2025-07-25 notice was located, but its complete contract list must be checked
   against the target set before it can be marked as a negative month.
-- 2025-11-28, 2025-12-05 and 2025-12-12 results located other contracts.
+- 2025-11-28 notice listed VFYUSDT, BASUSDT, ZKJUSDT, LYNUSDT, LABUSDT, PTBUSDT, PROMPTUSDT, RECALLUSDT, QUSDT, VINEUSDT, CROSSUSDT, AIOTUSDT, STBLUSDT, 4USDT, FLOCKUSDT, ORDERUSDT, CARVUSDT, VVVUSDT, TRUTHUSDT, RIVERUSDT, XANUSDT, 币安人生USDT, POPCATUSDT, DRIFTUSDT, SAFEUSDT, ZETAUSDT and FARTCOINUSDT; none is in the target set. Existing positions are explicitly affected.\n- 2025-12-05 and 2025-12-12 surfaced notices listed other contracts, not the target eight.
 - 2026-01-12, 2026-01-30, 2026-02-03, 2026-02-27, 2026-03-07,
   2026-03-10, 2026-03-20 and 2026-04-10 results were checked. The surfaced
   tier updates named other contracts, not the eight target symbols. The
