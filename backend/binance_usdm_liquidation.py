@@ -41,6 +41,46 @@ def validate_brackets(brackets: Iterable[MaintenanceBracket]) -> list[Maintenanc
         previous_cap=cap
     return rows
 
+def derive_brackets_from_published_tiers(tier_rows: Iterable[dict]) -> list[MaintenanceBracket]:
+    """Derive Binance cumulative maintenance deductions from published floor/cap/MMR rows.
+
+    Binance announcements publish notional bands and MMR. The cumulative
+    maintenance amount is reconstructed recursively to keep maintenance
+    margin continuous at each tier boundary:
+    cum[i] = cum[i-1] + floor[i] * (mmr[i] - mmr[i-1]).
+    The resulting schedule is still subject to source review and hash binding.
+    """
+    rows = sorted(list(tier_rows), key=lambda row: float(row["notional_floor"]))
+    if not rows:
+        raise ValueError("published maintenance tiers are required")
+    brackets = []
+    previous_cap = None
+    previous_mmr = None
+    previous_cum = 0.0
+    for index, row in enumerate(rows):
+        try:
+            floor = float(row["notional_floor"])
+            cap = float(row["notional_cap"])
+            mmr = float(row["maint_margin_ratio"])
+        except (KeyError, TypeError, ValueError, OverflowError) as exc:
+            raise ValueError("published tier requires numeric floor, cap and MMR") from exc
+        if not all(math.isfinite(value) for value in (floor, cap, mmr)):
+            raise ValueError("published tier values must be finite")
+        if floor < 0 or cap <= floor or not 0 < mmr < 1:
+            raise ValueError("published tier floor/cap/MMR is invalid")
+        if index == 0:
+            if floor != 0:
+                raise ValueError("first published tier must start at zero")
+            cum = 0.0
+        else:
+            if not math.isclose(floor, previous_cap, rel_tol=0, abs_tol=1e-8):
+                raise ValueError("published maintenance tiers must be contiguous")
+            cum = previous_cum + floor * (mmr - previous_mmr)
+        brackets.append(MaintenanceBracket(floor, cap, mmr, cum))
+        previous_cap, previous_mmr, previous_cum = cap, mmr, cum
+    return validate_brackets(brackets)
+
+
 def calculate_isolated_liquidation_price(*, side: str, entry_price: float,
         quantity: float, isolated_wallet_balance: float,
         brackets: Iterable[MaintenanceBracket], margin_mode: str="ISOLATED",
