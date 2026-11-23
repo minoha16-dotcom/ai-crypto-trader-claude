@@ -172,6 +172,8 @@ def _read_funding(path: Path, start: int, end: int) -> list[FundingEvent]:
             if not start <= timestamp < end or not math.isfinite(rate) or not math.isfinite(mark) or mark <= 0:
                 raise ValueError(f"{path}:{line}: invalid Funding row")
             rows.append(FundingEvent(timestamp, rate, mark))
+    if not rows:
+        raise ValueError(f"{path}: Funding file contains no valid records")
     rows.sort(key=lambda item: item.funding_time_ms)
     if len({item.funding_time_ms for item in rows}) != len(rows):
         raise ValueError(f"{path}: duplicate Funding timestamps")
