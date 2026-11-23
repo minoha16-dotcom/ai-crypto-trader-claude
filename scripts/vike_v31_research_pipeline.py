@@ -491,10 +491,20 @@ def run(args) -> dict:
             )
             funding_hashes_match = funding_hashes_match and month_funding_verified
             symbol_funding_verified = symbol_funding_verified and month_funding_verified
+            funding_interval_counts = Counter(
+                round((funding[index].funding_time_ms - funding[index - 1].funding_time_ms) / HOUR_MS, 6)
+                for index in range(1, len(funding))
+            )
             monthly_audits.append({
                 "symbol": symbol, "month": month, "trade_rows": len(trade), "mark_rows": len(mark),
-                "funding_rows": len(funding), "price_eligible_days": len(eligible) // 96,
-                "excluded_days": excluded, "funding_structural_status": "PASS" if funding else "FAIL",
+                "funding_rows": len(funding),
+                "funding_first_time_ms": funding[0].funding_time_ms,
+                "funding_last_time_ms": funding[-1].funding_time_ms,
+                "funding_interval_hours_counts": dict(sorted(funding_interval_counts.items())),
+                "funding_rate_min": min(item.funding_rate for item in funding),
+                "funding_rate_max": max(item.funding_rate for item in funding),
+                "price_eligible_days": len(eligible) // 96,
+                "excluded_days": excluded, "funding_structural_status": "PASS",
                 "funding_coverage_status": "VERIFIED" if month_funding_verified else "NOT_VERIFIED",
             })
             exclusions.extend({"symbol": symbol, "month": month, **item} for item in excluded)
