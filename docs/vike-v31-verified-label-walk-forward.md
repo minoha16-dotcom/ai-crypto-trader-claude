@@ -104,9 +104,14 @@ snapshot. The supported manifest shape is:
 ~~~
 
 Position intervals must cover the full development period for every selected
-symbol. Each event must match exactly one interval. Cross margin, hedge mode,
-portfolio offsets, multi-assets collateral and unsupported contract types
-remain excluded.
+symbol. Each event must match exactly one interval. The quantity and isolated
+wallet balance are explicit, frozen research-position assumptions for that
+interval, not values inferred from a current account. The wallet balance must
+reflect available isolated margin after entry fees and before any later funding
+settlement. If the position sizing or margin policy changes, create a new
+time-bounded interval and evidence record; do not silently reuse today's
+settings for earlier years. Cross margin, hedge mode, portfolio offsets,
+multi-assets collateral and unsupported contract types remain excluded.
 
 The current Triple-Barrier engine uses one liquidation threshold for the
 holding interval. Funding settlements can change isolated wallet balance and
