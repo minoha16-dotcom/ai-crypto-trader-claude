@@ -476,6 +476,8 @@ def run(args) -> dict:
             trade = read_trade_or_mark(files["trade_15m"], "trade_15m", start, end)
             mark = read_trade_or_mark(files["mark_15m"], "mark_15m", start, end)
             funding = _read_funding(files["funding"], start, end)
+            if not funding:
+                raise ValueError(f"{symbol}/{month}: Funding CSV has no valid records")
             eligible, excluded = complete_day_bars(trade, mark, start, end)
             funding_item = funding_attestation.get((symbol, month))
             source_funding_hash = next(item["sha256"] for item in hashes
