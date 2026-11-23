@@ -67,20 +67,38 @@ funding_coverage_not_verified and creates no labels.
 
 ## Historical liquidation gate
 
-A current maintenance-bracket schedule is not historical evidence. The
-pipeline requires a reviewed manifest with complete time coverage for every
-selected symbol and a time-matched isolated, one-way, USDT-linear position
-snapshot. The supported manifest shape is:
+A current maintenance-bracket schedule is not historical evidence. Schema v2
+separates exchange-published tier history from independently evidenced
+position/account assumptions. Both timelines must cover the entire development
+window without gaps or overlaps for every selected symbol, and every event
+must resolve to exactly one interval in each timeline.
 
 ~~~json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "status": "VERIFIED",
-  "evidence_sha256": "<SHA-256 of the exact exchange-tier evidence artifact>",
-  "evidence_artifact_path": "binance-tier-archive.pdf",
   "reviewed_by": "<reviewer or review process>",
   "reviewed_at_utc": "<ISO-8601 UTC timestamp>",
-  "positions": [
+  "maintenance_bracket_history": [
+    {
+      "symbol": "BTCUSDT",
+      "valid_from_ms": 1698796800000,
+      "valid_to_ms": 1701388800000,
+      "applicability": "NOT_AFFECTED",
+      "source_url": "https://www.binance.com/en/support/announcement/detail/<id>",
+      "source_artifact_path": "exchange-notices/BTCUSDT-tier-update.pdf",
+      "source_sha256": "<SHA-256 of exact source artifact>",
+      "brackets": [
+        {
+          "notional_floor": 0.0,
+          "notional_cap": 50000.0,
+          "maint_margin_ratio": 0.004,
+          "cum": 0.0
+        }
+      ]
+    }
+  ],
+  "position_assumptions": [
     {
       "symbol": "BTCUSDT",
       "valid_from_ms": 1698796800000,
@@ -91,42 +109,38 @@ snapshot. The supported manifest shape is:
       "quantity": 0.001,
       "isolated_wallet_balance": 100.0,
       "no_external_flows": true,
-      "snapshot_sha256": "<SHA-256 of the exact position snapshot artifact>",
       "snapshot_artifact_path": "position-snapshots/BTCUSDT-2023-11.json",
-      "brackets": [
-        {
-          "notional_floor": 0.0,
-          "notional_cap": 50000.0,
-          "maint_margin_ratio": 0.004,
-          "cum": 0.0
-        }
-      ]
+      "snapshot_sha256": "<SHA-256 of exact position snapshot>"
     }
   ]
 }
 ~~~
 
-All evidence hashes are now checked against files, not just their
-64-character syntax. `evidence_artifact_path` and
-`snapshot_artifact_path` must be relative paths located under the directory
-containing the certificate/manifest; absolute paths and path traversal are
-rejected. The bytes at each path must match the declared SHA-256 exactly.
-Keep the evidence files beside or below the manifest directory and preserve
-them unchanged. This binds the declared hashes to inspectable local artifacts,
-but it does not by itself prove that a public notice is a complete historical
-account snapshot or that the current v1 schema correctly models every
-maintenance-tier change. The archive inventory document records the remaining
-design limitation.
+`applicability` must be `AFFECTED`, `NOT_AFFECTED`, or `NOT_STATED`,
+recording Binance's wording for that tier change. The timeline used for a
+simulated new entry must reflect the schedule effective for new positions;
+the announcement's existing-position applicability is retained as provenance
+and must not be discarded.
 
-Position intervals must cover the full development period for every selected
-symbol. Each event must match exactly one interval. The quantity and isolated
-wallet balance are explicit, frozen research-position assumptions for that
-interval, not values inferred from a current account. The wallet balance must
-reflect available isolated margin after entry fees and before any later funding
-settlement. If the position sizing or margin policy changes, create a new
-time-bounded interval and evidence record; do not silently reuse today's
-settings for earlier years. Cross margin, hedge mode, portfolio offsets,
-multi-assets collateral and unsupported contract types remain excluded.
+The loader verifies each `source_artifact_path` and
+`snapshot_artifact_path` against its SHA-256. Paths must be relative to the
+manifest directory, remain inside that directory, and point to existing files.
+The bytes must match exactly. Hashes are not accepted on syntax alone.
+
+The two histories are joined only over their actual time-interval
+intersections. Gaps, overlaps, missing symbols, unsupported margin/position
+modes, invalid tier schedules, missing evidence files, or unbound hashes make
+the entire manifest `NOT_VERIFIED`. Legacy schema v1 combined manifests are
+rejected and must not be silently migrated: the source of each tier schedule
+and each position assumption must be reviewed independently.
+
+The quantity and isolated wallet balance are explicit, frozen research-position
+assumptions for that interval, not values inferred from a current account.
+Public exchange announcements do not prove historical user-specific position
+quantity or wallet balance. If defensible position-state evidence is not
+available, the liquidation gate remains blocked. Cross margin, hedge mode,
+portfolio offsets, multi-assets collateral and unsupported contract types
+remain excluded.
 
 The current Triple-Barrier engine uses one liquidation threshold for the
 holding interval. Funding settlements can change isolated wallet balance and
