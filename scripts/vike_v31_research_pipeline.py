@@ -89,7 +89,10 @@ def _artifact_matches(manifest_path: Path, relative_path: Any, expected_sha256: 
 def load_funding_attestation(path: Path | None, symbols: list[str]) -> tuple[dict, str]:
     if path is None or not path.is_file():
         return {}, "NOT_VERIFIED"
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}, "NOT_VERIFIED"
     if payload.get("schema_version") != 1 or payload.get("coverage_status") != "VERIFIED":
         return {}, "NOT_VERIFIED"
     if not _artifact_matches(path, payload.get("evidence_artifact_path"), payload.get("evidence_sha256")):
