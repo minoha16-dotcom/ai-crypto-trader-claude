@@ -18,7 +18,7 @@ historical completeness.
 | 2023-12-24 09:35 | BTCUSDT, ETHUSDT, SOLUSDT | Not affected | [Binance 2024-01-02 announcement](https://www.binance.com/en/support/announcement/detail/d75c5ca94f704e96a6a4e55ffddfd65d) |
 | 2024-01-02 12:50 | BNBUSDT | Not affected | [Binance 2024-01-02 announcement](https://www.binance.com/en/support/announcement/detail/d75c5ca94f704e96a6a4e55ffddfd65d) |
 | 2024-05-28 10:30 | BTCUSDT, ETHUSDT | Not affected | [Binance 2024-05-28 announcement](https://www.binance.com/en/support/announcement/detail/aa735cd2d8bd4e7bb092179cf086e486) |
-| 2024-08-22 09:30 | SOLUSDT, DOGEUSDT | Not affected | [Binance 2024-08-22 announcement](https://www.binance.com/en/support/announcement/detail/572598a13c384de6aa3c4d4dc1be5f81) |
+| 2024-08-02 06:30 | SOLUSDT | Not affected | [Binance 2024-08-02 announcement](https://www.binance.com/en/support/announcement/detail/365375ab9cda445aa025c51bbaeea88e) |\n| 2024-08-22 09:30 | SOLUSDT, DOGEUSDT | Not affected | [Binance 2024-08-22 announcement](https://www.binance.com/en/support/announcement/detail/572598a13c384de6aa3c4d4dc1be5f81) |
 | 2024-08-27 07:30 | XRPUSDT, BNBUSDT | Not affected | [Binance 2024-08-27 announcement](https://www.binance.com/fr/support/announcement/detail/194e244a94e9416cb400318dbed2f4b9) |
 | 2024-09-17 07:30 | LINKUSDT | Not affected | [Binance 2024-09-17 announcement](https://www.binance.com/en/support/announcement/detail/a05ae5aad6e44f6c848bde0a4c94ad4b) |
 | 2024-11-07 08:30 | XRPUSDT | Not affected | [Binance 2024-11-07 announcement](https://www.binance.com/en/support/announcement/detail/2c473e4efef140e8b58b950987bcc577) |
