@@ -180,7 +180,7 @@ def _read_funding(path: Path, start: int, end: int) -> list[FundingEvent]:
 
 def build_opportunity_events(symbol: str, bars: list[dict]) -> list[dict]:
     """Frozen Donchian-20 generator; no outcome, future-bar or label filtering."""
-    if len(bars) < 22:
+    if len(bars) < 21:
         return []
     atrs = wilder_atr_values(bars)
     h1c, h1v = aggregate_context(bars, HOUR_MS, 4)
