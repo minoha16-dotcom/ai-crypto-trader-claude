@@ -454,8 +454,8 @@ def run(args) -> dict:
                 symbol_trade[row["t"]] = row
                 symbol_mark[row["t"]] = {
                     "t": row["t"], "close_t": mark[row["t"]]["close_t"],
-                    "o": mark[row["t"]]["o"], "h": mark[row["t"]]["h"],
-                    "l": mark[row["t"]]["l"], "c": mark[row["t"]]["c"],
+                    "mark_o": mark[row["t"]]["o"], "mark_h": mark[row["t"]]["h"],
+                    "mark_l": mark[row["t"]]["l"], "mark_c": mark[row["t"]]["c"],
                 }
             symbol_funding.extend(funding)
         ordered = [symbol_trade[t] for t in sorted(symbol_trade)]
@@ -467,14 +467,16 @@ def run(args) -> dict:
             all_events.extend(build_opportunity_events(symbol, segment))
 
     all_events = apply_overlap_control(all_events)
-    event_by_symbol_time = {(row["symbol"], row["signal_time_ms"]): row for row in all_events}
+    for event in all_events:
+        event["label_status"] = "NOT_ATTEMPTED"
+        event["label_reason"] = "event_segment_not_resolved"
     for symbol, segments in symbol_segments.items():
         funding = funding_by_symbol[symbol]
         funding_verified = funding_verified_by_symbol[symbol]
         for segment, mark_map in segments:
-            segment_times = {row["t"] for row in segment}
+            segment_signal_times = {row["close_t"] for row in segment}
             candidates = [row for row in all_events
-                          if row["symbol"] == symbol and row["entry_time_ms"] in segment_times]
+                          if row["symbol"] == symbol and row["signal_time_ms"] in segment_signal_times]
             for event in candidates:
                 result = label_opportunity(
                     event, segment, mark_map, funding, funding_verified,
