@@ -118,18 +118,17 @@ def _validate_time_series_coverage(rows: list[dict], symbol: str,
                                    start_key: str = "valid_from_ms",
                                    end_key: str = "valid_to_ms") -> bool:
     intervals = sorted(
-        (row[start_key], row[end_key])
-        for row in rows if str(row.get("symbol", "")).upper() == symbol
+        (max(row[start_key], window_start), min(row[end_key], window_end))
+        for row in rows
+        if str(row.get("symbol", "")).upper() == symbol
+        and row[end_key] > window_start and row[start_key] < window_end
     )
     cursor = window_start
     for start_ms, end_ms in intervals:
-        if start_ms > cursor:
+        if start_ms != cursor or end_ms <= start_ms:
             return False
-        if end_ms <= cursor:
-            continue
         cursor = end_ms
-    return cursor >= window_end
-
+    return cursor == window_end
 
 def load_liquidation_manifest(path: Path | None, symbols: list[str]) -> tuple[list[dict], str]:
     """Load v2 manifest with separate exchange tier history and account assumptions."""
