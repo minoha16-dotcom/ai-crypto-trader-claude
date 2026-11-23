@@ -560,6 +560,26 @@ def run(args) -> dict:
                 if event["label_status"] != "LABELED_TRIPLE_BARRIER"
             )),
         }
+    acceptance_blockers = []
+    if funding_status != "VERIFIED":
+        acceptance_blockers.append(
+            "Funding semantics and historical coverage are not verified against all selected symbol-month source hashes."
+        )
+    if liquidation_status != "VERIFIED":
+        acceptance_blockers.append(
+            "Historical liquidation brackets and time-matched isolated position assumptions do not cover the full development window."
+        )
+    if any(event.get("label_reason") == "dynamic_liquidation_margin_after_funding_not_modeled"
+           for event in all_events):
+        acceptance_blockers.append(
+            "Events with Funding settlements before their barrier exit are excluded until dynamic isolated-margin updates are modeled."
+        )
+    if walk_forward.get("valid_fold_count", 0) < 3:
+        acceptance_blockers.append("At least three valid purged/embargoed walk-forward folds are required.")
+    acceptance_blockers.extend([
+        "Synchronized block bootstrap, calibration uncertainty, doubled-cost tests, and the remaining preregistered acceptance gates are pending.",
+        "The locked May-October 2026 holdout remains untouched and requires separate one-time authorization.",
+    ])
     report = {
         "schema_version": 1, "run_id": run_id,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -583,13 +603,7 @@ def run(args) -> dict:
         "walk_forward": walk_forward,
         "lightgbm_status": "NOT_RUN_UNTIL_LOGISTIC_REGRESSION_WFO_AND_PREREGISTERED_COMPARISON_MARGIN_PASS",
         "acceptance_status": "NOT_APPROVED",
-        "acceptance_blockers": [
-            "Funding semantics and historical coverage require an explicit verified attestation bound to all 240 symbol-month files.",
-            "Historical liquidation brackets and time-matched isolated account/position snapshots are required.",
-            "Events with funding settlement during holding are excluded until dynamic liquidation-margin updates are modeled.",
-            "At least three valid purged/embargoed walk-forward folds and all statistical acceptance gates are required.",
-            "Locked May-October 2026 holdout remains untouched and requires a separate one-time authorization.",
-        ],
+        "acceptance_blockers": acceptance_blockers,
         "source_file_hashes": hashes,
     }
     (output_dir / "research_report.json").write_text(json.dumps(report, indent=2, allow_nan=False) + "\n", encoding="utf-8")
