@@ -102,8 +102,7 @@ The v3 manifest has this shape:
         {
           "notional_floor": 0,
           "notional_cap": 50000,
-          "maint_margin_ratio": 0.004,
-          "cum": 0
+          "maint_margin_ratio": 0.004
         }
       ]
     }
@@ -127,6 +126,13 @@ single-event research convention, not a portfolio equity curve: it does not
 model concurrent positions, capital contention, compounding, funding transfers
 to margin, or historical user balances. Schema v2 historical account snapshots
 are rejected rather than silently reinterpreted.
+
+Published Binance tier announcements expose notional floor/cap and MMR.
+The pipeline derives each cumulative maintenance amount from adjacent published
+tiers using the continuity recurrence `cum[i] = cum[i-1] + floor[i] × (MMR[i] - MMR[i-1])`, with first-tier cum 0.
+If an artifact supplies cum explicitly, the loader verifies it against this
+derived value. The derivation is unit-tested against Binance's published
+500,000 USDT / 1,300 USDT maintenance-amount example.
 
 The loader requires all selected symbols to have uninterrupted
 maintenance-bracket coverage across the complete development window, rejects
