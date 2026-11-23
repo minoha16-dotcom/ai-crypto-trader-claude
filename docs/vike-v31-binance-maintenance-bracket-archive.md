@@ -83,13 +83,12 @@ engine must preserve, at minimum:
    first two can contribute to a reviewed completeness claim, and
    `SEARCHED_NO_MATCH` must retain the search method and evidence.
 
-The existing PR #55 schema v1 does not yet meet this evidence-binding standard:
-it validates the syntax of `evidence_sha256` and `snapshot_sha256` but does
-not prove that either hash matches an accessible source artifact. Its
-`positions[].brackets` also combines two distinct concepts: exchange tier
-history and assumed account/position state. Do not create a VERIFIED v1
-manifest from this inventory.
-
+The existing PR #55 now implements a schema v2 loader that separates
+`maintenance_bracket_history` from `position_assumptions`, binds each source
+artifact to SHA-256, joins the histories by interval intersection, and rejects
+gaps or overlaps. The code gate is not itself historical evidence: do not
+create a VERIFIED v2 manifest until every source artifact and each independent
+position assumption have been reviewed.
 ## Labeling remains blocked
 
 No archive inventory can supply historical user-specific position quantity or
