@@ -89,6 +89,47 @@ def test_funding_attestation_must_be_verified_and_cover_exact_symbol_month_grid(
     assert status == "NOT_VERIFIED"
 
 
+def test_funding_attestation_requires_hash_bound_evidence_and_exact_grid(tmp_path: Path):
+    evidence = tmp_path / "funding-audit-evidence.txt"
+    evidence.write_text("reviewed funding semantic and coverage evidence", encoding="utf-8")
+    digest = hashlib.sha256(evidence.read_bytes()).hexdigest()
+    from scripts.vike_exploratory_train import MONTHS
+    path = tmp_path / "funding-certificate.json"
+    entries = [{
+        "symbol": "BTCUSDT", "month": month, "status": "VERIFIED",
+        "funding_file_sha256": "b" * 64,
+    } for month in MONTHS]
+    path.write_text(json.dumps({
+        "schema_version": 1, "coverage_status": "VERIFIED",
+        "evidence_sha256": digest, "evidence_artifact_path": evidence.name,
+        "reviewed_by": "independent-review",
+        "reviewed_at_utc": "2026-11-23T00:00:00Z",
+        "semantic_basis": "Funding timestamp/rate/mark semantics and archive completeness reviewed",
+        "symbol_months": entries,
+    }), encoding="utf-8")
+    index, status = load_funding_attestation(path, ["BTCUSDT"])
+    assert status == "VERIFIED"
+    assert set(index) == {("BTCUSDT", month) for month in MONTHS}
+
+
+def test_funding_attestation_rejects_modified_evidence_artifact(tmp_path: Path):
+    evidence = tmp_path / "audit.txt"
+    evidence.write_text("original evidence", encoding="utf-8")
+    digest = hashlib.sha256(evidence.read_bytes()).hexdigest()
+    evidence.write_text("changed after signing", encoding="utf-8")
+    path = tmp_path / "funding-certificate.json"
+    path.write_text(json.dumps({
+        "schema_version": 1, "coverage_status": "VERIFIED",
+        "evidence_sha256": digest, "evidence_artifact_path": evidence.name,
+        "reviewed_by": "reviewer", "reviewed_at_utc": "2026-11-23T00:00:00Z",
+        "semantic_basis": "reviewed",
+        "symbol_months": [],
+    }), encoding="utf-8")
+    index, status = load_funding_attestation(path, ["BTCUSDT"])
+    assert index == {}
+    assert status == "NOT_VERIFIED"
+
+
 def test_empty_funding_file_is_rejected(tmp_path: Path):
     path = tmp_path / "funding.csv"
     path.write_text("funding_time,funding_rate,mark_price" + chr(10), encoding="utf-8")
