@@ -73,6 +73,8 @@ def load_funding_attestation(path: Path | None, symbols: list[str]) -> tuple[dic
         return {}, "NOT_VERIFIED"
     if not _valid_sha256(payload.get("evidence_sha256")):
         return {}, "NOT_VERIFIED"
+    if not payload.get("reviewed_by") or not payload.get("reviewed_at_utc") or not payload.get("semantic_basis"):
+        return {}, "NOT_VERIFIED"
     entries = payload.get("symbol_months")
     if not isinstance(entries, list):
         return {}, "NOT_VERIFIED"
@@ -335,7 +337,10 @@ def _fold_bounds(row: tuple[str, str, str, str]) -> dict:
     }
 
 
-def run_walk_forward(labels: list[dict], min_examples_per_symbol: int = 200) -> dict:
+def run_walk_forward(labels: list[dict], symbols: list[str] | None = None,
+                      output_dir: Path | None = None,
+                      min_examples_per_symbol: int = 200) -> dict:
+    selected_symbols = symbols or list(SYMBOLS)
     counts = Counter(row["symbol"] for row in labels)
     if not labels:
         return {"status": "BLOCKED_NO_VERIFIED_LABELS", "folds": [],
@@ -356,9 +361,9 @@ def run_walk_forward(labels: list[dict], min_examples_per_symbol: int = 200) -> 
                       and row["exit_time_ms"] < test_start - EMBARGO_MS]
         test = [row for row in labels if test_start <= row["signal_time_ms"] < test_end - EMBARGO_MS
                 and row["exit_time_ms"] < test_end]
-        per_symbol_train = {symbol: sum(row["symbol"] == symbol for row in train) for symbol in SYMBOLS}
+        per_symbol_train = {symbol: sum(row["symbol"] == symbol for row in train) for symbol in selected_symbols}
         if (len(train) < 3000 or len(validation) < 100 or len(test) < 50
-                or any(per_symbol_train[symbol] < min_examples_per_symbol for symbol in SYMBOLS)
+                or any(per_symbol_train[symbol] < min_examples_per_symbol for symbol in selected_symbols)
                 or len({row["label"] for row in train}) < 2):
             results.append({"fold": index, **bounds, "status": "INCONCLUSIVE_INSUFFICIENT_SAMPLES",
                             "train_count": len(train), "validation_count": len(validation),
@@ -377,8 +382,16 @@ def run_walk_forward(labels: list[dict], min_examples_per_symbol: int = 200) -> 
         threshold = float(np.quantile(val_prob, 2.0 / 3.0))
         test_prob = model.predict_proba(x_test)[:, 1]
         selected = [row for row, probability in zip(test, test_prob) if probability >= threshold]
+        model_artifact = None
+        model_sha256 = None
+        if output_dir is not None:
+            import joblib
+            model_path = output_dir / f"fold_{index:02d}_logistic_regression.joblib"
+            joblib.dump(model, model_path)
+            model_artifact = model_path.name
+            model_sha256 = sha256_file(model_path)
         per_symbol = {}
-        for symbol in SYMBOLS:
+        for symbol in selected_symbols:
             rows = [row for row in test if row["symbol"] == symbol]
             chosen = [row for row, probability in zip(test, test_prob)
                       if row["symbol"] == symbol and probability >= threshold]
@@ -391,6 +404,7 @@ def run_walk_forward(labels: list[dict], min_examples_per_symbol: int = 200) -> 
             "fold": index, **bounds, "status": "SCORED",
             "train_count": len(train), "validation_count": len(validation), "test_count": len(test),
             "selected_count": len(selected), "validation_top_tercile_threshold": threshold,
+            "model_artifact": model_artifact, "model_sha256": model_sha256,
             "mean_net_r_all": statistics.fmean(row["net_r"] for row in test),
             "mean_net_r_selected": statistics.fmean(row["net_r"] for row in selected) if selected else None,
             "precision_selected": precision_score(
@@ -408,7 +422,7 @@ def run_walk_forward(labels: list[dict], min_examples_per_symbol: int = 200) -> 
                   else "INCONCLUSIVE_FEWER_THAN_THREE_VALID_FOLDS",
         "folds": results, "valid_fold_count": len(scored),
         "per_symbol_label_counts": dict(counts),
-        "per_symbol_minimum_200_pass": {symbol: counts[symbol] >= min_examples_per_symbol for symbol in SYMBOLS},
+        "per_symbol_minimum_200_pass": {symbol: counts[symbol] >= min_examples_per_symbol for symbol in selected_symbols},
         "pooled_minimum_3000_pass": len(labels) >= 3000,
         "lightgbm": "NOT_RUN_LOGISTIC_REGRESSION_BASELINE_MUST_BE_VALID_FIRST",
         "acceptance": "NOT_APPROVED_BLOCK_BOOTSTRAP_AND_ALL_PREREGISTERED_GATES_REQUIRED",
@@ -512,11 +526,11 @@ def run(args) -> dict:
                 else:
                     event["label_detail"] = result.get("detail")
 
-    walk_forward = run_walk_forward(labeled)
     output_root.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output_dir = output_root / run_id
     output_dir.mkdir(parents=False, exist_ok=False)
+    walk_forward = run_walk_forward(labeled, symbols, output_dir)
     per_symbol = {}
     for symbol in symbols:
         rows = [event for event in all_events if event["symbol"] == symbol]
