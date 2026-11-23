@@ -13,6 +13,7 @@ from scripts.vike_v31_research_pipeline import (
     load_funding_attestation,
     load_liquidation_manifest,
     run_walk_forward,
+    _read_funding,
 )
 
 
@@ -84,6 +85,13 @@ def test_funding_attestation_must_be_verified_and_cover_exact_symbol_month_grid(
     index, status = load_funding_attestation(path, ["BTCUSDT"])
     assert index == {}
     assert status == "NOT_VERIFIED"
+
+
+def test_empty_funding_file_is_rejected(tmp_path: Path):
+    path = tmp_path / "funding.csv"
+    path.write_text("funding_time,funding_rate,mark_price\\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="no valid records"):
+        _read_funding(path, 0, 10_000_000)
 
 
 def test_missing_liquidation_manifest_fails_closed():
