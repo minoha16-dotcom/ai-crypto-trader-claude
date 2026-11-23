@@ -147,7 +147,7 @@ def load_liquidation_manifest(path: Path | None, symbols: list[str]) -> tuple[li
     for symbol in symbols:
         intervals = sorted(
             (row["valid_from_ms"], row["valid_to_ms"])
-            for row in validated if row["symbol"] == symbol
+            for row in validated if str(row["symbol"]).upper() == symbol
         )
         cursor = window_start
         for start_ms, end_ms in intervals:
@@ -252,7 +252,7 @@ def _to_bar(row: dict, prefix: str = "") -> Bar:
 
 
 def _liquidation_position(positions: list[dict], symbol: str, entry_time: int) -> dict | None:
-    matches = [row for row in positions if row["symbol"] == symbol
+    matches = [row for row in positions if str(row["symbol"]).upper() == symbol
                and row["valid_from_ms"] <= entry_time < row["valid_to_ms"]]
     return matches[0] if len(matches) == 1 else None
 
