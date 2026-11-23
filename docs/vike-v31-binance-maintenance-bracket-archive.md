@@ -83,34 +83,94 @@ during the open position because it does not yet recalculate isolated wallet
 balance and liquidation threshold after each settlement. This is conservative,
 not a claim that funding has no effect.
 
-## Important implementation consequence
+## Tier values extracted from official notices — partial evidence
 
-A single current bracket table per symbol is not sufficient. The research
-engine must preserve, at minimum:
+The following low-notional bands were directly visible in official Binance
+announcement content during this review. These are useful anchors for the
+synthetic account, whose maximum notional is 30,000 USDT, but they are **not**
+a complete tier archive. The applicable second and higher bands must also be
+retained whenever the simulated notional can reach them.
 
-1. **Maintenance bracket history** — symbol, effective UTC timestamp, prior
-   and new tier tables, notional floors/caps, maintenance-margin rate, and
-   maintenance amount / cumulative deduction (`cum`) where published.
-2. **Applicability to existing positions** — explicit
-   `AFFECTED`, `NOT_AFFECTED`, or `NOT_STATED` copied from the notice.
-3. **Position assumptions** — independently time-bounded quantity, isolated
-   wallet balance, margin mode, position mode, contract type and external-flow
-   assumptions. These are not supplied by tier announcements and must not be
-   fabricated from them.
-4. **Evidence binding** — source URL, retrieval time, exact downloaded source
-   artifact, SHA-256 of that artifact, reviewer and review timestamp. A
-   64-character hash-shaped string without a source artifact is not evidence.
-5. **Coverage ledger** — one explicit status for each symbol × month:
-   `CONFIRMED_CHANGE`, `SEARCHED_NO_MATCH`, or `NOT_REVIEWED`. Only the
-   first two can contribute to a reviewed completeness claim, and
-   `SEARCHED_NO_MATCH` must retain the search method and evidence.
+| Effective UTC | Symbol | New first band (notional USDT) | MMR | Existing positions | Evidence |
+|---|---|---:|---:|---|---|
+| 2023-12-24 09:35 | BTCUSDT | 0–50,000 | 0.40% | Not affected | [Binance notice](https://www.binance.com/en/support/announcement/detail/d75c5ca94f704e96a6a4e55ffddfd65d) |
+| 2023-12-24 09:35 | ETHUSDT | 0–50,000 | 0.40% | Not affected | [Binance notice](https://www.binance.com/en/support/announcement/detail/d75c5ca94f704e96a6a4e55ffddfd65d) |
+| 2023-12-24 09:35 | SOLUSDT | 0–10,000 | 0.50% | Not affected | [Binance notice](https://www.binance.com/en/support/announcement/detail/d75c5ca94f704e96a6a4e55ffddfd65d) |
+| 2024-01-02 12:50 | BNBUSDT | 0–10,000 | 0.50% | Not affected | [Binance notice](https://www.binance.com/en/support/announcement/detail/d75c5ca94f704e96a6a4e55ffddfd65d) |
+| 2024-05-28 10:30 | BTCUSDT | 0–50,000 | 0.40% | Not affected | [Binance notice](https://www.binance.com/en/support/announcement/detail/aa735cd2d8bd4e7bb092179cf086e486) |
+| 2025-06-17 06:30 | BTCUSDT | 0–300,000 | 0.40% | Affected | [Binance notice](https://www.binance.com/en-PH/support/announcement/detail/e778988edec446038ad536bcb0c8d460) |
+| 2025-06-20 06:30 | XRPUSDT | 0–10,000 | 0.65% | Affected | [Binance notice](https://www.binance.com/en-PH/support/announcement/detail/e778988edec446038ad536bcb0c8d460) |
+| 2025-06-20 06:30 | DOGEUSDT | 0–10,000 | 0.65% | Affected | [Binance notice](https://www.binance.com/en-PH/support/announcement/detail/e778988edec446038ad536bcb0c8d460) |
+| 2025-08-19 06:30 | BTCUSDT | 0–300,000 | 0.40% | Affected | [Binance notice](https://www.binance.com/en/support/announcement/detail/8e428625ebeb4cc7ae8678026846095c) |
+| 2025-08-19 06:30 | ETHUSDT | 0–300,000 | 0.40% | Affected | [Binance notice](https://www.binance.com/en/support/announcement/detail/8e428625ebeb4cc7ae8678026846095c) |
 
-The existing PR #55 now implements a schema v2 loader that separates
-`maintenance_bracket_history` from `position_assumptions`, binds each source
-artifact to SHA-256, joins the histories by interval intersection, and rejects
-gaps or overlaps. The code gate is not itself historical evidence: do not
-create a VERIFIED v2 manifest until every source artifact and each independent
-position assumption have been reviewed.
+For each listed first band, the initial tier has notional floor 0 and
+maintenance amount/cumulative deduction `cum = 0`. Higher-tier `cum`
+values must be calculated from the full adjacent tier schedule and reviewed
+against Binance's published liquidation formula; do not copy an assumed
+constant `cum` across bands.
+
+The 2024-01-02 notice contains the before/after tables for BTCUSDT, ETHUSDT,
+SOLUSDT and BNBUSDT. For example, the new BTCUSDT first band was 0–50,000
+USDT at 0.40%; the new SOLUSDT and BNBUSDT first bands were 0–10,000 USDT at
+0.50%. The notice explicitly says positions opened before the update were not
+affected. The 2025-06-14 notice sets BTCUSDT at 2025-06-17 06:30 UTC and
+XRPUSDT/DOGEUSDT at 2025-06-20 06:30 UTC; it explicitly says existing
+positions are affected. The 2025-08-17 notice changes BTCUSDT and ETHUSDT at
+2025-08-19 06:30 UTC and also explicitly says existing positions are affected.
+
+This extraction still does not establish every target symbol's complete
+historical table from November 2023 through April 2026. It also does not prove
+that a symbol-month without an announcement had no tier change. The 240-row
+ledger therefore remains authoritative for review state: 20 confirmed
+announcement entries and 220 NOT_REVIEWED entries.
+
+## Synthetic position sizing — schema v3
+
+The pipeline no longer asks for fictitious historical account snapshots.
+Schema v3 stores the synthetic research account once and derives a quantity
+and isolated wallet balance independently for every event:
+
+- Initial equity: 10,000 USDT.
+- Risk budget: 0.5% of equity = 50 USDT per event.
+- Maximum notional leverage: 3x.
+- Margin mode: isolated; position mode: one-way; contract: USDT-linear.
+- Quantity is the smaller of risk-budget sizing (including adverse entry/stop
+  slippage and both-side fees) and the 3x notional cap.
+- Initial margin = position notional / 3.
+- Isolated wallet balance = initial margin less the entry-fee reserve.
+- Each event resets to the same equity; no concurrent positions, compounding,
+  portfolio allocation, or user account history is represented.
+
+This is a reproducible single-event research assumption, not an actual account
+snapshot. The manifest must still include complete time-bounded Binance tier
+history with official source artifacts, hashes, and reviewer metadata. The
+loader rejects gaps, overlaps, unbound files, unsupported contract scope, and
+old schema versions.
+
+## Funding archive review workflow
+
+Run the read-only Funding audit against the already collected Drive files:
+
+~~~powershell
+python .\\scripts\\vike_v31_funding_archive_audit.py --drive-root "G:\\Mon Drive\\ai trade\\Vike V3.1"
+~~~
+
+The script produces a 240-file SHA-256/structure evidence packet and a
+PENDING_REVIEW certificate template outside raw-staging. It checks CSV schema,
+timestamps, duplicates, ordering, ranges, and observed settlement intervals.
+It cannot prove that every settlement was collected.
+
+Binance's USDⓈ-M API documents GET /fapi/v1/fundingRate as ascending history
+with inclusive start/end milliseconds and a maximum limit of 1,000 records;
+the response includes fundingTime, fundingRate and the associated markPrice.
+An independently reviewed completeness claim must retain a paginated
+retrieval log (symbol, time bounds, page boundaries, response counts and raw
+response hashes), account for symbol-specific interval changes, and match all
+240 current local file hashes. The draft must remain PENDING_REVIEW until
+that work is complete. See the
+[official USDⓈ-M Funding Rate History API](https://developers.binance.com/docs/derivatives/usds-margined-futures/market-data/rest-api/Get-Funding-Rate-History).
+
 ## Labeling remains blocked
 
 No archive inventory can supply historical user-specific position quantity or
