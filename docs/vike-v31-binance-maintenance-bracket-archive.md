@@ -149,7 +149,7 @@ This extraction still does not establish every target symbol's complete
 historical table from November 2023 through April 2026. It also does not prove
 that a symbol-month without an announcement had no tier change. The 240-row
 ledger therefore remains authoritative for review state: 20 confirmed
-announcement entries and 220 NOT_REVIEWED entries.
+announcement entries and 218 NOT_REVIEWED entries.
 
 For higher bands, Binance announcements publish the notional thresholds and MMR; the maintenance amount (`cum`) is reconstructed from adjacent bands using `cum[i] = cum[i-1] + floor[i] × (MMR[i] - MMR[i-1])`, starting with zero in the first band. This makes maintenance margin continuous at each boundary. The recurrence is checked against Binance's FAQ example where a 500,000 USDT position has a 1,300 USDT maintenance amount. The loader derives this value and, if a reviewed manifest also includes `cum`, rejects any mismatch. See the [Binance liquidation FAQ](https://www.binance.com/en/support/faq/detail/b3c689c1f50a44cabb3a84e663b81d93).
 
