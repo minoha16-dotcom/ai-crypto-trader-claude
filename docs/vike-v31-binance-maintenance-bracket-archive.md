@@ -61,6 +61,28 @@ Portfolio Margin collateral-ratio changes are not USD-M maintenance-bracket
 changes. COIN-M, USDC-M, BUSD contracts, isolated spot margin and quarterly
 delivery contracts are outside this archive.
 
+## Exchange mechanics relevant to the label engine
+
+Binance's USDⓈ-M liquidation FAQ defines maintenance margin using position
+notional, the maintenance-margin rate and the maintenance amount (the
+`cum`/deduction component in the tier schedule). It also explains that
+isolated mode uses the isolated wallet balance and the applicable tier values
+in the liquidation calculation:
+[Binance — How to Calculate Liquidation Price of USDⓈ-M Futures Contracts](https://www.binance.com/en-IN/support/faq/detail/b3c689c1f50a44cabb3a84e663b81d93).
+
+Binance's Funding FAQ states that funding is settled at contract-specific
+times, that the default interval may be changed, and that when the Futures
+Account available balance is insufficient, funding can be deducted from
+position margin and affect liquidation price:
+[Binance — Introduction to Binance Futures Funding Rates](https://www.binance.com/en/support/faq/detail/360033525031).
+
+Therefore the pipeline must use the recorded funding timestamps rather than
+assuming every symbol always settles on an eight-hour schedule. The current
+research pipeline deliberately excludes events with a funding settlement
+during the open position because it does not yet recalculate isolated wallet
+balance and liquidation threshold after each settlement. This is conservative,
+not a claim that funding has no effect.
+
 ## Important implementation consequence
 
 A single current bracket table per symbol is not sufficient. The research
