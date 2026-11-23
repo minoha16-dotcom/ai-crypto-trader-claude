@@ -553,11 +553,21 @@ def run(args) -> dict:
     per_symbol = {}
     for symbol in symbols:
         rows = [event for event in all_events if event["symbol"] == symbol]
+        month_counts = Counter(
+            datetime.fromtimestamp(event["signal_time_ms"] / 1000, timezone.utc).strftime("%Y-%m")
+            for event in rows
+        )
         per_symbol[symbol] = {
             "events": len(rows),
             "long_events": sum(event["side"] == "LONG" for event in rows),
             "short_events": sum(event["side"] == "SHORT" for event in rows),
+            "eligible_non_overlapping_events": sum(
+                event["overlap_status"] == "ELIGIBLE_NON_OVERLAPPING" for event in rows
+            ),
             "overlap_excluded": sum(event["overlap_status"] != "ELIGIBLE_NON_OVERLAPPING" for event in rows),
+            "first_event_utc": datetime.fromtimestamp(min((event["signal_time_ms"] for event in rows), default=0) / 1000, timezone.utc).isoformat() if rows else None,
+            "last_event_utc": datetime.fromtimestamp(max((event["signal_time_ms"] for event in rows), default=0) / 1000, timezone.utc).isoformat() if rows else None,
+            "events_by_month": {month: month_counts.get(month, 0) for month in MONTHS},
             "triple_barrier_labeled": sum(event["label_status"] == "LABELED_TRIPLE_BARRIER" for event in rows),
             "label_exclusion_reasons": dict(Counter(
                 event.get("label_reason") or event["label_status"] for event in rows
