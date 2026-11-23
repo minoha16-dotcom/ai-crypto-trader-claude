@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -97,6 +98,63 @@ def test_empty_funding_file_is_rejected(tmp_path: Path):
 
 def test_missing_liquidation_manifest_fails_closed():
     rows, status = load_liquidation_manifest(None, ["BTCUSDT"])
+    assert rows == []
+    assert status == "NOT_VERIFIED"
+
+
+def test_liquidation_manifest_requires_hash_bound_evidence_artifacts(tmp_path: Path):
+    evidence = tmp_path / "exchange-tier-source.txt"
+    snapshot = tmp_path / "position-snapshot.json"
+    evidence.write_text("official historical tier evidence", encoding="utf-8")
+    snapshot.write_text('{"quantity": 1, "wallet": 100}', encoding="utf-8")
+    digest = lambda file: hashlib.sha256(file.read_bytes()).hexdigest()
+    from scripts.vike_exploratory_train import MONTHS, month_bounds
+    start, _ = month_bounds(MONTHS[0])
+    _, end = month_bounds(MONTHS[-1])
+    manifest = tmp_path / "liquidation.json"
+    manifest.write_text(json.dumps({
+        "schema_version": 1,
+        "status": "VERIFIED",
+        "evidence_sha256": digest(evidence),
+        "evidence_artifact_path": evidence.name,
+        "reviewed_by": "independent-review",
+        "reviewed_at_utc": "2026-11-23T00:00:00Z",
+        "positions": [{
+            "symbol": "BTCUSDT",
+            "valid_from_ms": start,
+            "valid_to_ms": end,
+            "margin_mode": "ISOLATED",
+            "position_mode": "ONE_WAY",
+            "contract_type": "USDT_LINEAR",
+            "quantity": 1.0,
+            "isolated_wallet_balance": 100.0,
+            "no_external_flows": True,
+            "snapshot_sha256": digest(snapshot),
+            "snapshot_artifact_path": snapshot.name,
+            "brackets": [{
+                "notional_floor": 0.0,
+                "notional_cap": 1_000_000_000_000.0,
+                "maint_margin_ratio": 0.004,
+                "cum": 0.0,
+            }],
+        }],
+    }), encoding="utf-8")
+    rows, status = load_liquidation_manifest(manifest, ["BTCUSDT"])
+    assert status == "VERIFIED"
+    assert len(rows) == 1
+
+
+def test_liquidation_manifest_rejects_unbound_evidence_hash(tmp_path: Path):
+    manifest = tmp_path / "liquidation.json"
+    manifest.write_text(json.dumps({
+        "schema_version": 1,
+        "status": "VERIFIED",
+        "evidence_sha256": "a" * 64,
+        "reviewed_by": "independent-review",
+        "reviewed_at_utc": "2026-11-23T00:00:00Z",
+        "positions": [],
+    }), encoding="utf-8")
+    rows, status = load_liquidation_manifest(manifest, ["BTCUSDT"])
     assert rows == []
     assert status == "NOT_VERIFIED"
 
