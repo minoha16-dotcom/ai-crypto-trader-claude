@@ -93,7 +93,7 @@ def load_funding_attestation(path: Path | None, symbols: list[str]) -> tuple[dic
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}, "NOT_VERIFIED"
-    if payload.get("schema_version") != 1 or payload.get("coverage_status") != "VERIFIED":
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1 or payload.get("coverage_status") != "VERIFIED":
         return {}, "NOT_VERIFIED"
     if not _artifact_matches(path, payload.get("evidence_artifact_path"), payload.get("evidence_sha256")):
         return {}, "NOT_VERIFIED"
@@ -141,7 +141,7 @@ def load_liquidation_manifest(path: Path | None, symbols: list[str]) -> tuple[li
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return [], "NOT_VERIFIED"
-    if payload.get("schema_version") != 2 or payload.get("status") != "VERIFIED":
+    if not isinstance(payload, dict) or payload.get("schema_version") != 2 or payload.get("status") != "VERIFIED":
         return [], "NOT_VERIFIED"
     if not payload.get("reviewed_by") or not payload.get("reviewed_at_utc"):
         return [], "NOT_VERIFIED"
@@ -162,6 +162,8 @@ def load_liquidation_manifest(path: Path | None, symbols: list[str]) -> tuple[li
         if any(key not in row for key in required):
             return [], "NOT_VERIFIED"
         if row.get("applicability") not in {"AFFECTED", "NOT_AFFECTED", "NOT_STATED"}:
+            return [], "NOT_VERIFIED"
+        if not isinstance(row.get("source_url"), str) or not row["source_url"].startswith("https://www.binance.com/"):
             return [], "NOT_VERIFIED"
         if not isinstance(row["valid_from_ms"], int) or not isinstance(row["valid_to_ms"], int):
             return [], "NOT_VERIFIED"
