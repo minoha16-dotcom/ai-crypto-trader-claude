@@ -17,6 +17,13 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import sys
+
+# Support direct execution via `python scripts/vike_v31_research_pipeline.py`.
+# In that mode Python places scripts/ on sys.path, not the repository root.
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from backend.binance_usdm_liquidation import (
     MaintenanceBracket,
