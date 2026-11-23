@@ -237,7 +237,7 @@ def apply_overlap_control(events: list[dict], max_holding_bars: int = MAX_HOLDIN
     result = []
     for event in sorted(events, key=lambda row: (row["symbol"], row["signal_time_ms"])):
         prior = last_kept.get(event["symbol"])
-        if prior is not None and event["signal_time_ms"] <= prior + cooldown:
+        if prior is not None and event["signal_time_ms"] < prior + cooldown:
             event["overlap_status"] = "EXCLUDED_FIXED_HORIZON_COOLDOWN"
         else:
             event["overlap_status"] = "ELIGIBLE_NON_OVERLAPPING"
