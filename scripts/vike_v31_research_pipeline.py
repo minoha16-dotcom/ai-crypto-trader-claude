@@ -159,7 +159,9 @@ def load_liquidation_manifest(path: Path | None, symbols: list[str]) -> tuple[li
     except (KeyError, TypeError, ValueError, OverflowError):
         return [], "NOT_VERIFIED"
     if (not all(math.isfinite(v) for v in (equity, risk_fraction, leverage))
-            or equity <= 0 or not 0 < risk_fraction <= 0.02 or not 1 <= leverage <= 3):
+            or not math.isclose(equity, DEFAULT_RESEARCH_ACCOUNT["initial_equity_usdt"])
+            or not math.isclose(risk_fraction, DEFAULT_RESEARCH_ACCOUNT["risk_fraction"])
+            or not math.isclose(leverage, DEFAULT_RESEARCH_ACCOUNT["max_leverage"])):
         return [], "NOT_VERIFIED"
     if (account.get("margin_mode") != "ISOLATED" or account.get("position_mode") != "ONE_WAY"
             or account.get("contract_type") != "USDT_LINEAR"
