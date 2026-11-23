@@ -21,9 +21,9 @@ historical completeness.
 | 2024-08-22 09:30 | SOLUSDT, DOGEUSDT | Not affected | [Binance 2024-08-22 announcement](https://www.binance.com/en/support/announcement/detail/572598a13c384de6aa3c4d4dc1be5f81) |
 | 2024-08-27 07:30 | XRPUSDT, BNBUSDT | Not affected | [Binance 2024-08-27 announcement](https://www.binance.com/fr/support/announcement/detail/194e244a94e9416cb400318dbed2f4b9) |
 | 2024-09-17 07:30 | LINKUSDT | Not affected | [Binance 2024-09-17 announcement](https://www.binance.com/en/support/announcement/detail/a05ae5aad6e44f6c848bde0a4c94ad4b) |
-| 2024-11-07 | XRPUSDT | Not affected | [Binance announcement archive result](https://www.binance.com/en/support/announcement/detail/) — exact announcement URL must be re-verified before importing tier rows |
-| 2024-11-13 | DOGEUSDT | Not affected | [Binance announcement archive result](https://www.binance.com/en/support/announcement/detail/) — exact announcement URL must be re-verified before importing tier rows |
-| 2024-11-19 | ADAUSDT | Not affected | [Binance announcement archive result](https://www.binance.com/en/support/announcement/detail/) — exact announcement URL must be re-verified before importing tier rows |
+| 2024-11-07 08:30 | XRPUSDT | Not affected | [Binance 2024-11-07 announcement](https://www.binance.com/en/support/announcement/detail/2c473e4efef140e8b58b950987bcc577) |
+| 2024-11-13 08:50 | DOGEUSDT | Not affected | [Binance 2024-11-13 announcement](https://www.binance.com/ar-AE/support/announcement/detail/0dc37e5073504db2968a5c3e9b2655fa) |
+| 2024-11-19 07:30 | ADAUSDT | Not affected | [Binance 2024-11-19 announcement](https://www.binance.com/en-AU/support/announcement/detail/2766181be07e49748736810996554c47) |
 | 2025-06-17 06:30 | BTCUSDT | Affected | [Binance June 2025 announcement](https://www.binance.com/en/support/announcement/detail/e778988edec446038ad536bcb0c8d460) |
 | 2025-06-20 06:30 | XRPUSDT, DOGEUSDT | Affected | [Binance June 2025 announcement](https://www.binance.com/en/support/announcement/detail/e778988edec446038ad536bcb0c8d460) |
 | 2025-06-23 06:30 | SOLUSDT | Affected | [Binance June 2025 announcement](https://www.binance.com/en/support/announcement/detail/aa1d165426df4a7a84a0005a5a2f1e03) |
