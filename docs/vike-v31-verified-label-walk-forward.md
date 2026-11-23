@@ -43,7 +43,8 @@ CSV. The certificate schema is:
 {
   "schema_version": 1,
   "coverage_status": "VERIFIED",
-  "evidence_sha256": "<64 lowercase hex characters>",
+  "evidence_sha256": "<SHA-256 of the exact evidence artifact file>",
+  "evidence_artifact_path": "funding-audit-source.pdf",
   "reviewed_by": "<reviewer or review process>",
   "reviewed_at_utc": "<ISO-8601 UTC timestamp>",
   "semantic_basis": "<documented REST/archive field and completeness basis>",
@@ -75,7 +76,8 @@ snapshot. The supported manifest shape is:
 {
   "schema_version": 1,
   "status": "VERIFIED",
-  "evidence_sha256": "<64 lowercase hex characters>",
+  "evidence_sha256": "<SHA-256 of the exact exchange-tier evidence artifact>",
+  "evidence_artifact_path": "binance-tier-archive.pdf",
   "reviewed_by": "<reviewer or review process>",
   "reviewed_at_utc": "<ISO-8601 UTC timestamp>",
   "positions": [
@@ -89,7 +91,8 @@ snapshot. The supported manifest shape is:
       "quantity": 0.001,
       "isolated_wallet_balance": 100.0,
       "no_external_flows": true,
-      "snapshot_sha256": "<64 lowercase hex characters>",
+      "snapshot_sha256": "<SHA-256 of the exact position snapshot artifact>",
+      "snapshot_artifact_path": "position-snapshots/BTCUSDT-2023-11.json",
       "brackets": [
         {
           "notional_floor": 0.0,
@@ -102,6 +105,18 @@ snapshot. The supported manifest shape is:
   ]
 }
 ~~~
+
+All evidence hashes are now checked against files, not just their
+64-character syntax. `evidence_artifact_path` and
+`snapshot_artifact_path` must be relative paths located under the directory
+containing the certificate/manifest; absolute paths and path traversal are
+rejected. The bytes at each path must match the declared SHA-256 exactly.
+Keep the evidence files beside or below the manifest directory and preserve
+them unchanged. This binds the declared hashes to inspectable local artifacts,
+but it does not by itself prove that a public notice is a complete historical
+account snapshot or that the current v1 schema correctly models every
+maintenance-tier change. The archive inventory document records the remaining
+design limitation.
 
 Position intervals must cover the full development period for every selected
 symbol. Each event must match exactly one interval. The quantity and isolated
