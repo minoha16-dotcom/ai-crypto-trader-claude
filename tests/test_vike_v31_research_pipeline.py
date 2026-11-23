@@ -62,6 +62,7 @@ def test_overlap_control_is_fixed_horizon_and_per_symbol():
     rows = [
         {"symbol": "BTCUSDT", "signal_time_ms": 0},
         {"symbol": "BTCUSDT", "signal_time_ms": 47 * BAR_MS},
+        {"symbol": "BTCUSDT", "signal_time_ms": 48 * BAR_MS},
         {"symbol": "BTCUSDT", "signal_time_ms": 100 * BAR_MS},
         {"symbol": "ETHUSDT", "signal_time_ms": 47 * BAR_MS},
     ]
@@ -69,6 +70,7 @@ def test_overlap_control_is_fixed_horizon_and_per_symbol():
     by_key = {(row["symbol"], row["signal_time_ms"]): row for row in result}
     assert by_key[("BTCUSDT", 0)]["overlap_status"] == "ELIGIBLE_NON_OVERLAPPING"
     assert by_key[("BTCUSDT", 47 * BAR_MS)]["overlap_status"] == "EXCLUDED_FIXED_HORIZON_COOLDOWN"
+    assert by_key[("BTCUSDT", 48 * BAR_MS)]["overlap_status"] == "ELIGIBLE_NON_OVERLAPPING"
     assert by_key[("BTCUSDT", 100 * BAR_MS)]["overlap_status"] == "ELIGIBLE_NON_OVERLAPPING"
     assert by_key[("ETHUSDT", 47 * BAR_MS)]["overlap_status"] == "ELIGIBLE_NON_OVERLAPPING"
 
