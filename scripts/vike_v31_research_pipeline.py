@@ -591,7 +591,7 @@ def run(args) -> dict:
         )
     if liquidation_status != "VERIFIED":
         acceptance_blockers.append(
-            "Historical liquidation brackets and time-matched isolated position assumptions do not cover the full development window."
+            "Historical liquidation brackets and time-bounded isolated position assumptions do not cover the full development window."
         )
     if any(event.get("label_reason") == "dynamic_liquidation_margin_after_funding_not_modeled"
            for event in all_events):
