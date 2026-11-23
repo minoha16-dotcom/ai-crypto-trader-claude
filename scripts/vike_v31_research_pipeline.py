@@ -72,13 +72,27 @@ def _valid_sha256(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value.lower())
 
 
+def _artifact_matches(manifest_path: Path, relative_path: Any, expected_sha256: Any) -> bool:
+    """Verify a relative evidence artifact against its declared SHA-256."""
+    if not isinstance(relative_path, str) or not relative_path or not _valid_sha256(expected_sha256):
+        return False
+    candidate = Path(relative_path)
+    if candidate.is_absolute():
+        return False
+    root = manifest_path.parent.resolve()
+    artifact = (root / candidate).resolve()
+    if root not in artifact.parents or not artifact.is_file():
+        return False
+    return sha256_file(artifact) == expected_sha256.lower()
+
+
 def load_funding_attestation(path: Path | None, symbols: list[str]) -> tuple[dict, str]:
     if path is None or not path.is_file():
         return {}, "NOT_VERIFIED"
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema_version") != 1 or payload.get("coverage_status") != "VERIFIED":
         return {}, "NOT_VERIFIED"
-    if not _valid_sha256(payload.get("evidence_sha256")):
+    if not _artifact_matches(path, payload.get("evidence_artifact_path"), payload.get("evidence_sha256")):
         return {}, "NOT_VERIFIED"
     if not payload.get("reviewed_by") or not payload.get("reviewed_at_utc") or not payload.get("semantic_basis"):
         return {}, "NOT_VERIFIED"
@@ -105,7 +119,7 @@ def load_liquidation_manifest(path: Path | None, symbols: list[str]) -> tuple[li
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("schema_version") != 1 or payload.get("status") != "VERIFIED":
         return [], "NOT_VERIFIED"
-    if not _valid_sha256(payload.get("evidence_sha256")):
+    if not _artifact_matches(path, payload.get("evidence_artifact_path"), payload.get("evidence_sha256")):
         return [], "NOT_VERIFIED"
     if not payload.get("reviewed_by") or not payload.get("reviewed_at_utc"):
         return [], "NOT_VERIFIED"
@@ -128,7 +142,7 @@ def load_liquidation_manifest(path: Path | None, symbols: list[str]) -> tuple[li
             continue
         if row["valid_to_ms"] <= row["valid_from_ms"]:
             continue
-        if not _valid_sha256(row.get("snapshot_sha256")):
+        if not _artifact_matches(path, row.get("snapshot_artifact_path"), row.get("snapshot_sha256")):
             continue
         try:
             quantity = float(row["quantity"])
