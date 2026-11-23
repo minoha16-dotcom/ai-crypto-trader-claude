@@ -39,6 +39,14 @@ def test_generator_creates_direction_neutral_long_event_without_labeling():
     assert events[0]["event_status"] == "GENERATED"
 
 
+def test_generator_retains_terminal_event_without_next_bar():
+    rows = [bar(i) for i in range(20)]
+    rows.append(bar(20, close=103, high=104, low=102))
+    events = build_opportunity_events("BTCUSDT", rows)
+    assert len(events) == 1
+    assert events[0]["entry_time_ms"] is None
+
+
 def test_generator_creates_short_event():
     rows = [bar(i) for i in range(20)]
     rows.extend([
