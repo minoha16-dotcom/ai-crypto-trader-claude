@@ -77,7 +77,7 @@ def test_funding_attestation_must_be_verified_and_cover_exact_symbol_month_grid(
 
 
 def test_missing_liquidation_manifest_fails_closed():
-    rows, status = load_liquidation_manifest(None)
+    rows, status = load_liquidation_manifest(None, ["BTCUSDT"])
     assert rows == []
     assert status == "NOT_VERIFIED"
 
