@@ -15,6 +15,7 @@ from scripts.vike_v31_research_pipeline import (
     load_funding_attestation,
     load_liquidation_manifest,
     run_walk_forward,
+    size_research_position,
     _read_funding,
 )
 
@@ -143,108 +144,96 @@ def test_missing_liquidation_manifest_fails_closed():
     assert status == "NOT_VERIFIED"
 
 
-def test_liquidation_manifest_requires_separate_hash_bound_histories(tmp_path: Path):
+def _write_v3_liquidation_manifest(tmp_path: Path, *, gap: bool = False) -> Path:
     tier_evidence = tmp_path / "binance-tier-notice.txt"
-    position_evidence = tmp_path / "account-snapshot.json"
     tier_evidence.write_text("official historical tier notice", encoding="utf-8")
-    position_evidence.write_text('{"quantity": 1, "wallet": 100}', encoding="utf-8")
-    digest = lambda file: hashlib.sha256(file.read_bytes()).hexdigest()
+    digest = hashlib.sha256(tier_evidence.read_bytes()).hexdigest()
     from scripts.vike_exploratory_train import MONTHS, month_bounds
     start, _ = month_bounds(MONTHS[0])
     _, end = month_bounds(MONTHS[-1])
-    manifest = tmp_path / "liquidation-v2.json"
+    base = {
+        "symbol": "BTCUSDT", "applicability": "NOT_AFFECTED",
+        "source_url": "https://www.binance.com/en/support/announcement/detail/example",
+        "source_artifact_path": tier_evidence.name, "source_sha256": digest,
+        "brackets": [{"notional_floor": 0, "notional_cap": 1e12,
+                      "maint_margin_ratio": 0.004, "cum": 0}],
+    }
+    history = ([{**base, "valid_from_ms": start, "valid_to_ms": start + (end-start)//2 - 1},
+                {**base, "valid_from_ms": start + (end-start)//2, "valid_to_ms": end}]
+               if gap else [{**base, "valid_from_ms": start, "valid_to_ms": end}])
+    manifest = tmp_path / "liquidation-v3.json"
     manifest.write_text(json.dumps({
-        "schema_version": 2,
-        "status": "VERIFIED",
-        "reviewed_by": "independent-review",
-        "reviewed_at_utc": "2026-11-23T00:00:00Z",
-        "maintenance_bracket_history": [{
-            "symbol": "BTCUSDT",
-            "valid_from_ms": start,
-            "valid_to_ms": end,
-            "applicability": "NOT_AFFECTED",
-            "source_url": "https://www.binance.com/en/support/announcement/detail/example",
-            "source_artifact_path": tier_evidence.name,
-            "source_sha256": digest(tier_evidence),
-            "brackets": [{
-                "notional_floor": 0.0,
-                "notional_cap": 1_000_000_000_000.0,
-                "maint_margin_ratio": 0.004,
-                "cum": 0.0,
-            }],
-        }],
-        "position_assumptions": [{
-            "symbol": "BTCUSDT",
-            "valid_from_ms": start,
-            "valid_to_ms": end,
-            "margin_mode": "ISOLATED",
-            "position_mode": "ONE_WAY",
+        "schema_version": 3, "status": "VERIFIED",
+        "reviewed_by": "independent-review", "reviewed_at_utc": "2026-11-23T00:00:00Z",
+        "research_account": {
+            "initial_equity_usdt": 10000, "risk_fraction": 0.005, "max_leverage": 3,
+            "margin_mode": "ISOLATED", "position_mode": "ONE_WAY",
             "contract_type": "USDT_LINEAR",
-            "quantity": 1.0,
-            "isolated_wallet_balance": 100.0,
-            "no_external_flows": True,
-            "snapshot_sha256": digest(position_evidence),
-            "snapshot_artifact_path": position_evidence.name,
-        }],
+            "account_scope": "INDEPENDENT_EVENT_RESET_NO_CONCURRENT_POSITIONS",
+        },
+        "maintenance_bracket_history": history,
     }), encoding="utf-8")
+    return manifest
+
+
+def test_liquidation_manifest_v3_uses_synthetic_account_and_hash_bound_tiers(tmp_path: Path):
+    manifest = _write_v3_liquidation_manifest(tmp_path)
     rows, status = load_liquidation_manifest(manifest, ["BTCUSDT"])
     assert status == "VERIFIED"
     assert len(rows) == 1
     assert rows[0]["_brackets"][0].maint_margin_ratio == 0.004
-    assert rows[0]["quantity"] == 1.0
+    assert rows[0]["_research_account"]["initial_equity_usdt"] == 10000
+    assert rows[0]["_research_account"]["risk_fraction"] == 0.005
     assert rows[0]["applicability"] == "NOT_AFFECTED"
 
 
-def test_liquidation_manifest_rejects_gaps_between_tier_history_intervals(tmp_path: Path):
-    tier_evidence = tmp_path / "tier.txt"
-    position_evidence = tmp_path / "position.json"
-    tier_evidence.write_text("tier evidence", encoding="utf-8")
-    position_evidence.write_text("position evidence", encoding="utf-8")
-    digest = lambda file: hashlib.sha256(file.read_bytes()).hexdigest()
-    from scripts.vike_exploratory_train import MONTHS, month_bounds
-    start, _ = month_bounds(MONTHS[0])
-    _, end = month_bounds(MONTHS[-1])
-    gap = start + (end - start) // 2
-    base_tier = {
-        "symbol": "BTCUSDT", "applicability": "AFFECTED",
-        "source_url": "https://www.binance.com/example",
-        "source_artifact_path": tier_evidence.name, "source_sha256": digest(tier_evidence),
-        "brackets": [{"notional_floor": 0, "notional_cap": 1e12,
-                      "maint_margin_ratio": 0.004, "cum": 0}],
-    }
+def test_liquidation_manifest_rejects_gaps_in_tier_history(tmp_path: Path):
+    manifest = _write_v3_liquidation_manifest(tmp_path, gap=True)
+    rows, status = load_liquidation_manifest(manifest, ["BTCUSDT"])
+    assert rows == []
+    assert status == "NOT_VERIFIED"
+
+
+def test_liquidation_manifest_rejects_legacy_schema_v2(tmp_path: Path):
     manifest = tmp_path / "liquidation-v2.json"
     manifest.write_text(json.dumps({
         "schema_version": 2, "status": "VERIFIED",
         "reviewed_by": "reviewer", "reviewed_at_utc": "2026-11-23T00:00:00Z",
-        "maintenance_bracket_history": [
-            {**base_tier, "valid_from_ms": start, "valid_to_ms": gap - 1},
-            {**base_tier, "valid_from_ms": gap, "valid_to_ms": end},
-        ],
-        "position_assumptions": [{
-            "symbol": "BTCUSDT", "valid_from_ms": start, "valid_to_ms": end,
-            "margin_mode": "ISOLATED", "position_mode": "ONE_WAY",
-            "contract_type": "USDT_LINEAR", "quantity": 1,
-            "isolated_wallet_balance": 100, "no_external_flows": True,
-            "snapshot_artifact_path": position_evidence.name,
-            "snapshot_sha256": digest(position_evidence),
-        }],
+        "maintenance_bracket_history": [], "position_assumptions": [],
     }), encoding="utf-8")
     rows, status = load_liquidation_manifest(manifest, ["BTCUSDT"])
     assert rows == []
     assert status == "NOT_VERIFIED"
 
 
-def test_liquidation_manifest_rejects_legacy_combined_v1_schema(tmp_path: Path):
-    manifest = tmp_path / "liquidation-v1.json"
-    manifest.write_text(json.dumps({
-        "schema_version": 1, "status": "VERIFIED",
-        "evidence_sha256": "a" * 64,
-        "reviewed_by": "reviewer", "reviewed_at_utc": "2026-11-23T00:00:00Z",
-        "positions": [],
-    }), encoding="utf-8")
-    rows, status = load_liquidation_manifest(manifest, ["BTCUSDT"])
-    assert rows == []
-    assert status == "NOT_VERIFIED"
+def test_research_position_sizing_respects_risk_budget_and_isolated_margin():
+    sized = size_research_position(side="LONG", entry_price=100.0, atr=2.0,
+                                   fee_bps=5.0, slippage_bps=2.0)
+    assert sized["status"] == "PASS"
+    assert sized["risk_budget_usdt"] == pytest.approx(50.0)
+    assert sized["estimated_stop_loss_usdt"] <= 50.0
+    assert sized["quantity"] > 0
+    assert sized["position_notional_usdt"] == pytest.approx(sized["quantity"] * sized["entry_fill"])
+    assert sized["initial_margin_usdt"] == pytest.approx(sized["position_notional_usdt"] / 3.0)
+    assert sized["isolated_wallet_balance"] == pytest.approx(
+        sized["initial_margin_usdt"] - sized["entry_fee_reserve_usdt"])
+    assert sized["effective_leverage"] == pytest.approx(3.0)
+
+
+def test_research_position_sizing_supports_short_and_caps_at_max_leverage():
+    sized = size_research_position(side="SHORT", entry_price=0.01, atr=0.000001,
+                                   fee_bps=0.0, slippage_bps=0.0)
+    assert sized["stop_price"] > sized["entry_fill"]
+    assert sized["position_notional_usdt"] <= 30_000.0 + 1e-8
+    assert sized["effective_leverage"] == pytest.approx(3.0)
+
+
+def test_research_position_sizing_rejects_invalid_inputs():
+    with pytest.raises(ValueError):
+        size_research_position(side="LONG", entry_price=0, atr=1, fee_bps=5, slippage_bps=2)
+    with pytest.raises(ValueError):
+        size_research_position(side="FLAT", entry_price=100, atr=1, fee_bps=5, slippage_bps=2)
+
 
 
 def test_labeling_fails_closed_when_funding_is_not_verified():
@@ -277,16 +266,18 @@ def test_triple_barrier_label_path_uses_mark_and_liquidation_verification():
         "atr": 1.0,
         "overlap_status": "ELIGIBLE_NON_OVERLAPPING",
     }
-    positions = [{
-        "symbol": "BTCUSDT",
-        "valid_from_ms": 0,
-        "valid_to_ms": 10_000_000_000,
-        "quantity": 1.0,
-        "isolated_wallet_balance": 10.0,
-        "_brackets": [MaintenanceBracket(0.0, 1_000.0, 0.004, 0.0)],
+    history = [{
+        "symbol": "BTCUSDT", "valid_from_ms": 0, "valid_to_ms": 10_000_000_000,
+        "_research_account": {
+            "initial_equity_usdt": 10_000.0, "risk_fraction": 0.005, "max_leverage": 3.0,
+            "margin_mode": "ISOLATED", "position_mode": "ONE_WAY",
+            "contract_type": "USDT_LINEAR",
+            "account_scope": "INDEPENDENT_EVENT_RESET_NO_CONCURRENT_POSITIONS",
+        },
+        "_brackets": [MaintenanceBracket(0.0, 1_000_000_000_000.0, 0.004, 0.0)],
     }]
     result = label_opportunity(
-        event, segment, mark_map, [], True, positions, True, 5.0, 2.0,
+        event, segment, mark_map, [], True, history, True, 5.0, 2.0,
     )
     assert result["status"] == "labeled"
     assert result["exit_reason"] == "time_exit"
