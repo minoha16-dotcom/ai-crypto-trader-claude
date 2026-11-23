@@ -113,72 +113,134 @@ def load_funding_attestation(path: Path | None, symbols: list[str]) -> tuple[dic
     return index, "VERIFIED"
 
 
+def _validate_time_series_coverage(rows: list[dict], symbol: str,
+                                   window_start: int, window_end: int,
+                                   start_key: str = "valid_from_ms",
+                                   end_key: str = "valid_to_ms") -> bool:
+    intervals = sorted(
+        (row[start_key], row[end_key])
+        for row in rows if str(row.get("symbol", "")).upper() == symbol
+    )
+    cursor = window_start
+    for start_ms, end_ms in intervals:
+        if start_ms > cursor:
+            return False
+        if end_ms <= cursor:
+            continue
+        cursor = end_ms
+    return cursor >= window_end
+
+
 def load_liquidation_manifest(path: Path | None, symbols: list[str]) -> tuple[list[dict], str]:
+    """Load v2 manifest with separate exchange tier history and account assumptions."""
     if path is None or not path.is_file():
         return [], "NOT_VERIFIED"
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("schema_version") != 1 or payload.get("status") != "VERIFIED":
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
         return [], "NOT_VERIFIED"
-    if not _artifact_matches(path, payload.get("evidence_artifact_path"), payload.get("evidence_sha256")):
+    if payload.get("schema_version") != 2 or payload.get("status") != "VERIFIED":
         return [], "NOT_VERIFIED"
     if not payload.get("reviewed_by") or not payload.get("reviewed_at_utc"):
         return [], "NOT_VERIFIED"
-    positions = payload.get("positions")
-    if not isinstance(positions, list) or not positions:
+
+    raw_brackets = payload.get("maintenance_bracket_history")
+    raw_positions = payload.get("position_assumptions")
+    if not isinstance(raw_brackets, list) or not raw_brackets:
         return [], "NOT_VERIFIED"
-    validated = []
-    for row in positions:
+    if not isinstance(raw_positions, list) or not raw_positions:
+        return [], "NOT_VERIFIED"
+
+    bracket_rows = []
+    for row in raw_brackets:
+        if not isinstance(row, dict):
+            return [], "NOT_VERIFIED"
+        required = ("symbol", "valid_from_ms", "valid_to_ms", "applicability",
+                    "brackets", "source_artifact_path", "source_sha256", "source_url")
+        if any(key not in row for key in required):
+            return [], "NOT_VERIFIED"
+        if row.get("applicability") not in {"AFFECTED", "NOT_AFFECTED", "NOT_STATED"}:
+            return [], "NOT_VERIFIED"
+        if not isinstance(row["valid_from_ms"], int) or not isinstance(row["valid_to_ms"], int):
+            return [], "NOT_VERIFIED"
+        if row["valid_to_ms"] <= row["valid_from_ms"]:
+            return [], "NOT_VERIFIED"
+        if not _artifact_matches(path, row.get("source_artifact_path"), row.get("source_sha256")):
+            return [], "NOT_VERIFIED"
+        try:
+            tiers = [MaintenanceBracket(
+                float(item["notional_floor"]), float(item["notional_cap"]),
+                float(item["maint_margin_ratio"]), float(item["cum"]),
+            ) for item in row["brackets"]]
+            from backend.binance_usdm_liquidation import validate_brackets
+            validate_brackets(tiers)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return [], "NOT_VERIFIED"
+        bracket_rows.append({**row, "symbol": str(row["symbol"]).upper(), "_brackets": tiers})
+
+    position_rows = []
+    for row in raw_positions:
         if not isinstance(row, dict):
             return [], "NOT_VERIFIED"
         required = ("symbol", "valid_from_ms", "valid_to_ms", "quantity",
-                    "isolated_wallet_balance", "brackets")
+                    "isolated_wallet_balance", "margin_mode", "position_mode",
+                    "contract_type", "no_external_flows",
+                    "snapshot_artifact_path", "snapshot_sha256")
         if any(key not in row for key in required):
             return [], "NOT_VERIFIED"
-        if row.get("margin_mode") != "ISOLATED" or row.get("position_mode") != "ONE_WAY":
-            continue
-        if row.get("contract_type") != "USDT_LINEAR" or row.get("no_external_flows") is not True:
-            continue
-        if not isinstance(row.get("valid_from_ms"), int) or not isinstance(row.get("valid_to_ms"), int):
-            continue
+        if row["margin_mode"] != "ISOLATED" or row["position_mode"] != "ONE_WAY":
+            return [], "NOT_VERIFIED"
+        if row["contract_type"] != "USDT_LINEAR" or row["no_external_flows"] is not True:
+            return [], "NOT_VERIFIED"
+        if not isinstance(row["valid_from_ms"], int) or not isinstance(row["valid_to_ms"], int):
+            return [], "NOT_VERIFIED"
         if row["valid_to_ms"] <= row["valid_from_ms"]:
-            continue
+            return [], "NOT_VERIFIED"
         if not _artifact_matches(path, row.get("snapshot_artifact_path"), row.get("snapshot_sha256")):
-            continue
+            return [], "NOT_VERIFIED"
         try:
             quantity = float(row["quantity"])
             wallet = float(row["isolated_wallet_balance"])
-            brackets = [MaintenanceBracket(
-                float(x["notional_floor"]), float(x["notional_cap"]),
-                float(x["maint_margin_ratio"]), float(x["cum"]),
-            ) for x in row["brackets"]]
             if not math.isfinite(quantity) or quantity <= 0 or not math.isfinite(wallet) or wallet <= 0:
-                continue
-            # The calculator validates contiguity and tier values.
-            from backend.binance_usdm_liquidation import validate_brackets
-            validate_brackets(brackets)
-        except (KeyError, TypeError, ValueError, OverflowError):
-            continue
-        validated.append({**row, "quantity": quantity, "isolated_wallet_balance": wallet,
-                          "_brackets": brackets})
-    if not validated:
-        return [], "NOT_VERIFIED"
-    # The manifest must cover the entire development window for every symbol;
-    # event-level matching below still rejects overlaps or missing snapshots.
+                return [], "NOT_VERIFIED"
+        except (TypeError, ValueError, OverflowError):
+            return [], "NOT_VERIFIED"
+        position_rows.append({**row, "symbol": str(row["symbol"]).upper(),
+                              "quantity": quantity, "isolated_wallet_balance": wallet})
+
     window_start, window_end = _month_start(MONTHS[0]), _month_end(MONTHS[-1])
     for symbol in symbols:
-        intervals = sorted(
-            (row["valid_from_ms"], row["valid_to_ms"])
-            for row in validated if str(row["symbol"]).upper() == symbol
-        )
-        cursor = window_start
-        for start_ms, end_ms in intervals:
-            if start_ms > cursor:
-                break
-            cursor = max(cursor, end_ms)
-        if cursor < window_end:
+        symbol_brackets = [row for row in bracket_rows if row["symbol"] == symbol]
+        symbol_positions = [row for row in position_rows if row["symbol"] == symbol]
+        if not _validate_time_series_coverage(symbol_brackets, symbol, window_start, window_end):
             return [], "NOT_VERIFIED"
-    return validated, "VERIFIED"
+        if not _validate_time_series_coverage(symbol_positions, symbol, window_start, window_end):
+            return [], "NOT_VERIFIED"
 
+    # Join the two independent histories only over their actual interval intersection.
+    combined = []
+    for symbol in symbols:
+        for tier in (row for row in bracket_rows if row["symbol"] == symbol):
+            for account in (row for row in position_rows if row["symbol"] == symbol):
+                start_ms = max(tier["valid_from_ms"], account["valid_from_ms"])
+                end_ms = min(tier["valid_to_ms"], account["valid_to_ms"])
+                if start_ms < end_ms:
+                    combined.append({
+                        "symbol": symbol, "valid_from_ms": start_ms, "valid_to_ms": end_ms,
+                        "quantity": account["quantity"],
+                        "isolated_wallet_balance": account["isolated_wallet_balance"],
+                        "margin_mode": account["margin_mode"],
+                        "position_mode": account["position_mode"],
+                        "contract_type": account["contract_type"],
+                        "no_external_flows": account["no_external_flows"],
+                        "applicability": tier["applicability"],
+                        "source_url": tier["source_url"],
+                        "_brackets": tier["_brackets"],
+                    })
+    for symbol in symbols:
+        if not _validate_time_series_coverage(combined, symbol, window_start, window_end):
+            return [], "NOT_VERIFIED"
+    return combined, "VERIFIED"
 
 def _read_funding(path: Path, start: int, end: int) -> list[FundingEvent]:
     rows = []
