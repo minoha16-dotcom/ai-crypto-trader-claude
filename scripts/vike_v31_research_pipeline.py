@@ -626,6 +626,17 @@ def run(args) -> dict:
                         "label", "net_r", "exit_time_ms", "exit_reason", "entry_fill", "exit_fill",
                         "stop_price", "target_price", "funding_cashflow_per_unit",
                     )})
+                    sizing = result["position_sizing"]
+                    event.update({
+                        "research_quantity": sizing["quantity"],
+                        "research_position_notional_usdt": sizing["position_notional_usdt"],
+                        "research_initial_margin_usdt": sizing["initial_margin_usdt"],
+                        "research_isolated_wallet_balance_usdt": sizing["isolated_wallet_balance"],
+                        "research_risk_budget_usdt": sizing["risk_budget_usdt"],
+                        "research_estimated_stop_loss_usdt": sizing["estimated_stop_loss_usdt"],
+                        "research_liquidation_price": result["liquidation_price"],
+                        "research_maintenance_margin_rate": result["maintenance_margin_rate"],
+                    })
                     event["label_status"] = "LABELED_TRIPLE_BARRIER"
                     labeled.append(event)
                 else:
@@ -714,7 +725,11 @@ def run(args) -> dict:
     (output_dir / "walk_forward_results.json").write_text(json.dumps(walk_forward, indent=2, allow_nan=False) + "\n", encoding="utf-8")
     with (output_dir / "event_manifest.csv").open("w", newline="", encoding="utf-8") as handle:
         fields = ["symbol", "signal_time_ms", "entry_time_ms", "side", "atr", "overlap_status",
-                  "label_status", "label_reason", "label", "net_r", "exit_time_ms", *FEATURES]
+                  "label_status", "label_reason", "label", "net_r", "exit_time_ms",
+                  "research_quantity", "research_position_notional_usdt", "research_initial_margin_usdt",
+                  "research_isolated_wallet_balance_usdt", "research_risk_budget_usdt",
+                  "research_estimated_stop_loss_usdt", "research_liquidation_price",
+                  "research_maintenance_margin_rate", *FEATURES]
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         for event in sorted(all_events, key=lambda row: (row["signal_time_ms"], row["symbol"])):
