@@ -283,13 +283,10 @@ def label_opportunity(event: dict, segment: list[dict], mark_by_time: dict[int, 
     except ValueError as exc:
         return {"status": "excluded", "reason": "mark_price_alignment_failed", "detail": str(exc)}
     # Funding changes isolated wallet balance and therefore liquidation price.
-    # The current deterministic labeler uses a fixed liquidation threshold, so
-    # any settlement during the holding interval is conservatively excluded.
+    # We first resolve the actual barrier exit, then reject only if a settlement
+    # occurred before that exit. Settlements after an early exit do not affect
+    # the position and need not exclude the event.
     entry_time = event["entry_time_ms"]
-    horizon_end = trade_rows[-1]["close_t"]
-    in_horizon_funding = [item for item in funding if entry_time <= item.funding_time_ms <= horizon_end]
-    if in_horizon_funding:
-        return {"status": "excluded", "reason": "dynamic_liquidation_margin_after_funding_not_modeled"}
     position = _liquidation_position(positions, event["symbol"], entry_time)
     if position is None:
         return {"status": "excluded", "reason": "no_time_matched_historical_liquidation_snapshot"}
@@ -322,6 +319,18 @@ def label_opportunity(event: dict, segment: list[dict], mark_by_time: dict[int, 
         )
     except ValueError as exc:
         return {"status": "excluded", "reason": "label_precondition_failed", "detail": str(exc)}
+    if result.get("status") == "labeled":
+        exit_time = result["exit_time_ms"]
+        funding_during_position = [
+            item for item in funding
+            if entry_time <= item.funding_time_ms <= exit_time
+        ]
+        if funding_during_position:
+            return {
+                "status": "excluded",
+                "reason": "dynamic_liquidation_margin_after_funding_not_modeled",
+                "funding_events_during_position": len(funding_during_position),
+            }
     return result
 
 
