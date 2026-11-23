@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.binance_usdm_liquidation import MaintenanceBracket
 from scripts.vike_exploratory_train import BAR_MS
 from scripts.vike_v31_research_pipeline import (
     apply_overlap_control,
@@ -110,6 +111,40 @@ def test_labeling_fails_closed_when_funding_is_not_verified():
         event, [], {}, [], False, [], False, 5.0, 2.0,
     )
     assert result == {"status": "excluded", "reason": "funding_coverage_not_verified"}
+
+
+def test_triple_barrier_label_path_uses_mark_and_liquidation_verification():
+    segment = [bar(i) for i in range(69)]
+    mark_map = {
+        row["t"]: {
+            "t": row["t"], "close_t": row["close_t"],
+            "mark_o": row["o"], "mark_h": row["h"],
+            "mark_l": row["l"], "mark_c": row["c"],
+        }
+        for row in segment
+    }
+    event = {
+        "symbol": "BTCUSDT",
+        "signal_time_ms": segment[20]["close_t"],
+        "entry_time_ms": segment[21]["t"],
+        "side": "LONG",
+        "atr": 1.0,
+        "overlap_status": "ELIGIBLE_NON_OVERLAPPING",
+    }
+    positions = [{
+        "symbol": "BTCUSDT",
+        "valid_from_ms": 0,
+        "valid_to_ms": 10_000_000_000,
+        "quantity": 1.0,
+        "isolated_wallet_balance": 10.0,
+        "_brackets": [MaintenanceBracket(0.0, 1_000.0, 0.004, 0.0)],
+    }]
+    result = label_opportunity(
+        event, segment, mark_map, [], True, positions, True, 5.0, 2.0,
+    )
+    assert result["status"] == "labeled"
+    assert result["exit_reason"] == "time_exit"
+    assert result["funding_cashflow_per_unit"] == 0.0
 
 
 def test_walk_forward_does_not_train_without_verified_labels():
