@@ -17,7 +17,6 @@ import argparse
 import csv
 import json
 import math
-import statistics
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,6 +30,7 @@ from scripts.vike_exploratory_train import (
     complete_day_bars,
     month_bounds,
     read_trade_or_mark,
+    resolve_csv,
     sha256_file,
     split_contiguous,
 )
@@ -226,9 +226,9 @@ def run(args) -> dict:
         for month in MONTHS:
             start, end = month_bounds(month)
             files = {
-                "trade_15m": __import__("scripts.vike_exploratory_train", fromlist=["resolve_csv"]).resolve_csv(raw_root, month, symbol, "trade_15m"),
-                "mark_15m": __import__("scripts.vike_exploratory_train", fromlist=["resolve_csv"]).resolve_csv(raw_root, month, symbol, "mark_15m"),
-                "funding": __import__("scripts.vike_exploratory_train", fromlist=["resolve_csv"]).resolve_csv(raw_root, month, symbol, "funding"),
+                "trade_15m": resolve_csv(raw_root, month, symbol, "trade_15m"),
+                "mark_15m": resolve_csv(raw_root, month, symbol, "mark_15m"),
+                "funding": resolve_csv(raw_root, month, symbol, "funding"),
             }
             for stream, path in files.items():
                 digest = sha256_file(path)
