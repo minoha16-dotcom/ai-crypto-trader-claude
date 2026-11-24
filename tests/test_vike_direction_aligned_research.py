@@ -108,7 +108,7 @@ def test_synthetic_three_fold_wfo_reports_every_symbol_direction_group():
     assert all(fold["status"] == "SCORED" for fold in report["folds"])
 
 
-def test_loader_rejects_holdout_and_non_closed_signal_timestamps(tmp_path: Path):
+def test_loader_rejects_locked_holdout_events(tmp_path: Path):
     fields = [
         "symbol", "signal_time_ms", "entry_time_ms", "side", "label_status",
         "label", "net_r", "exit_time_ms", "ret_1", "ret_4", "ret_16",
@@ -133,4 +133,63 @@ def test_loader_rejects_holdout_and_non_closed_signal_timestamps(tmp_path: Path)
         writer.writeheader()
         writer.writerow(row)
     with pytest.raises(ValueError, match="outside the frozen development window"):
+        load_labeled_events(path)
+
+
+def test_loader_rejects_non_closed_signal_timestamp(tmp_path: Path):
+    fields = [
+        "symbol", "signal_time_ms", "entry_time_ms", "side", "label_status",
+        "label", "net_r", "exit_time_ms", "ret_1", "ret_4", "ret_16",
+        "atr_pct", "donchian_width_pct", "channel_position", "volume_ratio",
+        "rsi14", "hour_sin", "hour_cos", "htf_1h_ret_1", "htf_1h_ret_4",
+        "htf_4h_ret_1", "htf_4h_ret_4",
+    ]
+    start = utc_ms("2024-01-01")
+    row = {
+        "symbol": "BTCUSDT", "signal_time_ms": start + 1234,
+        "entry_time_ms": start + 1235, "side": "LONG",
+        "label_status": "LABELED_PRICE_ONLY", "label": 1, "net_r": 1.0,
+        "exit_time_ms": start + 48 * BAR_MS,
+        "ret_1": .01, "ret_4": .02, "ret_16": .03, "atr_pct": .01,
+        "donchian_width_pct": .04, "channel_position": 1.1, "volume_ratio": 2,
+        "rsi14": .7, "hour_sin": .5, "hour_cos": .5,
+        "htf_1h_ret_1": .01, "htf_1h_ret_4": .02,
+        "htf_4h_ret_1": .03, "htf_4h_ret_4": .04,
+    }
+    path = tmp_path / "labels.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerow(row)
+    with pytest.raises(ValueError, match="not a closed 15m candle close"):
+        load_labeled_events(path)
+
+
+def test_loader_rejects_label_that_disagrees_with_net_r(tmp_path: Path):
+    fields = [
+        "symbol", "signal_time_ms", "entry_time_ms", "side", "label_status",
+        "label", "net_r", "exit_time_ms", "ret_1", "ret_4", "ret_16",
+        "atr_pct", "donchian_width_pct", "channel_position", "volume_ratio",
+        "rsi14", "hour_sin", "hour_cos", "htf_1h_ret_1", "htf_1h_ret_4",
+        "htf_4h_ret_1", "htf_4h_ret_4",
+    ]
+    start = utc_ms("2024-01-01")
+    signal = start - (start % BAR_MS) + BAR_MS - 1
+    row = {
+        "symbol": "BTCUSDT", "signal_time_ms": signal,
+        "entry_time_ms": signal + 1, "side": "LONG",
+        "label_status": "LABELED_PRICE_ONLY", "label": 1, "net_r": -0.5,
+        "exit_time_ms": signal + 48 * BAR_MS,
+        "ret_1": .01, "ret_4": .02, "ret_16": .03, "atr_pct": .01,
+        "donchian_width_pct": .04, "channel_position": 1.1, "volume_ratio": 2,
+        "rsi14": .7, "hour_sin": .5, "hour_cos": .5,
+        "htf_1h_ret_1": .01, "htf_1h_ret_4": .02,
+        "htf_4h_ret_1": .03, "htf_4h_ret_4": .04,
+    }
+    path = tmp_path / "labels.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerow(row)
+    with pytest.raises(ValueError, match="label does not match"):
         load_labeled_events(path)
