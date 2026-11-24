@@ -8,6 +8,7 @@ import pytest
 from scripts.vike_direction_aligned_research import (
     BAR_MS, FEATURES, FOLDS, chronological_inner_split,
     direction_aligned_features, load_labeled_events, run_research, utc_ms,
+    _group_diagnostics,
 )
 
 
@@ -58,6 +59,10 @@ def test_inner_split_purges_training_labels_at_boundary():
     assert max(r["signal_time_ms"] for r in train) < boundary
     assert all(r["exit_time_ms"] < boundary - 48 * BAR_MS for r in train)
     assert min(r["signal_time_ms"] for r in validation) >= boundary
+    assert max(r["signal_time_ms"] for r in train) < boundary
+    assert all(r["signal_time_ms"] < utc_ms("2025-01-01") - 48 * BAR_MS
+               and r["exit_time_ms"] < utc_ms("2025-01-01") - 48 * BAR_MS
+               for r in train + validation)
 
 
 def test_fold_periods_are_chronological_and_stop_before_holdout():
@@ -193,3 +198,57 @@ def test_loader_rejects_label_that_disagrees_with_net_r(tmp_path: Path):
         writer.writerow(row)
     with pytest.raises(ValueError, match="label does not match"):
         load_labeled_events(path)
+
+
+def test_future_feature_availability_timestamp_is_rejected(tmp_path: Path):
+    fields = [
+        "symbol", "signal_time_ms", "entry_time_ms", "side", "label_status",
+        "label", "net_r", "exit_time_ms", "feature_available_time_ms",
+        "ret_1", "ret_4", "ret_16", "atr_pct", "donchian_width_pct",
+        "channel_position", "volume_ratio", "rsi14", "hour_sin", "hour_cos",
+        "htf_1h_ret_1", "htf_1h_ret_4", "htf_4h_ret_1", "htf_4h_ret_4",
+    ]
+    signal = utc_ms("2024-01-01") - (utc_ms("2024-01-01") % BAR_MS) + BAR_MS - 1
+    row = {
+        "symbol": "BTCUSDT", "signal_time_ms": signal,
+        "entry_time_ms": signal + 1, "side": "LONG",
+        "label_status": "LABELED_PRICE_ONLY", "label": 1, "net_r": 1.0,
+        "exit_time_ms": signal + 48 * BAR_MS,
+        "feature_available_time_ms": signal + 1,
+        "ret_1": .01, "ret_4": .02, "ret_16": .03, "atr_pct": .01,
+        "donchian_width_pct": .04, "channel_position": 1.1, "volume_ratio": 2,
+        "rsi14": .7, "hour_sin": .5, "hour_cos": .5,
+        "htf_1h_ret_1": .01, "htf_1h_ret_4": .02,
+        "htf_4h_ret_1": .03, "htf_4h_ret_4": .04,
+    }
+    path = tmp_path / "labels.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerow(row)
+    with pytest.raises(ValueError, match="future feature leakage"):
+        load_labeled_events(path)
+
+
+def test_group_report_marks_missing_oos_group_inconclusive():
+    btc = event(utc_ms("2025-05-02"), symbol="BTCUSDT")
+    eth = event(utc_ms("2025-05-02"), symbol="ETHUSDT")
+    reports = _group_diagnostics(
+        [btc], [0.7], [True], "fold_1",
+        all_groups=[("BTCUSDT", "LONG", "15m"), ("ETHUSDT", "SHORT", "15m")],
+        training_rows=[btc, eth],
+    )
+    missing = next(row for row in reports if row["symbol"] == "ETHUSDT")
+    assert missing["status"] == "INCONCLUSIVE"
+    assert missing["reason"] == "NO_MATURED_OOS_EVENTS_FOR_GROUP"
+    assert missing["train_count"] == 1
+    assert missing["test_count"] == 0
+    assert missing["all_oos"] is None
+
+
+def test_direction_aligned_features_do_not_depend_on_outcome_fields():
+    raw = raw_features("SHORT")
+    baseline = direction_aligned_features(raw)
+    raw.update({"label": 1, "net_r": 9999.0, "exit_price": 1e12,
+                "exit_time_ms": 9999999999999})
+    assert direction_aligned_features(raw) == baseline
