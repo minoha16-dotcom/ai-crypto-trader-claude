@@ -1,0 +1,40 @@
+name: Vike Direction-Aligned Research Tests
+
+on:
+  push:
+    branches:
+      - feat/vike-direction-aligned-research
+    paths:
+      - "scripts/vike_direction_aligned_research.py"
+      - "tests/test_vike_direction_aligned_research.py"
+      - "requirements-direction-aligned.txt"
+      - ".github/workflows/vike-direction-aligned-research.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "scripts/vike_direction_aligned_research.py"
+      - "tests/test_vike_direction_aligned_research.py"
+      - "requirements-direction-aligned.txt"
+      - ".github/workflows/vike-direction-aligned-research.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  direction-aligned-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-direction-aligned.txt
+      - name: Install isolated research dependencies
+        run: python -m pip install -r requirements-direction-aligned.txt
+      - name: Compile research runner
+        run: python -m py_compile scripts/vike_direction_aligned_research.py
+      - name: Run Direction-Aligned temporal and feature tests
+        run: python -m pytest -q tests/test_vike_direction_aligned_research.py
