@@ -135,3 +135,6 @@ python .\scripts\vike_direction_aligned_research.py `
 ```
 
 Review `research_report.json`, `direction_aligned_report.md`, `oos_predictions.csv`, and the label bundle's `extreme_event_audit.json`. The report requires three scored folds, at least 100 OOS events, 200 training labels per symbol × direction group in every fold, positive uplift in every fold, positive selected net expectancy, and a 95% uplift confidence interval whose lower bound is above zero. Even if these statistical gates pass, funding retrieval provenance and margin/liquidation evidence remain separate approval blockers.
+
+
+Funding timing uncertainty: for a stop/target exit, if a settlement falls inside the same 15m candle that triggers the barrier, the exact ordering cannot be recovered from OHLC. Funding-aware mode excludes that event with `funding_exit_bar_timing_ambiguous` rather than applying a potentially post-exit payment. Settlements in earlier held candles are applied; Time Exit is known at the 48th candle close, so settlements through that close are applied.
