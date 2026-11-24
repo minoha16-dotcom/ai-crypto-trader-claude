@@ -464,12 +464,21 @@ def run_research(rows: list[dict], c_grid: Iterable[float] = C_GRID_DEFAULT,
         for fold in results
     )
     ci_lower = ci.get("ci_95")[0] if ci.get("ci_95") else None
+    fold_uplifts = [fold.get("selected_minus_all_net_r") for fold in scored]
+    stable_fold_uplift = len(scored) >= 3 and all(value is not None and value > 0 for value in fold_uplifts)
+    selected_expectancy = _mean(selected_r)
     quality_gates = {
-        "three_scored_oos_folds": {"pass": len(scored) >= 3, "observed": len(scored), "required": 3},
+        "three_scored_oos_folds": {"pass": len(scored) == 3, "observed": len(scored), "required": 3},
         "at_least_100_oos_events": {"pass": len(oos_rows) >= 100, "observed": len(oos_rows), "required": 100},
         "per_group_training_minimum": {"pass": group_train_gate, "required_per_group": min_train_per_group},
+        "positive_uplift_each_oos_fold": {"pass": stable_fold_uplift, "observed_fold_uplifts": fold_uplifts},
+        "positive_aggregate_uplift": {"pass": uplift is not None and uplift > 0, "observed": uplift},
+        "positive_selected_net_expectancy": {"pass": selected_expectancy is not None and selected_expectancy > 0, "observed": selected_expectancy},
         "positive_uplift_ci_lower_bound": {"pass": ci_lower is not None and ci_lower > 0, "observed_lower_bound": ci_lower},
     }
+    research_candidate_status = "STATISTICAL_GATES_PASS" if all(
+        item["pass"] for item in quality_gates.values()
+    ) else "STATISTICAL_GATES_NOT_MET"
     return {
         "schema_version": 1,
         "verdict": "RESEARCH_DIAGNOSTICS_ONLY_NOT_MODEL_APPROVAL",
@@ -488,6 +497,7 @@ def run_research(rows: list[dict], c_grid: Iterable[float] = C_GRID_DEFAULT,
         "oos_uplift_ci_95": ci,
         "group_reports": group_reports, "_oos_predictions": oos_predictions,
         "quality_gates": quality_gates,
+        "research_candidate_status": research_candidate_status,
         "acceptance": {"status": "NOT_APPROVED_FUNDING_AWARE_PRICE_ONLY_SCOPE",
                        "reasons": [
                            "Funding cashflows are applied per settlement, but retrieval completeness/provenance is not independently verified.",
