@@ -103,3 +103,35 @@ Each label run writes `extreme_event_audit.json` containing the raw Trade and Ma
 ## Research runner
 
 Run Direction-Aligned Logistic Regression diagnostics only against the Funding-aware output directory. The runner refuses Price-only or mixed label scopes. A successful run is not model approval; Funding retrieval provenance and the missing margin/liquidation model remain explicit blockers.
+
+
+## PowerShell: run Funding-aware labels and Logistic Regression
+
+Install the research/test dependencies in the project virtual environment:
+
+```powershell
+pip install -r requirements-test.txt
+```
+
+Prepare the new labels (the existing Price-only command remains the default when `--funding-aware` is omitted):
+
+```powershell
+python .\scripts\vike_v31_price_only_labels.py `
+  --drive-root $driveRoot `
+  --funding-attestation (Join-Path $evidenceDir "vike_v31_funding_coverage_attestation_ai_reviewed.json") `
+  --funding-aware
+```
+
+Then run the Direction-Aligned Logistic Regression diagnostics on the exact generated label bundle:
+
+```powershell
+$labelRoot = Join-Path $driveRoot "derived\funding-aware-labels"
+$latest = Get-ChildItem $labelRoot -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $latest) { throw "No Funding-aware label run found" }
+$out = Join-Path (Join-Path $driveRoot "derived\direction-aligned-research") $latest.Name
+python .\scripts\vike_direction_aligned_research.py `
+  --input-dir $latest.FullName `
+  --output-dir $out
+```
+
+Review `research_report.json`, `direction_aligned_report.md`, `oos_predictions.csv`, and the label bundle's `extreme_event_audit.json`. The report requires three scored folds, at least 100 OOS events, 200 training labels per symbol × direction group in every fold, positive uplift in every fold, positive selected net expectancy, and a 95% uplift confidence interval whose lower bound is above zero. Even if these statistical gates pass, funding retrieval provenance and margin/liquidation evidence remain separate approval blockers.
