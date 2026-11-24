@@ -1,4 +1,4 @@
-# Vike V3.1 Price-only Labels
+# Vike V3.1 Price-only and Funding-aware Labels
 
 ## Purpose
 
@@ -80,3 +80,26 @@ Expected artifacts:
 ## Interpretation
 
 A successful run means the price-only label dataset was prepared. It does not mean the strategy is profitable, the model is accepted, the Maintenance Bracket gate is closed, or the system is ready for live trading.
+
+
+## Funding-aware research mode (new)
+
+The default mode remains the legacy Price-only benchmark: Funding settlements during a position are excluded. Use `--funding-aware` to apply every settlement cashflow per base unit for Binance USD-M linear USDT perpetuals:
+
+`funding_cashflow_per_unit = -side_sign * settlement_mark_price * funding_rate`
+
+where `side_sign=+1` for LONG and `-1` for SHORT. Positive rates debit LONG and credit SHORT. Funding cashflows are included in net PnL after fees and adverse slippage. Time exits remain eligible; settlements from entry time through the 48th Mark Price candle close are included conservatively because 15m OHLC does not identify the intrabar exit instant.
+
+Funding CSV hashes are checked against the reviewed attestation, but independent retrieval completeness/provenance remains unverified and is reported as a blocker. This mode does not model maintenance margin, leverage, isolated wallet evolution, or liquidation, and it is not a liquidation-aware futures backtest.
+
+## Feature timestamp provenance
+
+The event generator records `feature_available_time_ms`, `htf_1h_close_time_ms`, and `htf_4h_close_time_ms`. The Direction-Aligned runner requires these columns for Funding-aware research, checks that the feature timestamp equals the closed 15m signal timestamp, verifies 1h/4h UTC close boundaries, rejects future timestamps, and rejects stale higher-timeframe context.
+
+## Extreme-event audit
+
+Each label run writes `extreme_event_audit.json` containing the raw Trade and Mark Price 15m OHLC window around feature outliers. This is evidence for manual source verification; the pipeline does not clip, winsorize, or silently remove extremes.
+
+## Research runner
+
+Run Direction-Aligned Logistic Regression diagnostics only against the Funding-aware output directory. The runner refuses Price-only or mixed label scopes. A successful run is not model approval; Funding retrieval provenance and the missing margin/liquidation model remain explicit blockers.
