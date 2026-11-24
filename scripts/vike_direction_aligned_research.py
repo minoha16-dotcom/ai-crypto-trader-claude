@@ -131,6 +131,23 @@ def load_labeled_events(labels_csv: Path) -> list[dict]:
                 raise ValueError(f"line {line}: event outside the frozen development window")
             if exit_time - signal > 48 * BAR_MS:
                 raise ValueError(f"line {line}: label exceeds the frozen 48-bar maturity horizon")
+            # When the source bundle carries explicit feature/HTF availability
+            # timestamps, fail closed if any value was not observable at signal time.
+            for timestamp_key in (
+                "feature_available_time_ms", "htf_1h_close_time_ms",
+                "htf_4h_close_time_ms",
+            ):
+                timestamp_value = raw.get(timestamp_key)
+                if timestamp_value not in (None, ""):
+                    try:
+                        available_at = int(timestamp_value)
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(f"line {line}: invalid {timestamp_key}") from exc
+                    if available_at > signal:
+                        raise ValueError(
+                            f"line {line}: future feature leakage: {timestamp_key} "
+                            f"({available_at}) is after signal_time_ms ({signal})"
+                        )
             key = (symbol, side, signal)
             if key in seen:
                 raise ValueError(f"line {line}: duplicate symbol/side/signal event {key}")
@@ -268,10 +285,14 @@ def _group_key(row):
 
 
 def _group_diagnostics(rows: list[dict], probabilities: list[float], selected: list[bool],
-                       fold_name: str, all_groups: Iterable[tuple[str, str, str]] = ()):
+                       fold_name: str, all_groups: Iterable[tuple[str, str, str]] = (),
+                       training_rows: Iterable[dict] = ()):
     grouped = defaultdict(list)
+    train_counts = defaultdict(int)
     for row, prob, take in zip(rows, probabilities, selected):
         grouped[_group_key(row)].append((row, prob, take))
+    for row in training_rows:
+        train_counts[_group_key(row)] += 1
     for group in all_groups:
         grouped.setdefault(group, [])
     result = []
@@ -280,13 +301,26 @@ def _group_diagnostics(rows: list[dict], probabilities: list[float], selected: l
         group_probs = [item[1] for item in items]
         chosen = [item[0]["net_r"] for item in items if item[2]]
         all_r = [r["net_r"] for r in group_rows]
+        base = {
+            "fold": fold_name, "symbol": symbol, "direction": side,
+            "timeframe": timeframe, "train_count": train_counts[(symbol, side, timeframe)],
+            "test_count": len(group_rows), "selected_count": len(chosen),
+        }
+        if not group_rows:
+            result.append({
+                **base, "status": "INCONCLUSIVE",
+                "reason": "NO_MATURED_OOS_EVENTS_FOR_GROUP",
+                "all_oos": None, "selected_mean_net_r": None,
+                "all_mean_net_r": None, "selected_minus_all_net_r": None,
+            })
+            continue
         result.append({
-            "fold": fold_name, "symbol": symbol, "direction": side, "timeframe": timeframe,
-            "status": "SCORED",
+            **base, "status": "SCORED",
             "all_oos": _classification_metrics(group_rows, group_probs),
-            "selected_count": len(chosen), "selected_mean_net_r": _mean(chosen),
+            "selected_mean_net_r": _mean(chosen),
             "all_mean_net_r": _mean(all_r),
             "selected_minus_all_net_r": (_mean(chosen) - _mean(all_r)) if chosen else None,
+            "reason": None if chosen else "NO_EVENTS_ABOVE_VALIDATION_THRESHOLD",
         })
     return result
 
@@ -382,7 +416,10 @@ def run_research(rows: list[dict], c_grid: Iterable[float] = C_GRID_DEFAULT,
         results.append(fold_report)
         for row, prob, take in zip(test, probabilities, selected):
             oos_predictions.append({**row, "probability": prob, "selected": take, "fold": fold["name"]})
-        group_reports.extend(_group_diagnostics(test, probabilities, selected, fold["name"], all_groups))
+        group_reports.extend(_group_diagnostics(
+            test, probabilities, selected, fold["name"], all_groups,
+            training_rows=training,
+        ))
 
     scored = [r for r in results if r["status"] == "SCORED"]
     oos_predictions.sort(key=lambda r: (r["signal_time_ms"], r["symbol"], r["side"]))
@@ -412,6 +449,7 @@ def run_research(rows: list[dict], c_grid: Iterable[float] = C_GRID_DEFAULT,
         "c_grid": list(c_grid), "c_selection_metric": "inner_validation_roc_auc",
         "class_weight": None, "random_state": 31,
         "split_policy": "3 expanding OOS folds; inner chronological 80/20 C selection; 48-bar maturity purge/embargo; scaler fit on training only",
+        "feature_timestamp_policy": "optional feature_available_time_ms, htf_1h_close_time_ms, and htf_4h_close_time_ms are checked when supplied; absent source timestamps are explicitly not independently verifiable by this runner",
         "folds": results, "scored_fold_count": len(scored),
         "oos_event_count": len(oos_rows), "oos_selected_count": len(selected_r),
         "oos_all_mean_net_r": _mean(all_r), "oos_selected_mean_net_r": _mean(selected_r),
