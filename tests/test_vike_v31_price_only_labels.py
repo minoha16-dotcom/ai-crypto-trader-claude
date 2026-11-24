@@ -159,3 +159,18 @@ def test_funding_aware_rejects_malformed_settlement_record():
                                     apply_funding_cashflows=True)
     assert result["status"] == "excluded"
     assert result["reason"] == "invalid_funding_cashflow_record"
+
+
+def test_funding_aware_excludes_settlement_in_intrabar_barrier_exit_candle():
+    event, trade, marks, _ = make_case(
+        first_mark={"o": 100.0, "h": 101.0, "l": 96.0, "c": 100.0}
+    )
+    funding = [SimpleNamespace(
+        funding_time_ms=event["entry_time_ms"] + 1,
+        funding_rate=0.001, mark_price=100.0,
+    )]
+    result = label_price_only_event(event, trade, marks, funding, 0.0, 0.0,
+                                    apply_funding_cashflows=True)
+    assert result["status"] == "excluded"
+    assert result["reason"] == "funding_exit_bar_timing_ambiguous"
+    assert result["ambiguous_funding_events"] == 1
