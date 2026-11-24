@@ -39,7 +39,7 @@ The 14-feature vector is direction-neutral: positive directional values always m
 | volume_ratio | log(1 + volume ratio) |
 | hour_sin, hour_cos | Unchanged |
 
-The runner requires normalized RSI in [0, 1], positive ATR/channel width, finite numeric inputs, and a closed 15m signal timestamp. No label, net R, exit price, funding, or execution-cost field is used as a model feature.
+The runner requires normalized RSI in [0, 1], positive ATR/channel width, finite numeric inputs, and a closed 15m signal timestamp. If the input CSV includes `feature_available_time_ms`, `htf_1h_close_time_ms`, or `htf_4h_close_time_ms`, each is checked to be no later than the signal timestamp. If those provenance columns are absent, this runner explicitly cannot independently prove the upstream feature as-of time; the causal feature-generation contract must be verified in the source dataset pipeline. No label, net R, exit price, funding, or execution-cost field is used as a model feature.
 
 ## Model and evaluation protocol
 
@@ -97,7 +97,7 @@ The output directory must not be inside the input bundle or raw-staging. Choose 
 - `oos_predictions.csv`: OOS-only predictions, selected/abstained decisions, labels, net R, and aligned features.
 - `run_manifest.json`: input hashes, script hash, runtime versions, fold settings, and safety flags.
 
-The group table contains one row per symbol × direction × timeframe × fold, including explicit INCONCLUSIVE rows when a fold cannot be scored.
+The group table contains one row per symbol × direction × timeframe × fold, including `train_count`, `test_count`, selected count, and explicit `INCONCLUSIVE` status/reason when no matured OOS observations exist for a group.
 
 ## Interpretation
 
