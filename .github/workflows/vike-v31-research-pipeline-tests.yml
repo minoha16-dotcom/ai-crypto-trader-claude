@@ -6,6 +6,7 @@ on:
     paths:
       - "scripts/vike_v31_research_pipeline.py"
       - "scripts/vike_v31_funding_archive_audit.py"
+      - "scripts/vike_v31_funding_pagination_audit.py"
       - "tests/test_vike_v31_research_pipeline.py"
       - "backend/triple_barrier_labels.py"
       - "backend/causal_market_features.py"
@@ -45,6 +46,7 @@ jobs:
         run: |
           python -m py_compile scripts/vike_v31_research_pipeline.py
           python -m py_compile scripts/vike_v31_funding_archive_audit.py
+          python -m py_compile scripts/vike_v31_funding_pagination_audit.py
           python -m py_compile backend/triple_barrier_labels.py
       - name: Run Triple-Barrier, data-loader and walk-forward gate tests
         run: |
