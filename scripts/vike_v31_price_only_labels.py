@@ -325,6 +325,48 @@ def run(args) -> dict:
                 event[key] = result[key]
             labeled_events.append(event)
 
+    # Preserve raw evidence around extreme feature rows; never clip or auto-exclude.
+    extreme_events = []
+    thresholds = {
+        "abs_ret_1_gt_5pct": lambda f: abs(f["ret_1"]) > 0.05,
+        "abs_ret_4_gt_10pct": lambda f: abs(f["ret_4"]) > 0.10,
+        "abs_ret_16_gt_20pct": lambda f: abs(f["ret_16"]) > 0.20,
+        "abs_htf_1h_ret_1_gt_10pct": lambda f: abs(f["htf_1h_ret_1"]) > 0.10,
+        "abs_htf_4h_ret_4_gt_20pct": lambda f: abs(f["htf_4h_ret_4"]) > 0.20,
+        "volume_ratio_gt_50": lambda f: f["volume_ratio"] > 50,
+        "abs_channel_position_gt_3": lambda f: abs(f["channel_position"]) > 3,
+    }
+    for event in all_events:
+        features = event["features"]
+        triggered = [name for name, check in thresholds.items() if check(features)]
+        if not triggered:
+            continue
+        segment = segment_lookup.get((event["symbol"], event["signal_time_ms"]))
+        if segment is None:
+            continue
+        signal_index = next((i for i, bar in enumerate(segment) if bar["close_t"] == event["signal_time_ms"]), None)
+        if signal_index is None:
+            continue
+        start_index = max(0, signal_index - 64)
+        evidence = []
+        for bar in segment[start_index:signal_index + 1]:
+            mark = per_symbol_marks[event["symbol"]].get(bar["t"])
+            evidence.append({
+                "open_time_ms": bar["t"], "close_time_ms": bar["close_t"],
+                "trade_ohlc": {k: bar[k] for k in ("o", "h", "l", "c")},
+                "mark_ohlc": ({k: mark["mark_" + k] for k in ("o", "h", "l", "c")} if mark else None),
+            })
+        extreme_events.append({
+            "symbol": event["symbol"], "signal_time_ms": event["signal_time_ms"],
+            "side": event["side"], "triggered_thresholds": triggered,
+            "features": features,
+            "feature_available_time_ms": event.get("feature_available_time_ms"),
+            "htf_1h_close_time_ms": event.get("htf_1h_close_time_ms"),
+            "htf_4h_close_time_ms": event.get("htf_4h_close_time_ms"),
+            "source_window_15m": evidence,
+            "review_status": "RAW_OHLC_EXPORTED_FOR_MANUAL_REVIEW_NOT_CLIPPED",
+        })
+
     output_root.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output_dir = output_root / run_id
@@ -337,15 +379,15 @@ def run(args) -> dict:
             "events": len(rows),
             "long_events": sum(row["side"] == "LONG" for row in rows),
             "short_events": sum(row["side"] == "SHORT" for row in rows),
-            "labeled_price_only": sum(row["label_status"] == "LABELED_PRICE_ONLY" for row in rows),
-            "excluded": sum(row["label_status"] != "LABELED_PRICE_ONLY" for row in rows),
+            "labeled": sum(row["label_status"] == ("LABELED_FUNDING_AWARE" if funding_aware else "LABELED_PRICE_ONLY") for row in rows),
+            "excluded": sum(row["label_status"] != ("LABELED_FUNDING_AWARE" if funding_aware else "LABELED_PRICE_ONLY") for row in rows),
             "label_balance": {
                 "negative": sum(row.get("label") == 0 for row in rows),
                 "positive": sum(row.get("label") == 1 for row in rows),
             },
             "exclusion_reasons": dict(Counter(
                 row.get("label_reason") or row.get("overlap_status")
-                for row in rows if row["label_status"] != "LABELED_PRICE_ONLY"
+                for row in rows if row["label_status"] != ("LABELED_FUNDING_AWARE" if funding_aware else "LABELED_PRICE_ONLY")
             )),
         }
 
@@ -411,11 +453,17 @@ def run(args) -> dict:
     (output_dir / "excluded_days.json").write_text(
         json.dumps(excluded_days, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
+    (output_dir / "extreme_event_audit.json").write_text(
+        json.dumps(extreme_events, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+    )
     fields = [
-        "symbol", "signal_time_ms", "entry_time_ms", "side", "atr",
-        "overlap_status", "label_status", "label_reason", "label", "net_r",
-        "exit_time_ms", "exit_reason", "entry_fill", "exit_fill",
-        "stop_price", "target_price", "funding_events_applied", *FEATURES,
+        "symbol", "signal_time_ms", "feature_available_time_ms",
+        "htf_1h_close_time_ms", "htf_4h_close_time_ms",
+        "entry_time_ms", "side", "atr", "overlap_status", "label_status",
+        "label_reason", "label", "net_r", "exit_time_ms", "exit_reason",
+        "entry_fill", "exit_fill", "stop_price", "target_price",
+        "gross_pnl_per_unit", "entry_fee_per_unit", "exit_fee_per_unit",
+        "funding_cashflow_per_unit", "funding_events_applied", *FEATURES,
     ]
     with (output_dir / "labels.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
