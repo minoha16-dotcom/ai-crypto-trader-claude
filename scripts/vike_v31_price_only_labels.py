@@ -192,7 +192,7 @@ def label_price_only_event(
         "bars_scanned": rows.index(exit_bar) + 1,
         "barrier_trigger_source": "MARK_PRICE_OHLC",
         "execution_price_proxy": "MARK_TRIGGER_LEVEL_WITH_ADVERSE_SLIPPAGE",
-        "label_scope": ("FUNDING_AWARE_PRICE_ONLY_NO_MARGIN_OR_LIQUIDATION" if funding_aware
+        "label_scope": ("FUNDING_AWARE_PRICE_ONLY_NO_MARGIN_OR_LIQUIDATION" if apply_funding_cashflows
                         else "PRICE_ONLY_EXCLUDES_FUNDING_CROSSING_EVENTS_NO_MARGIN_OR_LIQUIDATION"),
     }
 
