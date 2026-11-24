@@ -131,23 +131,32 @@ def direction_aligned_features(row: dict) -> dict[str, float]:
 
 def load_labeled_events(labels_csv: Path) -> list[dict]:
     required = {
-        "symbol", "signal_time_ms", "feature_available_time_ms",
-        "htf_1h_close_time_ms", "htf_4h_close_time_ms",
-        "entry_time_ms", "side", "label_status", "funding_cashflow_per_unit",
-        "funding_events_applied", "label", "net_r", "exit_time_ms", "ret_1", "ret_4", "ret_16",
+        "symbol", "signal_time_ms", "entry_time_ms", "side", "label_status",
+        "label", "net_r", "exit_time_ms", "ret_1", "ret_4", "ret_16",
         "atr_pct", "donchian_width_pct", "channel_position", "volume_ratio",
         "rsi14", "hour_sin", "hour_cos", "htf_1h_ret_1", "htf_1h_ret_4",
         "htf_4h_ret_1", "htf_4h_ret_4",
     }
-    rows, seen = [], set()
+    rows, seen, observed_scopes = [], set(), set()
     with labels_csv.open("r", newline="", encoding="utf-8-sig") as handle:
         reader = csv.DictReader(handle)
         missing = required - set(reader.fieldnames or [])
         if missing:
             raise ValueError(f"labels.csv missing columns: {sorted(missing)}")
         for line, raw in enumerate(reader, 2):
-            if raw.get("label_status") != "LABELED_FUNDING_AWARE":
+            label_status = raw.get("label_status")
+            if label_status not in ("LABELED_FUNDING_AWARE", "LABELED_PRICE_ONLY"):
                 continue
+            observed_scopes.add(label_status)
+            if label_status == "LABELED_FUNDING_AWARE":
+                for required_key in ("feature_available_time_ms", "htf_1h_close_time_ms",
+                                     "htf_4h_close_time_ms", "funding_cashflow_per_unit",
+                                     "funding_events_applied"):
+                    if required_key not in (reader.fieldnames or []):
+                        raise ValueError(f"line {line}: funding-aware labels missing {required_key}")
+                _number(raw, "funding_cashflow_per_unit")
+                if int(raw["funding_events_applied"]) < 0:
+                    raise ValueError(f"line {line}: funding_events_applied must be nonnegative")
             symbol = str(raw["symbol"]).upper()
             side = str(raw["side"]).upper()
             signal, entry, exit_time = (int(raw[k]) for k in ("signal_time_ms", "entry_time_ms", "exit_time_ms"))
@@ -161,7 +170,12 @@ def load_labeled_events(labels_csv: Path) -> list[dict]:
                 raise ValueError(f"line {line}: event outside the frozen development window")
             if exit_time - signal > 48 * BAR_MS:
                 raise ValueError(f"line {line}: label exceeds the frozen 48-bar maturity horizon")
-            validate_feature_timestamps(raw, signal, line)
+            if label_status == "LABELED_FUNDING_AWARE" or any(
+                raw.get(key) not in (None, "") for key in (
+                    "feature_available_time_ms", "htf_1h_close_time_ms", "htf_4h_close_time_ms"
+                )
+            ):
+                validate_feature_timestamps(raw, signal, line)
             key = (symbol, side, signal)
             if key in seen:
                 raise ValueError(f"line {line}: duplicate symbol/side/signal event {key}")
@@ -179,8 +193,10 @@ def load_labeled_events(labels_csv: Path) -> list[dict]:
             }
             event["features"] = direction_aligned_features(raw)
             rows.append(event)
+    if len(observed_scopes) > 1:
+        raise ValueError("mixed Price-only and Funding-aware labels are not allowed in one research run")
     if not rows:
-        raise ValueError("no LABELED_FUNDING_AWARE rows found; refusing Price-only or mixed-scope research")
+        raise ValueError("no labeled research rows found")
     return sorted(rows, key=lambda item: (item["signal_time_ms"], item["symbol"], item["side"]))
 
 
