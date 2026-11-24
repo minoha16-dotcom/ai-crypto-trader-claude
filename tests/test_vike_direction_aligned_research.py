@@ -301,8 +301,32 @@ def test_feature_timestamps_reject_stale_context():
     signal = 14_399_999
     row = {
         "feature_available_time_ms": signal,
-        "htf_1h_close_time_ms": signal - 3_600_000 - 1,
+        "htf_1h_close_time_ms": signal - 3_600_000,
         "htf_4h_close_time_ms": signal,
     }
     with pytest.raises(ValueError, match="1h context timestamp is stale"):
+        validate_feature_timestamps(row, signal)
+
+
+def test_feature_timestamps_reject_future_4h_close():
+    from scripts.vike_direction_aligned_research import validate_feature_timestamps
+    signal = 14_399_999
+    row = {
+        "feature_available_time_ms": signal,
+        "htf_1h_close_time_ms": signal,
+        "htf_4h_close_time_ms": signal + 14_400_000,
+    }
+    with pytest.raises(ValueError, match="future feature leakage"):
+        validate_feature_timestamps(row, signal)
+
+
+def test_feature_timestamps_reject_future_feature_computation_time():
+    from scripts.vike_direction_aligned_research import validate_feature_timestamps
+    signal = 14_399_999
+    row = {
+        "feature_available_time_ms": signal + 1,
+        "htf_1h_close_time_ms": signal,
+        "htf_4h_close_time_ms": signal,
+    }
+    with pytest.raises(ValueError, match="future feature leakage"):
         validate_feature_timestamps(row, signal)
