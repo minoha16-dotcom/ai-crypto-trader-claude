@@ -151,8 +151,19 @@ def label_price_only_event(
     funding_during = [item for item in funding_events
                       if entry_time <= item.funding_time_ms <= exit_bar["close_t"]]
     funding_cashflow_per_unit = 0.0
+    funding_to_apply = funding_during
     if apply_funding_cashflows:
-        for item in funding_during:
+        # For stop/target exits, OHLC reveals only the exit candle, not the
+        # intrabar hit time. A settlement inside that same candle may be before
+        # or after the barrier exit, so fail closed rather than invent ordering.
+        if exit_reason != "time_exit":
+            ambiguous = [item for item in funding_during
+                         if exit_bar["t"] <= item.funding_time_ms <= exit_bar["close_t"]]
+            if ambiguous:
+                return {"status": "excluded",
+                        "reason": "funding_exit_bar_timing_ambiguous",
+                        "ambiguous_funding_events": len(ambiguous)}
+        for item in funding_to_apply:
             try:
                 funding_rate = float(item.funding_rate)
                 funding_mark = float(item.mark_price)
@@ -418,7 +429,7 @@ def run(args) -> dict:
             "slippage_bps_per_side": args.slippage_bps_per_side,
             "funding_cashflow_applied": funding_aware,
         },
-        "funding_policy": ("APPLY_EACH_SETTLEMENT_CASHFLOW=-SIDE_SIGN*MARK_PRICE*FUNDING_RATE_FROM_ENTRY_THROUGH_EXIT_BAR_CLOSE"
+        "funding_policy": ("APPLY_UNAMBIGUOUS_SETTLEMENT_CASHFLOWS; EXCLUDE_FUNDING_IN_INTRABAR_STOP_TARGET_EXIT_CANDLE; INCLUDE_THROUGH_TIME_EXIT_CLOSE"
                            if funding_aware else "EXCLUDE_ANY_EVENT_WITH_FUNDING_SETTLEMENT_FROM_ENTRY_TIME_THROUGH_EXIT_BAR_CLOSE"),
         "funding_completeness_status": "HASH_ATTESTED_ONLY_RETRIEVAL_PROVENANCE_NOT_INDEPENDENTLY_VERIFIED",
         "net_r_definition": ("directional_price_pnl_after_round_trip_fees_slippage_plus_funding_cashflows_per_unit_divided_by_1_5_atr"
