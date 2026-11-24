@@ -2,12 +2,16 @@ name: Vike V3.1 Verified Labels and Walk-Forward Tests
 
 on:
   push:
-    branches: [feat/vike-v31-verified-label-walk-forward]
+    branches:
+      - feat/vike-v31-verified-label-walk-forward
+      - feat/vike-v31-price-only-labels
     paths:
       - "scripts/vike_v31_research_pipeline.py"
+      - "scripts/vike_v31_price_only_labels.py"
       - "scripts/vike_v31_funding_archive_audit.py"
       - "scripts/vike_v31_funding_pagination_audit.py"
       - "tests/test_vike_v31_research_pipeline.py"
+      - "tests/test_vike_v31_price_only_labels.py"
       - "backend/triple_barrier_labels.py"
       - "backend/causal_market_features.py"
       - "backend/binance_usdm_liquidation.py"
@@ -15,10 +19,14 @@ on:
       - "requirements-vike-research.txt"
       - ".github/workflows/vike-v31-research-pipeline-tests.yml"
   pull_request:
-    branches: [feat/vike-v31-drive-exploratory-training]
+    branches:
+      - feat/vike-v31-drive-exploratory-training
+      - feat/vike-v31-verified-label-walk-forward
     paths:
       - "scripts/vike_v31_research_pipeline.py"
+      - "scripts/vike_v31_price_only_labels.py"
       - "tests/test_vike_v31_research_pipeline.py"
+      - "tests/test_vike_v31_price_only_labels.py"
       - "backend/triple_barrier_labels.py"
       - "backend/causal_market_features.py"
       - "backend/binance_usdm_liquidation.py"
@@ -45,11 +53,13 @@ jobs:
       - name: Compile research pipeline
         run: |
           python -m py_compile scripts/vike_v31_research_pipeline.py
+          python -m py_compile scripts/vike_v31_price_only_labels.py
           python -m py_compile scripts/vike_v31_funding_archive_audit.py
           python -m py_compile scripts/vike_v31_funding_pagination_audit.py
           python -m py_compile backend/triple_barrier_labels.py
-      - name: Run Triple-Barrier, data-loader and walk-forward gate tests
+      - name: Run Triple-Barrier, price-only and walk-forward tests
         run: |
           python -m pytest -q tests/test_vike_v31_research_pipeline.py
+          python -m pytest -q tests/test_vike_v31_price_only_labels.py
           python -m pytest -q tests/test_triple_barrier_labels.py
           python -m pytest -q tests/test_vike_exploratory_train.py
