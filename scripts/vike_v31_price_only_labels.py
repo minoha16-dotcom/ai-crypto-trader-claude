@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Vike V3.1 Price-only Triple-Barrier label preparation.
+"""Vike V3.1 Triple-Barrier labels: legacy Price-only and optional Funding-aware.
 
-This path deliberately does NOT read or infer historical maintenance brackets,
-position size, leverage, margin, or liquidation. It uses Mark Price OHLC to
-trigger barriers, trade OHLC for next-bar-open entry, explicit fees/slippage,
-and excludes any event whose open-position interval overlaps a Funding
-settlement. Funding cashflows are not applied to net_r.
+Both modes use Mark Price OHLC barriers, next trade-bar open entry, fees and
+adverse slippage. Funding-aware mode applies each linear-USDT settlement cashflow
+per base unit; neither mode models leverage, margin, maintenance tiers or
+liquidation. The default remains the frozen Price-only compatibility path.
 
-Reads only the frozen Binance USD-M development archive (Nov 2023-Apr 2026)
-and writes only beneath derived/price-only-labels. It never trains a model,
-downloads data, mutates raw-staging, or accesses the locked May-Oct 2026 holdout.
+Reads only the frozen Binance USD-M development archive (Nov 2023-Apr 2026),
+keeps raw-staging read-only, and never accesses the locked May-Oct 2026 holdout.
 """
 from __future__ import annotations
 
@@ -430,6 +428,8 @@ def run(args) -> dict:
         "liquidation_model_used": False,
         "event_count": len(all_events),
         "labeled_event_count": len(labeled_events),
+        "extreme_event_audit_count": len(extreme_events),
+        "extreme_event_audit_file": "extreme_event_audit.json",
         "per_symbol": per_symbol,
         "acceptance_status": "NOT_EVALUATED_NO_MODEL_TRAINING",
         "acceptance_blockers": ([
