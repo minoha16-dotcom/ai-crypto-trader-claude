@@ -29,6 +29,7 @@ FEATURES = (
     "dir_htf_4h_ret_1", "dir_htf_4h_ret_4",
 )
 C_GRID_DEFAULT = (0.001, 0.01, 0.1, 1.0, 10.0)
+FROZEN_SYMBOLS = ("BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "LINKUSDT")
 FOLDS = (
     {"name": "fold_1", "test_start": "2025-05-01", "test_end": "2025-09-01"},
     {"name": "fold_2", "test_start": "2025-09-01", "test_end": "2026-01-01"},
@@ -120,8 +121,8 @@ def load_labeled_events(labels_csv: Path) -> list[dict]:
             symbol = str(raw["symbol"]).upper()
             side = str(raw["side"]).upper()
             signal, entry, exit_time = (int(raw[k]) for k in ("signal_time_ms", "entry_time_ms", "exit_time_ms"))
-            if side not in ("LONG", "SHORT") or not symbol:
-                raise ValueError(f"line {line}: invalid symbol/side")
+            if side not in ("LONG", "SHORT") or symbol not in FROZEN_SYMBOLS:
+                raise ValueError(f"line {line}: invalid symbol/side or symbol outside frozen universe")
             if entry != signal + 1 or exit_time <= entry:
                 raise ValueError(f"line {line}: invalid signal/entry/exit ordering")
             if signal % BAR_MS != BAR_MS - 1:
@@ -135,12 +136,15 @@ def load_labeled_events(labels_csv: Path) -> list[dict]:
                 raise ValueError(f"line {line}: duplicate symbol/side/signal event {key}")
             seen.add(key)
             label_value = int(raw["label"])
+            net_r = _number(raw, "net_r")
             if label_value not in (0, 1):
                 raise ValueError(f"line {line}: label must be binary")
+            if label_value != int(net_r > 0.0):
+                raise ValueError(f"line {line}: label does not match the frozen net_r > 0 definition")
             event = {
                 "symbol": symbol, "side": side, "timeframe": "15m",
                 "signal_time_ms": signal, "entry_time_ms": entry, "exit_time_ms": exit_time,
-                "label": label_value, "net_r": _number(raw, "net_r"),
+                "label": label_value, "net_r": net_r,
             }
             event["features"] = direction_aligned_features(raw)
             rows.append(event)
@@ -289,7 +293,8 @@ def _group_diagnostics(rows: list[dict], probabilities: list[float], selected: l
 
 def run_research(rows: list[dict], c_grid: Iterable[float] = C_GRID_DEFAULT,
                  min_train_per_group: int = 200, min_pooled_train: int = 3000,
-                 min_test_per_fold: int = 50, bootstrap_reps: int = 2000) -> dict:
+                 min_test_per_fold: int = 50, bootstrap_reps: int = 2000,
+                 expected_symbols: Iterable[str] | None = None) -> dict:
     import sklearn
     import numpy as np
     results, oos_predictions, group_reports = [], [], []
@@ -302,7 +307,11 @@ def run_research(rows: list[dict], c_grid: Iterable[float] = C_GRID_DEFAULT,
         train_group_counts = defaultdict(int)
         for row in training:
             train_group_counts[_group_key(row)] += 1
-        all_groups = sorted({_group_key(r) for r in rows})
+        symbols = tuple(expected_symbols) if expected_symbols is not None else tuple(sorted({r["symbol"] for r in rows}))
+        all_groups = sorted(
+            {_group_key(r) for r in rows}
+            | {(symbol, side, "15m") for symbol in symbols for side in ("LONG", "SHORT")}
+        )
         missing_groups = ["|".join(group) for group in all_groups
                           if train_group_counts[group] < min_train_per_group]
         fold_report = {"fold": fold["name"], "test_start": fold["test_start"],
@@ -406,7 +415,9 @@ def run_research(rows: list[dict], c_grid: Iterable[float] = C_GRID_DEFAULT,
         "folds": results, "scored_fold_count": len(scored),
         "oos_event_count": len(oos_rows), "oos_selected_count": len(selected_r),
         "oos_all_mean_net_r": _mean(all_r), "oos_selected_mean_net_r": _mean(selected_r),
-        "oos_top_tercile_uplift_net_r": uplift, "oos_uplift_ci_95": ci,
+        "oos_validation_selected_uplift_net_r": uplift,
+        "oos_selected_fraction": (len(selected_r) / len(oos_rows)) if oos_rows else None,
+        "oos_uplift_ci_95": ci,
         "group_reports": group_reports, "_oos_predictions": oos_predictions,
         "quality_gates": quality_gates,
         "acceptance": {"status": "NOT_APPROVED_PRICE_ONLY_SCOPE",
@@ -437,7 +448,7 @@ def write_outputs(report: dict, output_dir: Path, source_csv: Path):
           f"- Scored folds: {report['scored_fold_count']}/3",
           f"- All OOS mean R: {report['oos_all_mean_net_r']}",
           f"- Selected mean R: {report['oos_selected_mean_net_r']}",
-          f"- Uplift: {report['oos_top_tercile_uplift_net_r']}",
+          f"- Validation-selected uplift: {report['oos_validation_selected_uplift_net_r']}",
           f"- 95% CI: {report['oos_uplift_ci_95'].get('ci_95')}", "",
           "## Fold diagnostics", "",
           "| Fold | Status | Train | OOS | AUC | All mean R | Selected mean R | Uplift |",
@@ -507,7 +518,8 @@ def main() -> int:
     try:
         rows = load_labeled_events(labels_csv)
         report = run_research(rows, c_grid, args.min_train_per_group,
-                              args.min_pooled_train, args.min_test_per_fold, args.bootstrap_reps)
+                              args.min_pooled_train, args.min_test_per_fold, args.bootstrap_reps,
+                              source_report.get("symbols", FROZEN_SYMBOLS))
         report["source"] = {
             "label_rows": len(rows), "labels_csv_sha256": sha256_file(labels_csv),
             "source_report_sha256": sha256_file(report_path),
