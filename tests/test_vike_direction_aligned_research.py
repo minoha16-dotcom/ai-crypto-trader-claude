@@ -79,7 +79,7 @@ def test_wfo_fails_closed_when_group_sample_gate_not_met():
                           min_test_per_fold=50, bootstrap_reps=20)
     assert report["scored_fold_count"] == 0
     assert all(fold["status"] == "INCONCLUSIVE" for fold in report["folds"])
-    assert report["acceptance"]["status"] == "NOT_APPROVED_PRICE_ONLY_SCOPE"
+    assert report["acceptance"]["status"] == "NOT_APPROVED_FUNDING_AWARE_PRICE_ONLY_SCOPE"
 
 
 def test_synthetic_three_fold_wfo_reports_every_symbol_direction_group():
