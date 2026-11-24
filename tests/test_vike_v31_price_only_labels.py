@@ -107,3 +107,55 @@ def test_short_side_stop_is_checked_on_mark_high():
     assert result["status"] == "labeled"
     assert result["exit_reason"] == "stop_loss"
     assert result["label"] == 0
+
+
+def test_funding_aware_long_pays_positive_funding():
+    event, trade, marks, _ = make_case()
+    funding = [SimpleNamespace(
+        funding_time_ms=event["entry_time_ms"] + 1,
+        funding_rate=0.001, mark_price=100.0,
+    )]
+    result = label_price_only_event(event, trade, marks, funding, 0.0, 0.0,
+                                    apply_funding_cashflows=True)
+    assert result["status"] == "labeled"
+    assert result["funding_events_applied"] == 1
+    assert result["funding_cashflow_per_unit"] == pytest.approx(-0.1)
+    assert result["net_r"] == pytest.approx(-0.1 / 3.0)
+    assert result["label_scope"] == "FUNDING_AWARE_PRICE_ONLY_NO_MARGIN_OR_LIQUIDATION"
+
+
+def test_funding_aware_short_receives_positive_funding():
+    event, trade, marks, _ = make_case(side="SHORT")
+    funding = [SimpleNamespace(
+        funding_time_ms=event["entry_time_ms"] + 1,
+        funding_rate=0.001, mark_price=100.0,
+    )]
+    result = label_price_only_event(event, trade, marks, funding, 0.0, 0.0,
+                                    apply_funding_cashflows=True)
+    assert result["status"] == "labeled"
+    assert result["funding_cashflow_per_unit"] == pytest.approx(0.1)
+    assert result["net_r"] == pytest.approx(0.1 / 3.0)
+    assert result["label"] == 1
+
+
+def test_funding_aware_time_exit_applies_all_settlements_through_exit_close():
+    event, trade, marks, _ = make_case()
+    funding = [
+        SimpleNamespace(funding_time_ms=event["entry_time_ms"], funding_rate=0.001, mark_price=100.0),
+        SimpleNamespace(funding_time_ms=trade[-1]["close_t"], funding_rate=-0.0005, mark_price=100.0),
+    ]
+    result = label_price_only_event(event, trade, marks, funding, 0.0, 0.0,
+                                    apply_funding_cashflows=True)
+    assert result["exit_reason"] == "time_exit"
+    assert result["funding_events_applied"] == 2
+    assert result["funding_cashflow_per_unit"] == pytest.approx(-0.05)
+    assert result["net_r"] == pytest.approx(-0.05 / 3.0)
+
+
+def test_funding_aware_rejects_malformed_settlement_record():
+    event, trade, marks, _ = make_case()
+    funding = [SimpleNamespace(funding_time_ms=event["entry_time_ms"] + 1)]
+    result = label_price_only_event(event, trade, marks, funding, 0.0, 0.0,
+                                    apply_funding_cashflows=True)
+    assert result["status"] == "excluded"
+    assert result["reason"] == "invalid_funding_cashflow_record"
