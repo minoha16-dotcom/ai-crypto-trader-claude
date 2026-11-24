@@ -232,7 +232,7 @@ def test_future_feature_availability_timestamp_is_rejected(tmp_path: Path):
 
 def test_group_report_marks_missing_oos_group_inconclusive():
     btc = event(utc_ms("2025-05-02"), symbol="BTCUSDT")
-    eth = event(utc_ms("2025-05-02"), symbol="ETHUSDT")
+    eth = event(utc_ms("2025-05-02"), symbol="ETHUSDT", side="SHORT")
     reports = _group_diagnostics(
         [btc], [0.7], [True], "fold_1",
         all_groups=[("BTCUSDT", "LONG", "15m"), ("ETHUSDT", "SHORT", "15m")],
