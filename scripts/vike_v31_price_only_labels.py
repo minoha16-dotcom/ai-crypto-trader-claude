@@ -429,6 +429,7 @@ def run(args) -> dict:
             "slippage_bps_per_side": args.slippage_bps_per_side,
             "funding_cashflow_applied": funding_aware,
         },
+        "funding_cashflow_applied": funding_aware,
         "funding_policy": ("APPLY_UNAMBIGUOUS_SETTLEMENT_CASHFLOWS; EXCLUDE_FUNDING_IN_INTRABAR_STOP_TARGET_EXIT_CANDLE; INCLUDE_THROUGH_TIME_EXIT_CLOSE"
                            if funding_aware else "EXCLUDE_ANY_EVENT_WITH_FUNDING_SETTLEMENT_FROM_ENTRY_TIME_THROUGH_EXIT_BAR_CLOSE"),
         "funding_completeness_status": "HASH_ATTESTED_ONLY_RETRIEVAL_PROVENANCE_NOT_INDEPENDENTLY_VERIFIED",
