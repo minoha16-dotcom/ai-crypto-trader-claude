@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
-"""Vike V3.1 Price-only Triple-Barrier label preparation.
+"""Vike V3.1 Triple-Barrier labels: legacy Price-only and optional Funding-aware.
 
-This path deliberately does NOT read or infer historical maintenance brackets,
-position size, leverage, margin, or liquidation. It uses Mark Price OHLC to
-trigger barriers, trade OHLC for next-bar-open entry, explicit fees/slippage,
-and excludes any event whose open-position interval overlaps a Funding
-settlement. Funding cashflows are not applied to net_r.
+Both modes use Mark Price OHLC barriers, next trade-bar open entry, fees and
+adverse slippage. Funding-aware mode applies each linear-USDT settlement cashflow
+per base unit; neither mode models leverage, margin, maintenance tiers or
+liquidation. The default remains the frozen Price-only compatibility path.
 
-Reads only the frozen Binance USD-M development archive (Nov 2023-Apr 2026)
-and writes only beneath derived/price-only-labels. It never trains a model,
-downloads data, mutates raw-staging, or accesses the locked May-Oct 2026 holdout.
+Reads only the frozen Binance USD-M development archive (Nov 2023-Apr 2026),
+keeps raw-staging read-only, and never accesses the locked May-Oct 2026 holdout.
 """
 from __future__ import annotations
 
@@ -56,8 +54,9 @@ def label_price_only_event(
     funding_events: list,
     fee_bps_per_side: float = FEE_BPS_PER_SIDE,
     slippage_bps_per_side: float = SLIPPAGE_BPS_PER_SIDE,
+    apply_funding_cashflows: bool = False,
 ) -> dict:
-    """Label one event using Mark Price barriers and no liquidation model."""
+    """Label one event; optionally apply linear-USDT funding cashflows, never liquidation."""
     if event.get("overlap_status") != "ELIGIBLE_NON_OVERLAPPING":
         return {"status": "excluded", "reason": event.get("overlap_status", "overlap_not_verified")}
     if event.get("entry_time_ms") is None:
@@ -145,24 +144,42 @@ def label_price_only_event(
     if not math.isfinite(exit_fill) or exit_fill <= 0:
         return {"status": "excluded", "reason": "invalid_exit_fill"}
 
-    # Exclude, rather than model, every position whose open interval intersects
-    # a Funding settlement. Include the exit candle close conservatively because
-    # intrabar exit time is not observable from 15m OHLC.
-    funding_during = [
-        item for item in funding_events
-        if entry_time <= item.funding_time_ms <= exit_bar["close_t"]
-    ]
-    if funding_during:
-        return {
-            "status": "excluded",
-            "reason": "funding_settlement_during_open_position",
-            "funding_events_during_position": len(funding_during),
-        }
+    # Include settlements from entry through the conservative exit-candle close.
+    # The close boundary is used because 15m OHLC cannot reveal the intrabar exit
+    # instant. For linear USDT contracts, cashflow per base unit is
+    # -direction * settlement_mark_price * funding_rate (positive rates: longs pay).
+    funding_during = [item for item in funding_events
+                      if entry_time <= item.funding_time_ms <= exit_bar["close_t"]]
+    funding_cashflow_per_unit = 0.0
+    funding_to_apply = funding_during
+    if apply_funding_cashflows:
+        # For stop/target exits, OHLC reveals only the exit candle, not the
+        # intrabar hit time. A settlement inside that same candle may be before
+        # or after the barrier exit, so fail closed rather than invent ordering.
+        if exit_reason != "time_exit":
+            ambiguous = [item for item in funding_during
+                         if exit_bar["t"] <= item.funding_time_ms <= exit_bar["close_t"]]
+            if ambiguous:
+                return {"status": "excluded",
+                        "reason": "funding_exit_bar_timing_ambiguous",
+                        "ambiguous_funding_events": len(ambiguous)}
+        for item in funding_to_apply:
+            try:
+                funding_rate = float(item.funding_rate)
+                funding_mark = float(item.mark_price)
+            except (AttributeError, TypeError, ValueError) as exc:
+                return {"status": "excluded", "reason": "invalid_funding_cashflow_record", "detail": str(exc)}
+            if not math.isfinite(funding_rate) or not math.isfinite(funding_mark) or funding_mark <= 0:
+                return {"status": "excluded", "reason": "invalid_funding_cashflow_record"}
+            funding_cashflow_per_unit += -direction * funding_mark * funding_rate
+    elif funding_during:
+        return {"status": "excluded", "reason": "funding_settlement_during_open_position",
+                "funding_events_during_position": len(funding_during)}
 
     gross_pnl_per_unit = direction * (exit_fill - entry_fill)
     entry_fee_per_unit = entry_fill * fee
     exit_fee_per_unit = exit_fill * fee
-    net_pnl_per_unit = gross_pnl_per_unit - entry_fee_per_unit - exit_fee_per_unit
+    net_pnl_per_unit = gross_pnl_per_unit - entry_fee_per_unit - exit_fee_per_unit + funding_cashflow_per_unit
     net_r = net_pnl_per_unit / stop_distance
     if not math.isfinite(net_r):
         return {"status": "excluded", "reason": "non_finite_net_r"}
@@ -174,8 +191,8 @@ def label_price_only_event(
         "gross_pnl_per_unit": gross_pnl_per_unit,
         "entry_fee_per_unit": entry_fee_per_unit,
         "exit_fee_per_unit": exit_fee_per_unit,
-        "funding_cashflow_per_unit": 0.0,
-        "funding_events_applied": 0,
+        "funding_cashflow_per_unit": funding_cashflow_per_unit,
+        "funding_events_applied": len(funding_during) if apply_funding_cashflows else 0,
         "entry_time_ms": entry_time,
         "exit_time_ms": int(exit_bar["close_t"]),
         "entry_fill": entry_fill,
@@ -186,14 +203,16 @@ def label_price_only_event(
         "bars_scanned": rows.index(exit_bar) + 1,
         "barrier_trigger_source": "MARK_PRICE_OHLC",
         "execution_price_proxy": "MARK_TRIGGER_LEVEL_WITH_ADVERSE_SLIPPAGE",
-        "label_scope": "PRICE_ONLY_EXCLUDES_FUNDING_CROSSING_EVENTS_NO_MARGIN_OR_LIQUIDATION",
+        "label_scope": ("FUNDING_AWARE_PRICE_ONLY_NO_MARGIN_OR_LIQUIDATION" if apply_funding_cashflows
+                        else "PRICE_ONLY_EXCLUDES_FUNDING_CROSSING_EVENTS_NO_MARGIN_OR_LIQUIDATION"),
     }
 
 
 def run(args) -> dict:
     drive_root = Path(args.drive_root).expanduser().resolve()
     raw_root = (drive_root / "raw-staging").resolve()
-    output_root = (drive_root / "derived" / "price-only-labels").resolve()
+    funding_aware = bool(getattr(args, "funding_aware", False))
+    output_root = (drive_root / "derived" / ("funding-aware-labels" if funding_aware else "price-only-labels")).resolve()
     if not raw_root.is_dir():
         raise FileNotFoundError(f"raw-staging directory not found: {raw_root}")
     if raw_root == output_root or raw_root in output_root.parents:
@@ -296,8 +315,12 @@ def run(args) -> dict:
                 event, segment, per_symbol_marks[event["symbol"]],
                 per_symbol_funding[event["symbol"]],
                 args.fee_bps_per_side, args.slippage_bps_per_side,
+                apply_funding_cashflows=funding_aware,
             )
-        event["label_status"] = "LABELED_PRICE_ONLY" if result["status"] == "labeled" else "EXCLUDED"
+        event["label_status"] = (
+            ("LABELED_FUNDING_AWARE" if funding_aware else "LABELED_PRICE_ONLY")
+            if result["status"] == "labeled" else "EXCLUDED"
+        )
         event["label_reason"] = result.get("reason")
         event["label_detail"] = result.get("detail")
         if result["status"] == "labeled":
@@ -311,6 +334,48 @@ def run(args) -> dict:
                 event[key] = result[key]
             labeled_events.append(event)
 
+    # Preserve raw evidence around extreme feature rows; never clip or auto-exclude.
+    extreme_events = []
+    thresholds = {
+        "abs_ret_1_gt_5pct": lambda f: abs(f["ret_1"]) > 0.05,
+        "abs_ret_4_gt_10pct": lambda f: abs(f["ret_4"]) > 0.10,
+        "abs_ret_16_gt_20pct": lambda f: abs(f["ret_16"]) > 0.20,
+        "abs_htf_1h_ret_1_gt_10pct": lambda f: abs(f["htf_1h_ret_1"]) > 0.10,
+        "abs_htf_4h_ret_4_gt_20pct": lambda f: abs(f["htf_4h_ret_4"]) > 0.20,
+        "volume_ratio_gt_50": lambda f: f["volume_ratio"] > 50,
+        "abs_channel_position_gt_3": lambda f: abs(f["channel_position"]) > 3,
+    }
+    for event in all_events:
+        features = event["features"]
+        triggered = [name for name, check in thresholds.items() if check(features)]
+        if not triggered:
+            continue
+        segment = segment_lookup.get((event["symbol"], event["signal_time_ms"]))
+        if segment is None:
+            continue
+        signal_index = next((i for i, bar in enumerate(segment) if bar["close_t"] == event["signal_time_ms"]), None)
+        if signal_index is None:
+            continue
+        start_index = max(0, signal_index - 64)
+        evidence = []
+        for bar in segment[start_index:signal_index + 1]:
+            mark = per_symbol_marks[event["symbol"]].get(bar["t"])
+            evidence.append({
+                "open_time_ms": bar["t"], "close_time_ms": bar["close_t"],
+                "trade_ohlc": {k: bar[k] for k in ("o", "h", "l", "c")},
+                "mark_ohlc": ({k: mark["mark_" + k] for k in ("o", "h", "l", "c")} if mark else None),
+            })
+        extreme_events.append({
+            "symbol": event["symbol"], "signal_time_ms": event["signal_time_ms"],
+            "side": event["side"], "triggered_thresholds": triggered,
+            "features": features,
+            "feature_available_time_ms": event.get("feature_available_time_ms"),
+            "htf_1h_close_time_ms": event.get("htf_1h_close_time_ms"),
+            "htf_4h_close_time_ms": event.get("htf_4h_close_time_ms"),
+            "source_window_15m": evidence,
+            "review_status": "RAW_OHLC_EXPORTED_FOR_MANUAL_REVIEW_NOT_CLIPPED",
+        })
+
     output_root.mkdir(parents=True, exist_ok=True)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output_dir = output_root / run_id
@@ -323,15 +388,15 @@ def run(args) -> dict:
             "events": len(rows),
             "long_events": sum(row["side"] == "LONG" for row in rows),
             "short_events": sum(row["side"] == "SHORT" for row in rows),
-            "labeled_price_only": sum(row["label_status"] == "LABELED_PRICE_ONLY" for row in rows),
-            "excluded": sum(row["label_status"] != "LABELED_PRICE_ONLY" for row in rows),
+            "labeled": sum(row["label_status"] == ("LABELED_FUNDING_AWARE" if funding_aware else "LABELED_PRICE_ONLY") for row in rows),
+            "excluded": sum(row["label_status"] != ("LABELED_FUNDING_AWARE" if funding_aware else "LABELED_PRICE_ONLY") for row in rows),
             "label_balance": {
                 "negative": sum(row.get("label") == 0 for row in rows),
                 "positive": sum(row.get("label") == 1 for row in rows),
             },
             "exclusion_reasons": dict(Counter(
                 row.get("label_reason") or row.get("overlap_status")
-                for row in rows if row["label_status"] != "LABELED_PRICE_ONLY"
+                for row in rows if row["label_status"] != ("LABELED_FUNDING_AWARE" if funding_aware else "LABELED_PRICE_ONLY")
             )),
         }
 
@@ -339,8 +404,10 @@ def run(args) -> dict:
         "schema_version": 1,
         "run_id": run_id,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "verdict": "PRICE_ONLY_LABELS_PREPARED_NOT_MODEL_APPROVAL",
-        "label_scope": "PRICE_ONLY_EXCLUDES_FUNDING_CROSSING_EVENTS_NO_MARGIN_OR_LIQUIDATION",
+        "verdict": ("FUNDING_AWARE_PRICE_LABELS_PREPARED_NOT_MODEL_APPROVAL" if funding_aware
+                    else "PRICE_ONLY_LABELS_PREPARED_NOT_MODEL_APPROVAL"),
+        "label_scope": ("FUNDING_AWARE_PRICE_ONLY_NO_MARGIN_OR_LIQUIDATION" if funding_aware
+                        else "PRICE_ONLY_EXCLUDES_FUNDING_CROSSING_EVENTS_NO_MARGIN_OR_LIQUIDATION"),
         "venue": "Binance USD-M",
         "market_type": "USDT perpetual futures",
         "timeframe": "15m",
@@ -349,7 +416,7 @@ def run(args) -> dict:
         "locked_holdout_months_accessed": False,
         "raw_data_mutated": False,
         "model_training_started": False,
-        "funding_attestation_status": "VERIFIED",
+        "funding_attestation_status": "VERIFIED_HASH_MATCH_ONLY",
         "funding_local_csv_hashes_match": True,
         "maintenance_brackets_status": "NOT_VERIFIED_NOT_USED",
         "event_generator": "DONCHIAN_20_DIRECTION_NEUTRAL_CLOSED_15M",
@@ -360,22 +427,32 @@ def run(args) -> dict:
         "cost_policy": {
             "fee_bps_per_side": args.fee_bps_per_side,
             "slippage_bps_per_side": args.slippage_bps_per_side,
-            "funding_cashflow_applied": False,
+            "funding_cashflow_applied": funding_aware,
         },
-        "funding_policy": "EXCLUDE_ANY_EVENT_WITH_FUNDING_SETTLEMENT_FROM_ENTRY_TIME_THROUGH_EXIT_BAR_CLOSE",
-        "net_r_definition": "trade_directional_price_pnl_after_round_trip_taker_fees_and_adverse_slippage_divided_by_1_5_atr; funding_cashflows_excluded",
+        "funding_cashflow_applied": funding_aware,
+        "funding_policy": ("APPLY_UNAMBIGUOUS_SETTLEMENT_CASHFLOWS; EXCLUDE_FUNDING_IN_INTRABAR_STOP_TARGET_EXIT_CANDLE; INCLUDE_THROUGH_TIME_EXIT_CLOSE"
+                           if funding_aware else "EXCLUDE_ANY_EVENT_WITH_FUNDING_SETTLEMENT_FROM_ENTRY_TIME_THROUGH_EXIT_BAR_CLOSE"),
+        "funding_completeness_status": "HASH_ATTESTED_ONLY_RETRIEVAL_PROVENANCE_NOT_INDEPENDENTLY_VERIFIED",
+        "net_r_definition": ("directional_price_pnl_after_round_trip_fees_slippage_plus_funding_cashflows_per_unit_divided_by_1_5_atr"
+                             if funding_aware else "trade_directional_price_pnl_after_round_trip_taker_fees_and_adverse_slippage_divided_by_1_5_atr"),
         "maintenance_brackets_used": False,
         "margin_or_leverage_used": False,
         "liquidation_model_used": False,
         "event_count": len(all_events),
         "labeled_event_count": len(labeled_events),
+        "extreme_event_audit_count": len(extreme_events),
+        "extreme_event_audit_file": "extreme_event_audit.json",
         "per_symbol": per_symbol,
         "acceptance_status": "NOT_EVALUATED_NO_MODEL_TRAINING",
-        "acceptance_blockers": [
+        "acceptance_blockers": ([
+            "Funding CSVs are hash-attested, but independent retrieval completeness/provenance is not yet verified.",
+            "No maintenance-margin, isolated-margin, leverage, or liquidation behavior is modeled; this is not a liquidation-aware futures backtest.",
+            "A separate research protocol and out-of-sample gates are required before model approval.",
+        ] if funding_aware else [
             "Price-only labels do not model funding cashflows; events overlapping settlements are excluded.",
             "No maintenance-margin, isolated-margin, leverage, or liquidation behavior is modeled.",
             "A separate research protocol is required before Logistic Regression/WFO model acceptance.",
-        ],
+        ]),
         "source_file_hashes": source_hashes,
     }
 
@@ -388,11 +465,17 @@ def run(args) -> dict:
     (output_dir / "excluded_days.json").write_text(
         json.dumps(excluded_days, indent=2, allow_nan=False) + "\n", encoding="utf-8"
     )
+    (output_dir / "extreme_event_audit.json").write_text(
+        json.dumps(extreme_events, indent=2, allow_nan=False) + "\n", encoding="utf-8"
+    )
     fields = [
-        "symbol", "signal_time_ms", "entry_time_ms", "side", "atr",
-        "overlap_status", "label_status", "label_reason", "label", "net_r",
-        "exit_time_ms", "exit_reason", "entry_fill", "exit_fill",
-        "stop_price", "target_price", "funding_events_applied", *FEATURES,
+        "symbol", "signal_time_ms", "feature_available_time_ms",
+        "htf_1h_close_time_ms", "htf_4h_close_time_ms",
+        "entry_time_ms", "side", "atr", "overlap_status", "label_status",
+        "label_reason", "label", "net_r", "exit_time_ms", "exit_reason",
+        "entry_fill", "exit_fill", "stop_price", "target_price",
+        "gross_pnl_per_unit", "entry_fee_per_unit", "exit_fee_per_unit",
+        "funding_cashflow_per_unit", "funding_events_applied", *FEATURES,
     ]
     with (output_dir / "labels.csv").open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
@@ -423,6 +506,8 @@ def main() -> int:
     parser.add_argument("--funding-attestation", required=True, type=Path)
     parser.add_argument("--fee-bps-per-side", type=float, default=FEE_BPS_PER_SIDE)
     parser.add_argument("--slippage-bps-per-side", type=float, default=SLIPPAGE_BPS_PER_SIDE)
+    parser.add_argument("--funding-aware", action="store_true",
+                        help="Apply each Funding settlement cashflow; margin/liquidation remain out of scope.")
     args = parser.parse_args()
     try:
         result = run(args)

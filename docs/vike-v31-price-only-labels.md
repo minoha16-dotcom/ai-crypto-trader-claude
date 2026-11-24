@@ -1,4 +1,4 @@
-# Vike V3.1 Price-only Labels
+# Vike V3.1 Price-only and Funding-aware Labels
 
 ## Purpose
 
@@ -80,3 +80,61 @@ Expected artifacts:
 ## Interpretation
 
 A successful run means the price-only label dataset was prepared. It does not mean the strategy is profitable, the model is accepted, the Maintenance Bracket gate is closed, or the system is ready for live trading.
+
+
+## Funding-aware research mode (new)
+
+The default mode remains the legacy Price-only benchmark: Funding settlements during a position are excluded. Use `--funding-aware` to apply every settlement cashflow per base unit for Binance USD-M linear USDT perpetuals:
+
+`funding_cashflow_per_unit = -side_sign * settlement_mark_price * funding_rate`
+
+where `side_sign=+1` for LONG and `-1` for SHORT. Positive rates debit LONG and credit SHORT. Funding cashflows are included in net PnL after fees and adverse slippage. Time exits remain eligible; settlements from entry time through the 48th Mark Price candle close are included conservatively because 15m OHLC does not identify the intrabar exit instant.
+
+Funding CSV hashes are checked against the reviewed attestation, but independent retrieval completeness/provenance remains unverified and is reported as a blocker. This mode does not model maintenance margin, leverage, isolated wallet evolution, or liquidation, and it is not a liquidation-aware futures backtest.
+
+## Feature timestamp provenance
+
+The event generator records `feature_available_time_ms`, `htf_1h_close_time_ms`, and `htf_4h_close_time_ms`. The Direction-Aligned runner requires these columns for Funding-aware research, checks that the feature timestamp equals the closed 15m signal timestamp, verifies 1h/4h UTC close boundaries, rejects future timestamps, and rejects stale higher-timeframe context.
+
+## Extreme-event audit
+
+Each label run writes `extreme_event_audit.json` containing the raw Trade and Mark Price 15m OHLC window around feature outliers. This is evidence for manual source verification; the pipeline does not clip, winsorize, or silently remove extremes.
+
+## Research runner
+
+Run Direction-Aligned Logistic Regression diagnostics only against the Funding-aware output directory. The runner refuses Price-only or mixed label scopes. A successful run is not model approval; Funding retrieval provenance and the missing margin/liquidation model remain explicit blockers.
+
+
+## PowerShell: run Funding-aware labels and Logistic Regression
+
+Install the research/test dependencies in the project virtual environment:
+
+```powershell
+pip install -r requirements-test.txt
+```
+
+Prepare the new labels (the existing Price-only command remains the default when `--funding-aware` is omitted):
+
+```powershell
+python .\scripts\vike_v31_price_only_labels.py `
+  --drive-root $driveRoot `
+  --funding-attestation (Join-Path $evidenceDir "vike_v31_funding_coverage_attestation_ai_reviewed.json") `
+  --funding-aware
+```
+
+Then run the Direction-Aligned Logistic Regression diagnostics on the exact generated label bundle:
+
+```powershell
+$labelRoot = Join-Path $driveRoot "derived\funding-aware-labels"
+$latest = Get-ChildItem $labelRoot -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (-not $latest) { throw "No Funding-aware label run found" }
+$out = Join-Path (Join-Path $driveRoot "derived\direction-aligned-research") $latest.Name
+python .\scripts\vike_direction_aligned_research.py `
+  --input-dir $latest.FullName `
+  --output-dir $out
+```
+
+Review `research_report.json`, `direction_aligned_report.md`, `oos_predictions.csv`, and the label bundle's `extreme_event_audit.json`. The report requires three scored folds, at least 100 OOS events, 200 training labels per symbol × direction group in every fold, positive uplift in every fold, positive selected net expectancy, and a 95% uplift confidence interval whose lower bound is above zero. Even if these statistical gates pass, funding retrieval provenance and margin/liquidation evidence remain separate approval blockers.
+
+
+Funding timing uncertainty: for a stop/target exit, if a settlement falls inside the same 15m candle that triggers the barrier, the exact ordering cannot be recovered from OHLC. Funding-aware mode excludes that event with `funding_exit_bar_timing_ambiguous` rather than applying a potentially post-exit payment. Settlements in earlier held candles are applied; Time Exit is known at the 48th candle close, so settlements through that close are applied.

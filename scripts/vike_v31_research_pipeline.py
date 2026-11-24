@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+from bisect import bisect_right
 import hashlib
 import json
 import math
@@ -302,6 +303,15 @@ def build_opportunity_events(symbol: str, bars: list[dict]) -> list[dict]:
         signal_close = bar["close_t"]
         h1r1, h1r4 = context_returns(h1c, h1v, signal_close)
         h4r1, h4r4 = context_returns(h4c, h4v, signal_close)
+        h1_index = bisect_right(h1c, signal_close) - 1
+        h4_index = bisect_right(h4c, signal_close) - 1
+        if h1_index < 0 or h4_index < 0:
+            armed[side] = False
+            continue
+        h1_close_time_ms = h1c[h1_index]
+        h4_close_time_ms = h4c[h4_index]
+        if h1_close_time_ms > signal_close or h4_close_time_ms > signal_close:
+            raise ValueError("higher-timeframe context is not closed as of signal")
         hour = (bar["t"] // HOUR_MS) % 24
         features = {
             "ret_1": bar["c"] / bars[i - 1]["c"] - 1.0,
@@ -323,6 +333,9 @@ def build_opportunity_events(symbol: str, bars: list[dict]) -> list[dict]:
         entry_time = bars[i + 1]["t"] if i + 1 < len(bars) else None
         events.append({
             "symbol": symbol, "signal_time_ms": signal_close,
+            "feature_available_time_ms": signal_close,
+            "htf_1h_close_time_ms": h1_close_time_ms,
+            "htf_4h_close_time_ms": h4_close_time_ms,
             "entry_time_ms": entry_time, "side": side, "atr": float(atrs[i]),
             "features": features, "event_status": "GENERATED",
         })
