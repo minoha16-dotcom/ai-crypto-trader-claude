@@ -460,7 +460,7 @@ def run_research(rows: list[dict], c_grid: Iterable[float] = C_GRID_DEFAULT,
     uplift = _mean(selected_r) - _mean(all_r) if selected_r else None
     ci = _bootstrap_uplift(oos_rows, oos_selected, reps=bootstrap_reps)
     group_train_gate = all(
-        fold.get("status") == "SCORED" or not fold.get("groups_below_min_train")
+        fold.get("status") == "SCORED" and not fold.get("groups_below_min_train")
         for fold in results
     )
     ci_lower = ci.get("ci_95")[0] if ci.get("ci_95") else None
@@ -570,6 +570,8 @@ def main() -> int:
         parser.error(f"invalid source bundle metadata: {exc}")
     if (source_report.get("label_scope") != "FUNDING_AWARE_PRICE_ONLY_NO_MARGIN_OR_LIQUIDATION"
             or source_report.get("funding_cashflow_applied") is not True
+            or source_manifest.get("label_scope") != "FUNDING_AWARE_PRICE_ONLY_NO_MARGIN_OR_LIQUIDATION"
+            or source_manifest.get("locked_holdout_accessed") is not False
             or source_report.get("timeframe") != "15m"
             or source_report.get("locked_holdout_months_accessed") is not False
             or source_report.get("model_training_started") is not False
