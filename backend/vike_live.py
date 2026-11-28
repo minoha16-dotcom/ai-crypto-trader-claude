@@ -60,8 +60,8 @@ def _fetch_klines(symbol: str, interval: str, limit: int) -> list[list]:
 def _closed(rows: list[list], now_ms: int) -> list[list]:
     # Binance kline close_time is inclusive; only use candles fully closed by now.
     result = [row for row in rows if row[6] < now_ms]
-    if len(result) < 55:
-        raise VikeMarketDataError("insufficient closed candles after removing forming bar")
+    if not result:
+        raise VikeMarketDataError("no fully closed candles returned")
     return result
 
 
@@ -171,6 +171,8 @@ def _scan_one(symbol: str) -> dict:
     base = _closed(_fetch_klines(symbol, "15m", 160), now_ms)
     h1 = _closed(_fetch_klines(symbol, "1h", 80), now_ms)
     h4 = _closed(_fetch_klines(symbol, "4h", 80), now_ms)
+    if len(base) < 55 or len(h1) < 5 or len(h4) < 5:
+        raise VikeMarketDataError(f"{symbol}: insufficient closed 15m/1h/4h context")
     candidate = _latest_breakout(symbol, base, h1, h4, now_ms)
     return candidate or {"symbol": symbol, "status": "NO_FRESH_DONCHIAN_EVENT"}
 
