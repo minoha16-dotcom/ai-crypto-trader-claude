@@ -23,3 +23,7 @@ services:
         value: "10"
       - key: PYTHONUNBUFFERED
         value: "1"
+      - key: ML_SHADOW_MODE_ENABLED
+        value: "false"
+      - key: ML_SHADOW_MODEL_PATH
+        sync: false

@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "artifact_status": "SHADOW_ONLY",
+  "model_type": "logistic_regression",
+  "model_version": "REPLACE_WITH_EXPORTED_MODEL_VERSION",
+  "feature_names": [
+    "dir_ret_1",
+    "dir_ret_4",
+    "dir_ret_16",
+    "log_atr_pct",
+    "log_donchian_width_pct",
+    "dir_breakout_distance",
+    "log_volume_ratio",
+    "dir_rsi14",
+    "hour_sin",
+    "hour_cos",
+    "dir_htf_1h_ret_1",
+    "dir_htf_1h_ret_4",
+    "dir_htf_4h_ret_1",
+    "dir_htf_4h_ret_4"
+  ],
+  "market_scope": "BINANCE_USDM_PERPETUAL",
+  "timeframe": "15m",
+  "training_cutoff_utc": "REQUIRED",
+  "dataset_sha256": "REQUIRED",
+  "research_report_sha256": "REQUIRED",
+  "standard_scaler": {
+    "mean": [
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED"
+    ],
+    "scale": [
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED"
+    ]
+  },
+  "logistic_regression": {
+    "coef": [
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED",
+      "REQUIRED"
+    ],
+    "intercept": "REQUIRED"
+  }
+}
