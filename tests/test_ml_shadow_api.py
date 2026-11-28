@@ -41,10 +41,13 @@ def test_shadow_prediction_endpoint_is_disabled_by_default_and_does_not_open_tra
     with TestClient(app) as client:
         status = client.get("/api/ml-shadow/status", headers=auth_headers())
         response = client.post("/api/ml-shadow/predict", json=shadow_payload(), headers=auth_headers())
+        audit = client.get("/api/ml-shadow/predictions", headers=auth_headers())
     assert status.status_code == 200
     assert status.json()["enabled"] is False
     assert status.json()["trade_decision_changed"] is False
     assert response.status_code == 409
+    assert audit.status_code == 200
+    assert audit.json()["items"] == []
 
 
 def test_shadow_prediction_records_audit_row_without_creating_trade(monkeypatch, tmp_path):
@@ -66,7 +69,10 @@ def test_shadow_prediction_records_audit_row_without_creating_trade(monkeypatch,
     monkeypatch.setattr("backend.main.open_trade", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("trade function called")))
     with TestClient(app) as client:
         response = client.post("/api/ml-shadow/predict", json=shadow_payload(), headers=auth_headers())
+        audit = client.get("/api/ml-shadow/predictions", headers=auth_headers())
     assert response.status_code == 200
+    assert audit.status_code == 200
+    assert len(audit.json()["items"]) == 1
     body = response.json()
     assert body["diagnostic_only"] is True
     assert body["trade_decision_changed"] is False
