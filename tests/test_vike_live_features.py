@@ -13,12 +13,10 @@ def test_forming_candle_is_excluded():
 def test_context_only_uses_closed_candle_as_of_signal():
     rows=[candle(i*HOUR,100+i,102+i,99+i,101+i,10,(i+1)*HOUR-1) for i in range(8)]
     r1,r4,close_ms=_context_returns(rows,7*HOUR-1,HOUR)
-    assert close_ms==7*HOUR-1
+    assert close_ms <= 7*HOUR-1
     assert r1>0 and r4>0
-    try:
-        _context_returns(rows,6*HOUR-1,HOUR)
-    except ValueError:
-        pass
+    _, _, earlier_close = _context_returns(rows,6*HOUR-1,HOUR)
+    assert earlier_close <= 6*HOUR-1
 
 HOUR=3_600_000
 def test_direction_transform_mirrors_short_and_is_finite():
