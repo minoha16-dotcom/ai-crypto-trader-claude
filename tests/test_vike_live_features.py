@@ -1,6 +1,6 @@
-import math
+import math\nimport pytest
 from backend.vike_live import _context_returns, _closed, _latest_breakout, BAR_MS
-from backend.ml_shadow import direction_aligned_features
+from backend.ml_shadow import direction_aligned_features, ShadowModelError, validate_causal_timestamps
 
 def candle(open_ms, o, h, l, c, v, close_ms):
     return [open_ms,o,h,l,c,v,close_ms]
@@ -39,3 +39,18 @@ def test_event_generator_rejects_stale_signal():
     h1=[candle(i*HOUR,100,102,99,101,100,(i+1)*HOUR-1) for i in range(30)]
     h4=[candle(i*4*HOUR,100,102,99,101,100,(i+1)*4*HOUR-1) for i in range(30)]
     assert _latest_breakout("BTCUSDT",bars,h1,h4,80*BAR_MS) is None
+
+def test_causal_timestamps_require_closed_1h_and_4h_boundaries():
+    signal = 1_800_000_000_000
+    signal = signal - (signal % BAR_MS) + BAR_MS - 1
+    h1 = signal - (signal % HOUR) + HOUR - 1
+    if h1 > signal:
+        h1 -= HOUR
+    h4 = signal - (signal % (4 * HOUR)) + 4 * HOUR - 1
+    if h4 > signal:
+        h4 -= 4 * HOUR
+    validate_causal_timestamps(signal, signal, h1, h4)
+    with pytest.raises(ShadowModelError, match="future higher-timeframe"):
+        validate_causal_timestamps(signal, signal, h1, h4 + 4 * HOUR)
+    with pytest.raises(ShadowModelError, match="closed UTC 4h boundary"):
+        validate_causal_timestamps(signal, signal, h1, h4 - 1)
