@@ -18,14 +18,14 @@ change a signal, paper trade, position sizing, or any exchange action.
 
 ## Implemented backend pieces
 
-- `backend/ml_shadow.py\`: JSON artifact validation, exact feature schema,
+- `backend/ml_shadow.py`: JSON artifact validation, exact feature schema,
   direction alignment transform, scaler + logistic probability calculation,
   timestamp checks, and fail-closed behavior.
-- \`POST /api/ml-shadow/predict\`: authenticated diagnostic prediction endpoint.
-- \`GET /api/ml-shadow/status\`: authenticated status endpoint.
-- \`ml_shadow_predictions\`: separate audit table with model/artifact identifiers,
+- `POST /api/ml-shadow/predict`: authenticated diagnostic prediction endpoint.
+- `GET /api/ml-shadow/status`: authenticated status endpoint.
+- `ml_shadow_predictions`: separate audit table with model/artifact identifiers,
   symbol/side/time, probability, feature hash, and prediction payload.
-- \`ML_SHADOW_MODE_ENABLED=false\` and \`ML_SHADOW_MODEL_PATH=\` defaults.
+- `ML_SHADOW_MODE_ENABLED=false` and `ML_SHADOW_MODEL_PATH=` defaults.
 - Tests cover schema, finite values, timestamp causality, artifact mismatch,
   direction alignment, disabled mode, and audit isolation from the trades table.
 
@@ -38,30 +38,30 @@ caller; the API cannot independently prove the source candle data.
 
 ## Exact raw feature input
 
-The required \`raw_features\` keys are:
+The required `raw_features` keys are:
 
-- \`ret_1\`, \`ret_4\`, \`ret_16\`
-- \`atr_pct\`, \`donchian_width_pct\`, \`channel_position\`
-- \`volume_ratio\`, \`rsi14\` (normalized to [0, 1])
-- \`hour_sin\`, \`hour_cos\` (UTC)
-- \`htf_1h_ret_1\`, \`htf_1h_ret_4\`
-- \`htf_4h_ret_1\`, \`htf_4h_ret_4\`
+- `ret_1`, `ret_4`, `ret_16`
+- `atr_pct`, `donchian_width_pct`, `channel_position`
+- `volume_ratio`, `rsi14` (normalized to [0, 1])
+- `hour_sin`, `hour_cos` (UTC)
+- `htf_1h_ret_1`, `htf_1h_ret_4`
+- `htf_4h_ret_1`, `htf_4h_ret_4`
 
 Direction alignment uses the exact 14 model features:
 
-\`dir_ret_1, dir_ret_4, dir_ret_16, log_atr_pct,
+`dir_ret_1, dir_ret_4, dir_ret_16, log_atr_pct,
 log_donchian_width_pct, dir_breakout_distance, log_volume_ratio,
 dir_rsi14, hour_sin, hour_cos, dir_htf_1h_ret_1, dir_htf_1h_ret_4,
-dir_htf_4h_ret_1, dir_htf_4h_ret_4\`.
+dir_htf_4h_ret_1, dir_htf_4h_ret_4`.
 
 For SHORT, return and higher-timeframe return features are sign-adjusted,
-RSI is mirrored as \`1-rsi14\`, and breakout distance is measured outward from
+RSI is mirrored as `1-rsi14`, and breakout distance is measured outward from
 the lower Donchian edge. UTC hour features are unchanged.
 
 ## Artifact contract
 
 The JSON artifact format is documented in
-\`docs/ml-shadow-mode-artifact-format.json\`. It must contain the fitted
+`docs/ml-shadow-mode-artifact-format.json`. It must contain the fitted
 StandardScaler mean/scale and LogisticRegression coefficients/intercept in exact
 feature order, plus model version, training cutoff, dataset/report SHA-256,
 market scope, and timeframe.
@@ -76,7 +76,7 @@ separate reviewed export from the Vike research environment is required.
 
 The authenticated caller sends a JSON body shaped like:
 
-\`\`\`json
+```json
 {
   "symbol": "BTCUSDT",
   "side": "LONG",
@@ -103,7 +103,7 @@ The authenticated caller sends a JSON body shaped like:
     "htf_4h_ret_4": 0.008
   }
 }
-\`\`\`
+```
 
 This is a payload-shape example only; its values are not a live signal or a
 validated trade. Use closed 15m event time and closed 1h/4h context no later
@@ -111,14 +111,14 @@ than the event, with the research timestamp rules.
 
 ## Local configuration
 
-\`\`\`dotenv
+```dotenv
 ML_SHADOW_MODE_ENABLED=false
 ML_SHADOW_MODEL_PATH=/absolute/path/to/reviewed-shadow-model.json
-\`\`\`
+```
 
 Keep the feature disabled until the real artifact and upstream feature producer
 are validated. When enabled, the endpoint computes and records a probability
-only. It never calls \`open_trade\`, \`close_trade\`, risk sizing, or exchange
+only. It never calls `open_trade`, `close_trade`, risk sizing, or exchange
 private/order APIs.
 
 ## Remaining release gates
