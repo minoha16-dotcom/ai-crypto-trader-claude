@@ -153,6 +153,10 @@ def load_artifact(path: str | Path) -> tuple[dict, str]:
     for key in ("training_cutoff_utc", "dataset_sha256", "research_report_sha256"):
         if not isinstance(artifact.get(key), str) or not artifact[key].strip():
             raise ShadowModelError(f"artifact provenance field {key} is required")
+    for key in ("dataset_sha256", "research_report_sha256"):
+        digest_value = artifact[key]
+        if len(digest_value) != 64 or any(ch not in "0123456789abcdef" for ch in digest_value.lower()):
+            raise ShadowModelError(f"artifact provenance field {key} must be a SHA-256 hex digest")
     return artifact, digest
 
 
