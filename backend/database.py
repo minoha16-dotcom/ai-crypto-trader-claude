@@ -99,6 +99,13 @@ def init_db():
             trading_date DATE PRIMARY KEY, starting_equity DOUBLE PRECISION NOT NULL,
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS ml_shadow_predictions(
+            id BIGSERIAL PRIMARY KEY, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+            model_version TEXT NOT NULL, artifact_sha256 TEXT NOT NULL,
+            symbol TEXT NOT NULL, side TEXT NOT NULL, timeframe TEXT NOT NULL,
+            signal_time_ms BIGINT NOT NULL, probability DOUBLE PRECISION NOT NULL,
+            features_sha256 TEXT NOT NULL, payload TEXT NOT NULL
+        );
         """
     else:
         schema = """
@@ -120,6 +127,13 @@ def init_db():
         CREATE TABLE IF NOT EXISTS daily_equity_snapshots(
             trading_date TEXT PRIMARY KEY, starting_equity REAL NOT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS ml_shadow_predictions(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            model_version TEXT NOT NULL, artifact_sha256 TEXT NOT NULL,
+            symbol TEXT NOT NULL, side TEXT NOT NULL, timeframe TEXT NOT NULL,
+            signal_time_ms INTEGER NOT NULL, probability REAL NOT NULL,
+            features_sha256 TEXT NOT NULL, payload TEXT NOT NULL
         );
         """
     with connect() as db:
@@ -145,6 +159,8 @@ def init_db():
         db.execute("CREATE INDEX IF NOT EXISTS idx_trades_exchange_symbol_market ON trades(exchange, symbol, market_type, status)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_signals_market_symbol_timeframe_id ON signals(exchange, market_type, symbol, timeframe, id)")
         db.execute("CREATE INDEX IF NOT EXISTS idx_signals_archived_id ON signals(archived_at, id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_ml_shadow_created_id ON ml_shadow_predictions(created_at, id)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_ml_shadow_symbol_side_time ON ml_shadow_predictions(symbol, side, signal_time_ms)")
 
 
 def archive_expired_signals(retention_days=None):
