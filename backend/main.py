@@ -30,6 +30,7 @@ from .futures import liquidation_price, margin_snapshot
 from .advisor import analyze_closed_trade_history
 from .version import APP_VERSION
 from .ml_shadow import ShadowModelError, load_artifact, run_shadow_prediction
+from .vike_live import scan_vike_candidates, VikeMarketDataError
 
 
 @asynccontextmanager
@@ -733,6 +734,67 @@ async def run_scan(exchange=settings.default_exchange, market_type="spot", symbo
         raise
     except Exception as exc:
         raise HTTPException(400, str(exc))
+
+
+@app.post("/api/vike/scan")
+async def vike_ai_scan(symbols=None):
+    """Return model-ranked live Vike candidates; diagnostic only, never opens trades."""
+    if not settings.ml_shadow_mode_enabled:
+        raise HTTPException(409, "Vike model scan is disabled. Verify the exported artifact and feature producer before enabling ML_SHADOW_MODE_ENABLED.")
+    if not settings.ml_shadow_model_path:
+        raise HTTPException(503, "ML_SHADOW_MODEL_PATH is not configured.")
+    try:
+        artifact, artifact_sha = load_artifact(settings.ml_shadow_model_path)
+        requested = [item.strip().upper().replace("/", "") for item in symbols.split(",") if item.strip()] if symbols else None
+        candidates = await scan_vike_candidates(requested)
+        scored = []
+        for candidate in candidates:
+            if candidate.get("status") != "NO_FRESH_DONCHIAN_EVENT" and "raw_features" in candidate:
+                prediction = run_shadow_prediction(candidate, settings.ml_shadow_model_path)
+                probability = float(prediction["probability"])
+                feature_json = json.dumps(prediction["features"], sort_keys=True, separators=(",", ":"), allow_nan=False)
+                feature_sha = hashlib.sha256(feature_json.encode("utf-8")).hexdigest()
+                audit_json = json.dumps(prediction, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                with connect() as db:
+                    db.execute(
+                        "INSERT INTO ml_shadow_predictions(model_version,artifact_sha256,symbol,side,timeframe,signal_time_ms,probability,features_sha256,payload) VALUES(?,?,?,?,?,?,?,?,?)",
+                        (prediction["model_version"], prediction["artifact_sha256"], prediction["symbol"],
+                         prediction["side"], prediction["timeframe"], prediction["signal_time_ms"],
+                         probability, feature_sha, audit_json),
+                    )
+                scored.append({**candidate, "status": "SCORED_SHADOW_ONLY",
+                               "model_probability": probability, "score": probability * 100.0,
+                               "model_version": prediction["model_version"],
+                               "artifact_sha256": prediction["artifact_sha256"]})
+            else:
+                scored.append(candidate)
+        eligible = sorted((item for item in scored if item.get("status") == "SCORED_SHADOW_ONLY"),
+                          key=lambda item: item["model_probability"], reverse=True)
+        selected_count = max(1, math.ceil(len(eligible) / 3)) if eligible else 0
+        selected_ids = {id(item) for item in eligible[:selected_count]}
+        for rank, item in enumerate(eligible, 1):
+            item["rank"] = rank
+            item["selected"] = id(item) in selected_ids
+            item["selection_policy"] = "TOP_TERCILE_CURRENT_SCAN_ONLY"
+        scored.sort(key=lambda item: (item.get("status") == "SCORED_SHADOW_ONLY",
+                                     item.get("model_probability", -1)), reverse=True)
+        return {
+            "results": scored, "model_version": artifact["model_version"],
+            "artifact_sha256": artifact_sha, "scored_candidates": len(eligible),
+            "selected_count": selected_count,
+            "selection_policy": "Top tercile of current scored candidates; not model approval or trade authorization.",
+            "diagnostic_only": True, "trade_decision_changed": False,
+        }
+    except VikeMarketDataError as exc:
+        raise HTTPException(502, str(exc))
+    except ShadowModelError as exc:
+        raise HTTPException(422, str(exc))
+    except ExchangeRateLimitCooldown:
+        raise
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Vike scan unavailable: {exc}")
 
 
 @app.post("/api/ai/recommendations")
