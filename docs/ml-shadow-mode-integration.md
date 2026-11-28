@@ -18,7 +18,7 @@ change a signal, paper trade, position sizing, or any exchange action.
 
 ## Implemented backend pieces
 
-- \`backend/ml_shadow.py\`: JSON artifact validation, exact feature schema,
+- `backend/ml_shadow.py\`: JSON artifact validation, exact feature schema,
   direction alignment transform, scaler + logistic probability calculation,
   timestamp checks, and fail-closed behavior.
 - \`POST /api/ml-shadow/predict\`: authenticated diagnostic prediction endpoint.
