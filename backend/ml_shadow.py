@@ -60,6 +60,47 @@ def validate_causal_timestamps(signal_time_ms: int, feature_available_time_ms: i
         raise ShadowModelError("4h context is stale or incomplete")
 
 
+
+RAW_FEATURE_NAMES = (
+    "ret_1", "ret_4", "ret_16", "atr_pct", "donchian_width_pct",
+    "channel_position", "volume_ratio", "rsi14", "hour_sin", "hour_cos",
+    "htf_1h_ret_1", "htf_1h_ret_4", "htf_4h_ret_1", "htf_4h_ret_4",
+)
+
+
+def direction_aligned_features(raw_features: dict[str, Any], side: str) -> dict[str, float]:
+    """Apply the exact raw-to-direction-aligned transform used by Vike research."""
+    if not isinstance(raw_features, dict) or set(raw_features) != set(RAW_FEATURE_NAMES):
+        raise ShadowModelError("raw feature schema mismatch")
+    side = str(side).upper()
+    if side not in ("LONG", "SHORT"):
+        raise ShadowModelError("side must be LONG or SHORT")
+    raw = {name: _finite_number(raw_features[name], name) for name in RAW_FEATURE_NAMES}
+    if raw["atr_pct"] <= 0 or raw["donchian_width_pct"] <= 0 or raw["volume_ratio"] < 0:
+        raise ShadowModelError("ATR/channel width must be positive and volume ratio nonnegative")
+    if not 0.0 <= raw["rsi14"] <= 1.0:
+        raise ShadowModelError("rsi14 must be normalized to [0, 1]")
+    sign = 1.0 if side == "LONG" else -1.0
+    breakout_distance = raw["channel_position"] - 1.0 if sign > 0 else -raw["channel_position"]
+    result = {
+        "dir_ret_1": sign * raw["ret_1"],
+        "dir_ret_4": sign * raw["ret_4"],
+        "dir_ret_16": sign * raw["ret_16"],
+        "log_atr_pct": math.log(raw["atr_pct"]),
+        "log_donchian_width_pct": math.log(raw["donchian_width_pct"]),
+        "dir_breakout_distance": breakout_distance,
+        "log_volume_ratio": math.log1p(raw["volume_ratio"]),
+        "dir_rsi14": raw["rsi14"] if sign > 0 else 1.0 - raw["rsi14"],
+        "hour_sin": raw["hour_sin"],
+        "hour_cos": raw["hour_cos"],
+        "dir_htf_1h_ret_1": sign * raw["htf_1h_ret_1"],
+        "dir_htf_1h_ret_4": sign * raw["htf_1h_ret_4"],
+        "dir_htf_4h_ret_1": sign * raw["htf_4h_ret_1"],
+        "dir_htf_4h_ret_4": sign * raw["htf_4h_ret_4"],
+    }
+    validate_features(result)
+    return result
+
 def validate_features(features: dict[str, Any]) -> list[float]:
     if not isinstance(features, dict):
         raise ShadowModelError("features must be an object")
@@ -151,7 +192,7 @@ def run_shadow_prediction(payload: dict, artifact_path: str | Path | None = None
         payload.get("signal_time_ms"), payload.get("feature_available_time_ms"),
         payload.get("htf_1h_close_time_ms"), payload.get("htf_4h_close_time_ms"),
     )
-    features = payload.get("features")
+    features = direction_aligned_features(payload.get("raw_features"), side)
     validate_features(features)
     path = artifact_path or os.getenv("ML_SHADOW_MODEL_PATH", "")
     if not path:
@@ -167,6 +208,7 @@ def run_shadow_prediction(payload: dict, artifact_path: str | Path | None = None
         "timeframe": "15m",
         "signal_time_ms": payload["signal_time_ms"],
         "probability": probability,
+        "features": features,
         "diagnostic_only": True,
         "trade_decision_changed": False,
     }
