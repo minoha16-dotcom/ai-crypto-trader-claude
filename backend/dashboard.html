@@ -149,16 +149,13 @@ canvas#chart{width:100%;height:150px}
     <p id="chart-status">Connecting to public candle data…</p>
    </section>
    <section class="panel anchor-section" id="scanner">
-    <div class="panel-head"><div><h2>Local AI Trade Advisor</h2><p class="panel-subtitle">Ranks public-market setups and learns from closed paper trades</p></div><span class="panel-status">PAPER ONLY</span></div>
+    <div class="panel-head"><div><h2>Vike Model Trade Scanner</h2><p class="panel-subtitle">Direction-Aligned Logistic Regression · diagnostic ranking only</p></div><span class="panel-status">SHADOW ONLY</span></div>
     <div class="row">
-     <label>Exchange<select id="exchange"><option>kucoin</option><option>bybit</option><option>okx</option></select></label>
-     <label>Market<select id="market"><option value="spot">Spot</option><option value="futures">Futures</option></select></label>
-     <label>Timeframe<select id="timeframe"><option>15m</option><option selected>1h</option><option>4h</option><option>1d</option></select></label>
-     <label style="min-width:190px;flex:1">Symbols<input id="symbols" value="BTC/USDT,ETH/USDT,SOL/USDT,BNB/USDT"></label>
+     <div class="helper-note" style="flex:1;min-width:220px">Fixed research scope: Binance USD-M perpetual · closed 15m Donchian-20 events · closed 1h/4h context · frozen 8-symbol universe.</div>
+     <label style="min-width:190px;flex:1">Symbols<input id="symbols" value="BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,LINKUSDT"></label>
      <button type="button" class="secondary" onclick="scan()">Run Vike AI scan</button>
-     <button type="button" onclick="runAiAdvisor()">AI choose best</button>
     </div>
-    <p id="scanmsg">A scan may take several seconds. Signals are research prompts, not recommendations.</p>
+    <p id="scanmsg">Model scan requires a verified JSON artifact and ML_SHADOW_MODE_ENABLED=true. No trades are opened.</p>
     <div class="scroll"><table><thead><tr><th>Pair</th><th>Direction</th><th>Model probability</th><th>Signal price</th><th>ATR %</th><th>Donchian width %</th><th>Rank</th><th>Selection</th></tr></thead><tbody id="scanrows"><tr><td colspan="8">No scan yet.</td></tr></tbody></table></div>
     <p id="advisor-status" class="helper-note">The advisor only ranks candidates. Historical scores use unique closed signal-linked paper trades; they are not calibrated profit probabilities.</p>
     <div class="scroll"><table><thead><tr><th>Rank</th><th>Pair</th><th>Signal</th><th>Historical score</th><th>Similar outcomes</th><th></th></tr></thead><tbody id="advisor-rows"><tr><td colspan="6">Select “AI choose best” to scan and rank candidates.</td></tr></tbody></table></div>
