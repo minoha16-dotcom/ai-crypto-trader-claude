@@ -201,7 +201,7 @@ class MLShadowPredictionRequest(BaseModel):
     feature_available_time_ms: int
     htf_1h_close_time_ms: int
     htf_4h_close_time_ms: int
-    features: dict[str, float]
+    raw_features: dict[str, float]
 
     @model_validator(mode="after")
     def validate_shadow_request(self):
@@ -211,8 +211,10 @@ class MLShadowPredictionRequest(BaseModel):
             raise ValueError("Vike shadow model requires 15m events")
         if self.market_scope != "BINANCE_USDM_PERPETUAL":
             raise ValueError("Vike shadow model requires Binance USD-M perpetual scope")
-        if set(self.features) != set(FEATURE_NAMES):
-            raise ValueError("features must exactly match the Vike feature schema")
+        # Raw feature schema is transformed by the same direction-alignment
+        # adapter as the Vike research script before inference.
+        if not self.raw_features:
+            raise ValueError("raw_features are required")
         return self
 
 
@@ -275,7 +277,7 @@ def ml_shadow_predict(body: MLShadowPredictionRequest):
         message = str(exc)
         status_code = 503 if ("missing" in message or "not configured" in message) else 422
         raise HTTPException(status_code=status_code, detail=message)
-    features_json = json.dumps(body.features, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    features_json = json.dumps(result["features"], sort_keys=True, separators=(",", ":"), allow_nan=False)
     features_sha256 = hashlib.sha256(features_json.encode("utf-8")).hexdigest()
     audit_payload = json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False)
     with connect() as db:
