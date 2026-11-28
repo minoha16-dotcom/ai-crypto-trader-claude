@@ -1,6 +1,8 @@
 import asyncio
 import base64
 import hmac
+import hashlib
+import json
 import math
 import os
 from contextlib import asynccontextmanager
@@ -23,6 +25,7 @@ from .position_monitor import run_position_monitor
 from .metrics import position_pnl, position_risk
 from .advisor import analyze_closed_trade_history
 from .version import APP_VERSION
+from .ml_shadow import FEATURE_NAMES, ShadowModelError, load_artifact, run_shadow_prediction
 
 
 @asynccontextmanager
@@ -189,6 +192,30 @@ class PaperClose(BaseModel):
     exit_price: float = Field(gt=0, allow_inf_nan=False)
 
 
+class MLShadowPredictionRequest(BaseModel):
+    symbol: str = Field(min_length=6, max_length=12)
+    side: str
+    timeframe: str
+    market_scope: str
+    signal_time_ms: int
+    feature_available_time_ms: int
+    htf_1h_close_time_ms: int
+    htf_4h_close_time_ms: int
+    features: dict[str, float]
+
+    @model_validator(mode="after")
+    def validate_shadow_request(self):
+        if self.side not in ("LONG", "SHORT"):
+            raise ValueError("side must be LONG or SHORT")
+        if self.timeframe != "15m":
+            raise ValueError("Vike shadow model requires 15m events")
+        if self.market_scope != "BINANCE_USDM_PERPETUAL":
+            raise ValueError("Vike shadow model requires Binance USD-M perpetual scope")
+        if set(self.features) != set(FEATURE_NAMES):
+            raise ValueError("features must exactly match the Vike feature schema")
+        return self
+
+
 @app.get("/api/health")
 def health():
     """Liveness only: confirms the web process can answer HTTP requests."""
@@ -200,7 +227,7 @@ def readiness():
     """Readiness check: verify PostgreSQL/SQLite connectivity and required schema."""
     try:
         with connect() as db:
-            for table in ("signals", "trades", "daily_equity_snapshots"):
+            for table in ("signals", "trades", "daily_equity_snapshots", "ml_shadow_predictions"):
                 db.execute(f"SELECT 1 FROM {table} LIMIT 0")
     except Exception:
         # Do not disclose connection strings, hostnames, or database error details.
@@ -209,6 +236,58 @@ def readiness():
             status_code=503,
         )
     return {"status": "ready", "database": "ok", "version": APP_VERSION}
+
+
+@app.get("/api/ml-shadow/status")
+def ml_shadow_status():
+    """Status only; this route never enables inference or changes trade decisions."""
+    configured = bool(settings.ml_shadow_model_path)
+    artifact_valid = False
+    model_version = None
+    if settings.ml_shadow_mode_enabled and configured:
+        try:
+            artifact, _ = load_artifact(settings.ml_shadow_model_path)
+            artifact_valid = True
+            model_version = artifact["model_version"]
+        except ShadowModelError:
+            artifact_valid = False
+    return {
+        "enabled": bool(settings.ml_shadow_mode_enabled),
+        "artifact_configured": configured,
+        "artifact_valid": artifact_valid,
+        "model_version": model_version,
+        "mode": "diagnostic_only",
+        "trade_decision_changed": False,
+    }
+
+
+@app.post("/api/ml-shadow/predict")
+def ml_shadow_predict(body: MLShadowPredictionRequest):
+    """Record one diagnostic prediction; never invokes paper-trade or order code."""
+    if not settings.ml_shadow_mode_enabled:
+        raise HTTPException(409, "ML Shadow Mode is disabled.")
+    if not settings.ml_shadow_model_path:
+        raise HTTPException(503, "ML shadow model artifact is not configured.")
+    payload = body.model_dump()
+    try:
+        result = run_shadow_prediction(payload, settings.ml_shadow_model_path)
+    except ShadowModelError as exc:
+        message = str(exc)
+        status_code = 503 if ("missing" in message or "not configured" in message) else 422
+        raise HTTPException(status_code=status_code, detail=message)
+    features_json = json.dumps(body.features, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    features_sha256 = hashlib.sha256(features_json.encode("utf-8")).hexdigest()
+    audit_payload = json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    with connect() as db:
+        cursor = db.execute(
+            "INSERT INTO ml_shadow_predictions(model_version,artifact_sha256,symbol,side,timeframe,"
+            "signal_time_ms,probability,features_sha256,payload) VALUES(?,?,?,?,?,?,?,?,?) RETURNING id",
+            (result["model_version"], result["artifact_sha256"], result["symbol"], result["side"],
+             result["timeframe"], result["signal_time_ms"], result["probability"],
+             features_sha256, audit_payload),
+        )
+        prediction_id = cursor.fetchone()["id"]
+    return {**result, "prediction_id": prediction_id, "features_sha256": features_sha256}
 
 
 @app.get("/api/exchanges")
