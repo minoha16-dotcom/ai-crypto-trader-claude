@@ -1,9 +1,10 @@
 import base64
+import json
 
 from fastapi.testclient import TestClient
 
 from backend.config import settings
-from backend.ml_shadow import RAW_FEATURE_NAMES
+from backend.ml_shadow import FEATURE_NAMES, RAW_FEATURE_NAMES
 from backend.main import app
 
 
@@ -44,3 +45,34 @@ def test_shadow_prediction_endpoint_is_disabled_by_default_and_does_not_open_tra
     assert status.json()["enabled"] is False
     assert status.json()["trade_decision_changed"] is False
     assert response.status_code == 409
+
+
+def test_shadow_prediction_records_audit_row_without_creating_trade(monkeypatch, tmp_path):
+    artifact = {
+        "schema_version": 1, "artifact_status": "SHADOW_ONLY",
+        "model_type": "logistic_regression", "model_version": "unit-test-only",
+        "feature_names": list(FEATURE_NAMES), "market_scope": "BINANCE_USDM_PERPETUAL",
+        "timeframe": "15m", "training_cutoff_utc": "2026-05-01T00:00:00Z",
+        "dataset_sha256": "a" * 64, "research_report_sha256": "b" * 64,
+        "standard_scaler": {"mean": [0.0] * 14, "scale": [1.0] * 14},
+        "logistic_regression": {"coef": [0.0] * 14, "intercept": 0.0},
+    }
+    artifact_path = tmp_path / "shadow-model.json"
+    artifact_path.write_text(json.dumps(artifact), encoding="utf-8")
+    db_path = tmp_path / "shadow-active.db"
+    monkeypatch.setattr(settings, "database_url", f"sqlite:///{db_path}")
+    monkeypatch.setattr(settings, "ml_shadow_mode_enabled", True)
+    monkeypatch.setattr(settings, "ml_shadow_model_path", str(artifact_path))
+    monkeypatch.setattr("backend.main.open_trade", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("trade function called")))
+    with TestClient(app) as client:
+        response = client.post("/api/ml-shadow/predict", json=shadow_payload(), headers=auth_headers())
+    assert response.status_code == 200
+    body = response.json()
+    assert body["diagnostic_only"] is True
+    assert body["trade_decision_changed"] is False
+    assert body["probability"] == 0.5
+    assert body["prediction_id"] > 0
+    import sqlite3
+    with sqlite3.connect(db_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM ml_shadow_predictions").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM trades").fetchone()[0] == 0
