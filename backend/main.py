@@ -25,7 +25,7 @@ from .position_monitor import run_position_monitor
 from .metrics import position_pnl, position_risk
 from .advisor import analyze_closed_trade_history
 from .version import APP_VERSION
-from .ml_shadow import FEATURE_NAMES, ShadowModelError, load_artifact, run_shadow_prediction
+from .ml_shadow import ShadowModelError, load_artifact, run_shadow_prediction
 
 
 @asynccontextmanager
@@ -197,10 +197,10 @@ class MLShadowPredictionRequest(BaseModel):
     side: str
     timeframe: str
     market_scope: str
-    signal_time_ms: int
-    feature_available_time_ms: int
-    htf_1h_close_time_ms: int
-    htf_4h_close_time_ms: int
+    signal_time_ms: int = Field(strict=True)
+    feature_available_time_ms: int = Field(strict=True)
+    htf_1h_close_time_ms: int = Field(strict=True)
+    htf_4h_close_time_ms: int = Field(strict=True)
     raw_features: dict[str, float]
 
     @model_validator(mode="after")
@@ -261,6 +261,29 @@ def ml_shadow_status():
         "mode": "diagnostic_only",
         "trade_decision_changed": False,
     }
+
+
+@app.get("/api/ml-shadow/predictions")
+def ml_shadow_predictions(limit: int = 100, offset: int = 0):
+    """Read-only audit view of diagnostic predictions."""
+    if limit < 1 or limit > 500 or offset < 0 or offset > 1_000_000:
+        raise HTTPException(400, "limit must be 1..500 and offset must be non-negative")
+    with connect() as db:
+        rows = db.execute(
+            "SELECT id,created_at,model_version,artifact_sha256,symbol,side,timeframe,"
+            "signal_time_ms,probability,features_sha256,payload "
+            "FROM ml_shadow_predictions ORDER BY id DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+    items = []
+    for row in rows:
+        item = dict(row)
+        try:
+            item["prediction"] = json.loads(item.pop("payload"))
+        except (TypeError, json.JSONDecodeError):
+            item["prediction"] = None
+        items.append(item)
+    return {"items": items, "limit": limit, "offset": offset}
 
 
 @app.post("/api/ml-shadow/predict")
