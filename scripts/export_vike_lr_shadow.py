@@ -32,7 +32,19 @@ def main():
     p.add_argument("--model-version",required=True)
     p.add_argument("--output",required=True,type=Path)
     p.add_argument("--training-cutoff-utc",required=True)
+    p.add_argument("--confirm-training-feature-order",required=True,
+      help="Must exactly equal the research feature order; prevents exporting a mismatched estimator.")
     args=p.parse_args()
+    if args.confirm_training_feature_order != ",".join(FEATURES):
+        p.error("confirmed feature order does not exactly match the frozen Direction-Aligned order")
+    try:
+        report=json.loads(args.research_report.read_text(encoding="utf-8"))
+    except (OSError,json.JSONDecodeError) as exc:
+        p.error(f"research report is unreadable: {exc}")
+    if report.get("feature_names") != list(FEATURES):
+        p.error("research report feature_names do not match the frozen runtime schema")
+    if report.get("verdict") != "RESEARCH_DIAGNOSTICS_ONLY_NOT_MODEL_APPROVAL":
+        p.error("unexpected research report verdict; export refused")
     if not args.model.is_file() or not args.dataset.is_file() or not args.research_report.is_file():
         p.error("model, dataset and research report must exist")
     # WARNING: only load a model artifact you created and trust.
