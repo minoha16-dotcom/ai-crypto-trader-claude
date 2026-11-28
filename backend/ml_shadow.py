@@ -116,7 +116,10 @@ def load_artifact(path: str | Path) -> tuple[dict, str]:
     candidate = Path(path).expanduser()
     if not candidate.is_file():
         raise ShadowModelError("shadow model artifact is missing")
-    raw_bytes = candidate.read_bytes()
+    try:
+        raw_bytes = candidate.read_bytes()
+    except OSError as exc:
+        raise ShadowModelError("shadow model artifact cannot be read") from exc
     digest = hashlib.sha256(raw_bytes).hexdigest()
     try:
         artifact = json.loads(raw_bytes.decode("utf-8"))
