@@ -52,11 +52,9 @@ def main():
     if not isinstance(fitted,Pipeline):
         p.error("expected a fitted sklearn Pipeline; refusing implicit estimator conversion")
     steps=[step for _,step in fitted.steps]
-    scalers=[x for x in steps if isinstance(x,StandardScaler)]
-    models=[x for x in steps if isinstance(x,LogisticRegression)]
-    if len(scalers)!=1 or len(models)!=1:
-        p.error("pipeline must contain exactly one StandardScaler and one LogisticRegression")
-    scaler,model=scalers[0],models[0]
+    if len(steps)!=2 or not isinstance(steps[0],StandardScaler) or not isinstance(steps[1],LogisticRegression):
+        p.error("pipeline steps must be exactly StandardScaler followed by LogisticRegression")
+    scaler,model=steps
     if getattr(scaler,"n_features_in_",None)!=len(FEATURES) or getattr(model,"n_features_in_",None)!=len(FEATURES):
         p.error("fitted feature count does not match the frozen 14-feature contract")
     if list(getattr(model,"classes_",[])) != [0,1]:
