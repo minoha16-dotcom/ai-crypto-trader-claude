@@ -139,6 +139,8 @@ The canonical example is .env.example. Values below are defaults; environment va
 | SIGNAL_MIN_ATR_PCT | 0.1 | Minimum ATR percent filter |
 | TAKER_FEE_RATE | 0.0006 | Estimated fee per side |
 | SLIPPAGE_BPS | 2.0 | Estimated slippage per side |
+| ML_SHADOW_MODE_ENABLED | false | Diagnostic Vike model inference; never changes trade decisions |
+| ML_SHADOW_MODEL_PATH | empty | Path to reviewed SHADOW_ONLY JSON model artifact |
 
 The default open-position limit remains 3 and the default reward/risk ratio remains 2.0; these values are now centralized in Settings and are not hidden constants.
 
@@ -231,6 +233,40 @@ python -m mcp_server.server
 The Streamable HTTP endpoint is http://127.0.0.1:8001/mcp. The MCP process must pass the same dashboard credentials as the protected FastAPI backend. To call the Render backend instead, set TRADER_API_URL, TRADER_API_USERNAME, and TRADER_API_PASSWORD in the local MCP process environment. Do not commit credentials or expose an unauthenticated listener publicly.
 
 MCP write tools are paper-only: open_paper_trade creates a simulated row in the configured database and close_paper_trade records a user-supplied simulated exit price. Neither tool submits an exchange order.
+
+## Vike ML Shadow Mode (diagnostic only)
+
+The optional Vike Shadow API is isolated from the existing scanner and paper-trade
+decision path. It accepts caller-produced raw features for Binance USD-M
+perpetual 15m events with closed 1h/4h context, applies the Vike direction
+alignment transform, computes a Logistic Regression probability from a reviewed
+JSON artifact, and writes an audit record to \`ml_shadow_predictions\`.
+
+Defaults are fail-closed:
+
+\`\`\`dotenv
+ML_SHADOW_MODE_ENABLED=false
+ML_SHADOW_MODEL_PATH=
+\`\`\`
+
+Authenticated endpoints:
+
+- \`GET /api/ml-shadow/status\`
+- \`POST /api/ml-shadow/predict\`
+
+The existing scanner supports KuCoin, Bybit, and OKX; its current indicator
+features are not the Vike model features. The Vike model is therefore not wired
+into scanner selection or paper-trade opening. A Vike-side producer must create
+the raw feature JSONL with exact training definitions and causal timestamps.
+\`scripts/vike_shadow_client.py\` securely publishes those events over HTTPS
+using \`TRADER_API_USERNAME\` and \`TRADER_API_PASSWORD\`.
+
+The repository does not yet include a verified fitted model artifact or an
+automatic live OHLCV-to-Vike-feature producer. The JSON artifact file under
+\`docs/\` is a schema template only. Do not enable the flag until the fitted
+scaler/coefficients and producer are exported, reviewed, and tested. Shadow
+probabilities are diagnostic; they do not authorize paper or live trading.
+See \`docs/ml-shadow-mode-integration.md\`.
 
 ## Dependencies and tests
 
