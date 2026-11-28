@@ -39,7 +39,7 @@ def valid_payload():
         "market_scope": "BINANCE_USDM_PERPETUAL",
         "signal_time_ms": signal, "feature_available_time_ms": signal,
         "htf_1h_close_time_ms": hour_close, "htf_4h_close_time_ms": four_hour_close,
-        "raw_features": {name: 0.0 for name in RAW_FEATURE_NAMES},
+        "raw_features": {**{name: 0.0 for name in RAW_FEATURE_NAMES}, "atr_pct": 0.01,\n                        "donchian_width_pct": 0.02, "rsi14": 0.5, "channel_position": 0.5},
     }
 
 def test_feature_schema_requires_exact_names_and_ordered_contract():
