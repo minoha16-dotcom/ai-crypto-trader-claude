@@ -59,6 +59,8 @@ def main():
         p.error("fitted feature count does not match the frozen 14-feature contract")
     if list(getattr(model,"classes_",[])) != [0,1]:
         p.error("positive class must be encoded as 1 with classes [0, 1]")
+    if model.class_weight is not None:
+        p.error("research baseline requires class_weight=None; weighted provisional model export refused")
     if getattr(model,"coef_",None) is None or model.coef_.shape != (1,len(FEATURES)):
         p.error("expected binary logistic regression coefficient shape (1,14)")
     artifact={
