@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     scan_symbols: str = "BTC/USDT,ETH/USDT,SOL/USDT"
     scan_timeframe: str = "1h"
 
+    # Diagnostic-only Vike inference. Disabled by default and never wired to trade decisions.
+    ml_shadow_mode_enabled: bool = False
+    ml_shadow_model_path: str = ""
+
     @field_validator("default_exchange")
     @classmethod
     def validate_default_exchange(cls, value):
