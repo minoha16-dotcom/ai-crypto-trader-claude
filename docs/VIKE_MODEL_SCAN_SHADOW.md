@@ -26,7 +26,7 @@ python .\scripts\export_vike_lr_shadow.py `
   --output ".\artifacts\vike_lr_shadow.json"
 ```
 
-The exporter verifies the report feature order, the 14-dimensional fitted scaler/model, binary classes `[0,1]`, and records dataset/report SHA-256. It deliberately marks the artifact `SHADOW_ONLY` and `NOT_APPROVED_RESEARCH_SHADOW_ONLY`. It does not turn a failed research result into an approved model. Do not use a placeholder/test model.
+The exporter verifies the report feature order, the exact `StandardScaler -> LogisticRegression` pipeline, the 14-dimensional fitted scaler/model, binary classes `[0,1]`, `class_weight=None` (matching the Direction-Aligned baseline), and records dataset/report SHA-256. A provisional class-weighted model is rejected. It deliberately marks the artifact `SHADOW_ONLY` and `NOT_APPROVED_RESEARCH_SHADOW_ONLY`. It does not turn a failed research result into an approved model. Do not use a placeholder/test model.
 
 ## Configure the Render service only after reviewing the exported JSON
 
