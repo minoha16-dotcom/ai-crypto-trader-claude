@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     scan_symbols: str = "BTC/USDT,ETH/USDT,SOL/USDT"
     scan_timeframe: str = "1h"
 
+    # Diagnostic-only Vike inference; never changes scanner or trade decisions.
+    ml_shadow_mode_enabled: bool = False
+    ml_shadow_model_path: str = ""
+
     @field_validator("bybit_api_hostname")
     @classmethod
     def validate_bybit_api_hostname(cls, value):
